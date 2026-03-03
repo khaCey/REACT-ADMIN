@@ -1,0 +1,31 @@
+{
+  "name": "student-admin-react",
+  "version": "1.0.0",
+  "description": "Student Management System - React + PostgreSQL",
+  "type": "module",
+  "scripts": {
+    "start": "node start.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:import": "node scripts/migrate.js --import",
+    "seed:teachers": "node scripts/seed-teacher-shifts.js",
+    "build": "cd client && npm run build",
+    "server": "node server/index.js",
+    "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\""
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.0",
+    "dotenv": "^17.3.1",
+    "embedded-postgres": "^16.2.0-beta.11",
+    "express": "^4.18.2",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "open": "^10.0.0",
+    "pg": "^8.11.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

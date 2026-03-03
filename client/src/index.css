@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@keyframes students-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.students-loading-spinner-ring {
+  animation: students-spin 1s linear infinite;
+}
+
+/* App styles - ported from Styles.html */
+#loader {
+  z-index: 12000;
+  pointer-events: auto;
+}
+#loader.hidden {
+  display: none !important;
+}
+
+.navbar {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 1030 !important;
+  width: 100% !important;
+}
+
+#mainContent {
+  margin-top: 56px;
+  height: calc(100vh - 56px);
+  padding: 1rem;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+body {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+nav.navbar {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  z-index: 1030 !important;
+}
+
+.toast-container {
+  position: fixed;
+  top: 70px;
+  right: 20px;
+  z-index: 1020;
+}
+
+.sidebar {
+  height: calc(100vh - 56px);
+  position: fixed;
+  padding-top: 1rem;
+  transition: margin-left 0.3s ease;
+  top: 56px;
+  z-index: 1020;
+}
+
+body.sidebar-collapsed #sidebar {
+  margin-left: -16rem;
+}
+
+.details-card {
+  background: #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.modal-card {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
+}
+
+.table-wrapper {
+  max-height: 70vh;
+  overflow: auto;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+#studentTable thead,
+table.table thead.bg-green-600 {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 10 !important;
+  background: #16a34a !important;
+  color: white !important;
+}
+
+/* Fixed row heights so gradient stripes align with rows and first stripe below table is full height */
+#studentTable thead tr {
+  height: 40px;
+}
+#studentTable tbody tr {
+  height: 40px;
+}
+
+/* Stripes continue in empty area below table (pattern on container only) */
+/* 40px stripe = match typical row height (py-2 + line); 40px offset = match thead height */
+.student-table-container {
+  background: repeating-linear-gradient(
+    to bottom,
+    #ffffff 0px,
+    #ffffff 40px,
+    #e2e8f0 40px,
+    #e2e8f0 80px
+  ) !important;
+  background-position-y: 40px;
+}
+#studentTable tbody tr:nth-child(odd) {
+  background-color: #e2e8f0 !important;
+}
+#studentTable tbody tr:nth-child(even) {
+  background-color: #ffffff !important;
+}
+.navbar.bg-primary {
+  background-color: #00994d !important;
+}
+
+.card,
+.details-card {
+  margin-bottom: 2rem;
+  border-radius: 1rem;
+  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.07);
+  padding: 2rem 2.5rem;
+  background: #fff;
+}
+
+.btn {
+  border-radius: 0.5rem;
+  font-weight: 500;
+  padding: 0.75rem 1.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.badge-status-active { background-color: #059669; color: white; }
+.badge-status-dormant { background-color: #475569; color: white; }
+.badge-status-demo { background-color: #7c3aed; color: white; }
+.badge-pay-neo { background-color: #0284c7; color: white; }
+.badge-pay-old { background-color: #475569; color: white; }
+.badge-group-individual { background-color: #059669; color: white; }
+.badge-group-group { background-color: #7c3aed; color: white; }
+.badge-child { background-color: #0ea5e9; color: white; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
