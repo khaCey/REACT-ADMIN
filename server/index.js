@@ -1,9 +1,12 @@
 import { config } from 'dotenv';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 
 const __dirnameServer = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirnameServer, '..', '.env'), override: true });
+const clientDistDir = join(__dirnameServer, '..', 'client', 'dist');
+const hasClientDist = existsSync(clientDistDir);
 
 // Keep server running on unhandled errors (log instead of exit)
 process.on('uncaughtException', (err) => {
@@ -43,6 +46,9 @@ app.use('/api', (req, res, next) => {
 });
 
 app.get('/', (req, res) => {
+  if (process.env.NODE_ENV === 'production' && hasClientDist) {
+    return res.sendFile(join(clientDistDir, 'index.html'));
+  }
   res.json({
     message: 'Student Admin API',
     health: '/api/health',
@@ -338,6 +344,13 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+if (process.env.NODE_ENV === 'production' && hasClientDist) {
+  app.use(express.static(clientDistDir));
+  app.get(/^\/(?!api).*/, (req, res) => {
+    res.sendFile(join(clientDistDir, 'index.html'));
+  });
+}
 
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'API route not found', path: req.originalUrl });

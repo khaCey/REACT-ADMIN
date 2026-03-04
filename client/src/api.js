@@ -33,7 +33,8 @@ export const api = {
   updatePayment: (id, data) => fetchApi(`/payments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePayment: (id) => fetchApi(`/payments/${id}`, { method: 'DELETE' }),
 
-  getNotes: (studentId) => fetchApi(`/notes${studentId ? `?student_id=${studentId}` : ''}`),
+  getNotes: (studentId) =>
+    fetchApi(`/notes${studentId != null ? `?student_id=${encodeURIComponent(studentId)}` : ''}`),
   addNote: (data) => fetchApi('/notes', { method: 'POST', body: JSON.stringify(data) }),
   updateNote: (id, data) => fetchApi(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteNote: (id) => fetchApi(`/notes/${id}`, { method: 'DELETE' }),
@@ -44,10 +45,17 @@ export const api = {
     fetchApi(`/notifications/unread?limit=${encodeURIComponent(limit)}`),
   markNotificationRead: (id) =>
     fetchApi(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+  markNotificationUnread: (id) =>
+    fetchApi(`/notifications/${encodeURIComponent(id)}/unread`, { method: 'POST' }),
   getNotifications: ({ limit = 50, offset = 0 } = {}) =>
     fetchApi(`/notifications?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
+  getNotificationStaff: () => fetchApi('/notifications/staff'),
   createNotification: (data) =>
     fetchApi('/notifications', { method: 'POST', body: JSON.stringify(data) }),
+  updateNotification: (id, data) =>
+    fetchApi(`/notifications/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteNotification: (id) =>
+    fetchApi(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   getUnpaidStudents: (month) =>
     fetchApi(month ? `/dashboard/unpaid?month=${encodeURIComponent(month)}` : '/dashboard/unpaid'),
@@ -99,4 +107,6 @@ export const api = {
   },
   undoChange: (id) =>
     fetchApi(`/change-log/${id}/undo`, { method: 'POST' }),
+  redoChange: (id) =>
+    fetchApi(`/change-log/${id}/redo`, { method: 'POST' }),
 };

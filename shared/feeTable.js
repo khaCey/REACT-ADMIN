@@ -27,25 +27,38 @@ export const feeTable = {
       4: { '2x': 3438, '4x': 3080, '8x': 2888 },
     },
   },
-  "Owner's Lesson": 9350,
-  "Owner's Course": 9350,
+  "Owner's Lesson": {
+    1: { '2x': 9350, '4x': 7920, '8x': 7150 },
+    2: { '2x': 11550, '4x': 10120, '8x': 9350 },
+    3: { '2x': 13750, '4x': 12320, '8x': 11550 },
+    4: { '2x': 15950, '4x': 14520, '8x': 13750 },
+  },
+  "Owner's Course": {
+    1: { '2x': 9350, '4x': 7920, '8x': 7150 },
+    2: { '2x': 11550, '4x': 10120, '8x': 9350 },
+    3: { '2x': 13750, '4x': 12320, '8x': 11550 },
+    4: { '2x': 15950, '4x': 14520, '8x': 13750 },
+  },
 };
 
 export function calculatePrice(lessonsCount, paymentType = 'Neo', groupType = 'Single', groupSize = 2, frequency = '4x') {
+  const freq = lessonsCount <= 2 ? '2x' : lessonsCount <= 4 ? '4x' : '8x';
   const payNorm = String(paymentType || '').trim();
   const ownerPayment = /owner'?s?\s*(lesson|course)/i.test(payNorm);
-  if (ownerPayment) return feeTable["Owner's Lesson"];
+  if (ownerPayment) {
+    const isSingle = groupType === 'Single' || groupType === 'Individual';
+    const people = isSingle ? 1 : Math.min(4, Math.max(2, Number(groupSize) || 2));
+    return feeTable["Owner's Lesson"][people]?.[freq] || 0;
+  }
   const payment = payNorm.toUpperCase() === 'OLD' ? feeTable.OLD : feeTable.Neo;
   if (lessonsCount === 1 && payment === feeTable.Neo) {
-    return feeTable["Owner's Lesson"];
+    return feeTable["Owner's Lesson"][1]['2x'];
   }
   // "Individual" in students.Group maps to Single rates (Code.js uses same mapping)
   const isSingle = groupType === 'Single' || groupType === 'Individual';
   if (isSingle) {
-    const freq = lessonsCount <= 2 ? '2x' : lessonsCount <= 4 ? '4x' : '8x';
     return payment.Single[freq] || 0;
   }
   const size = Math.min(4, Math.max(2, groupSize));
-  const freq = lessonsCount <= 2 ? '2x' : lessonsCount <= 4 ? '4x' : '8x';
   return payment.Group[size]?.[freq] || 0;
 }

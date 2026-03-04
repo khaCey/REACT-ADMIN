@@ -5,17 +5,24 @@ import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
 import NotificationDetailsModal from './NotificationDetailsModal'
+import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
+import { useGuideTour } from '../context/GuideTourContext'
+import { resolveGuideSlug } from '../guides/resolveGuideSlug'
+import { GUIDES_WIP_HIDDEN, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
   const { success } = useToast()
+  const { startGuideBySlug } = useGuideTour()
   const navigate = useNavigate()
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedNotification, setSelectedNotification] = useState(null)
+  const [editingNotification, setEditingNotification] = useState(null)
   const [readingId, setReadingId] = useState(null)
   const dropdownRef = useRef(null)
+  const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const {
     unreadCount,
     notifications,
@@ -23,7 +30,8 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     error: notificationsError,
     refreshUnread,
     markAsRead,
-  } = useNotificationsPolling({ enabled: !!staff })
+  } = useNotificationsPolling({ enabled: !!staff && !notificationsDisabled })
+  const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
   const handleLogout = async () => {
     await logout()
@@ -44,6 +52,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   }
 
   const handleViewAll = () => {
+    if (notificationsDisabled) return
     setIsNotificationOpen(false)
     navigate('/notifications')
   }
@@ -59,6 +68,24 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [isNotificationOpen])
+
+  useEffect(() => {
+    const handleGuideEnded = () => {
+      setIsNotificationOpen(false)
+      setShowCreateModal(false)
+      setSelectedNotification(null)
+    }
+    window.addEventListener('guide:ended', handleGuideEnded)
+    return () => window.removeEventListener('guide:ended', handleGuideEnded)
+  }, [])
+
+  useEffect(() => {
+    if (!notificationsDisabled) return
+    setIsNotificationOpen(false)
+    setShowCreateModal(false)
+    setSelectedNotification(null)
+    setEditingNotification(null)
+  }, [notificationsDisabled])
 
   const formatDateTime = (value) => {
     if (!value) return 'Unknown time'
@@ -124,6 +151,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             </button>
           )}
           {staff && (
+            !notificationsDisabled && (
             <button
               type="button"
               onClick={() => setIsNotificationOpen((v) => !v)}
@@ -138,8 +166,9 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                 </span>
               )}
             </button>
+            )
           )}
-          {isNotificationOpen && staff && (
+          {isNotificationOpen && staff && !notificationsDisabled && (
             <div className="absolute right-0 top-full mt-2 w-[26rem] max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-50">
               <div className="px-4 py-3 border-b border-gray-200">
                 <div className="flex items-center justify-between gap-3">
@@ -210,18 +239,50 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
         </div>
       </div>
       {showCreateModal && (
+        !notificationsDisabled && (
         <CreateNotificationModal
           onClose={() => setShowCreateModal(false)}
           onCreated={refreshUnread}
         />
+        )
       )}
       {selectedNotification && (
+        !notificationsDisabled && (
         <NotificationDetailsModal
           notification={selectedNotification}
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
           markingRead={readingId === selectedNotification.id}
+          canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
+          onEdit={(id) => {
+            const target = notifications.find((n) => n.id === id) || (selectedNotification?.id === id ? selectedNotification : null)
+            if (!target) return
+            setEditingNotification(target)
+          }}
+          editing={!!editingNotification && editingNotification.id === selectedNotification.id}
+          canStartGuide={!GUIDES_WIP_HIDDEN && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
+          onStartGuide={(n) => {
+            const resolvedSlug = resolveGuideSlug(n)
+            const started = resolvedSlug ? startGuideBySlug(resolvedSlug) : false
+            if (!started) return
+            setSelectedNotification(null)
+            setIsNotificationOpen(false)
+          }}
         />
+        )
+      )}
+      {editingNotification && (
+        !notificationsDisabled && (
+        <EditNotificationModal
+          notification={editingNotification}
+          onClose={() => setEditingNotification(null)}
+          onSaved={async () => {
+            await refreshUnread()
+            setEditingNotification(null)
+            setSelectedNotification(null)
+          }}
+        />
+        )
       )}
     </nav>
   )

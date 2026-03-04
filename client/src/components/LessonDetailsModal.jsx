@@ -10,6 +10,13 @@ const STATUS_STYLES = {
 }
 
 export default function LessonDetailsModal({ lesson, student, onClose, onCancel, onUncancel, onReschedule, onRemove }) {
+  useEffect(() => {
+    if (!lesson) return
+    const onKey = (e) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [lesson, onClose])
+
   if (!lesson) return null
 
   const status = (lesson.status || 'scheduled').toLowerCase()
@@ -44,12 +51,6 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
     onRemove?.(lesson, student)
     onClose()
   }
-
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose()
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   return createPortal(
     <div

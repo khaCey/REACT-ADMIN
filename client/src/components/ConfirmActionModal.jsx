@@ -9,6 +9,7 @@ export default function ConfirmActionModal({
   cancelLabel = 'Cancel',
   destructive = false,
   confirming = false,
+  highlightConfirm = false,
   onConfirm,
   onClose,
 }) {
@@ -65,7 +66,7 @@ export default function ConfirmActionModal({
             disabled={confirming}
             className={`px-4 py-2 rounded-lg text-white disabled:opacity-50 cursor-pointer ${
               destructive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-green-600 hover:bg-green-700'
-            }`}
+            } ${highlightConfirm ? 'ring-4 ring-yellow-300 animate-pulse shadow-xl' : ''}`}
           >
             {confirming ? 'Please wait...' : confirmLabel}
           </button>

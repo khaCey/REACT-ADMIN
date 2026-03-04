@@ -77,6 +77,263 @@ function formatPaymentMonthYear(month, year) {
   return m || y;
 }
 
+async function getToggleStateMap(baseIds) {
+  if (!baseIds || baseIds.length === 0) return new Map();
+  try {
+    const result = await query(
+      `SELECT DISTINCT ON (source_change_id) source_change_id, action
+       FROM change_log
+       WHERE source_change_id = ANY($1) AND action IN ('undo', 'redo')
+       ORDER BY source_change_id, created_at DESC, id DESC`,
+      [baseIds]
+    );
+    return new Map(result.rows.map((r) => [r.source_change_id, r.action]));
+  } catch (err) {
+    // DB may not have source_change_id yet.
+    if (err?.code !== '42703') throw err;
+    return new Map();
+  }
+}
+
+function normalizeJsonForCompare(value) {
+  if (Array.isArray(value)) return value.map(normalizeJsonForCompare);
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, k) => {
+        acc[k] = normalizeJsonForCompare(value[k]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+function sameJson(a, b) {
+  return JSON.stringify(normalizeJsonForCompare(a ?? null)) === JSON.stringify(normalizeJsonForCompare(b ?? null));
+}
+
+function toggleMatchesBase(base, toggle) {
+  if (!base || !toggle) return false;
+  if (base.entity_type !== toggle.entity_type || base.entity_key !== toggle.entity_key) return false;
+  const isUndoShape = sameJson(toggle.old_data, base.new_data) && sameJson(toggle.new_data, base.old_data);
+  const isRedoShape = sameJson(toggle.old_data, base.old_data) && sameJson(toggle.new_data, base.new_data);
+  return isUndoShape || isRedoShape;
+}
+
+async function getLegacyToggleStateMap(baseRows) {
+  if (!baseRows || baseRows.length === 0) return new Map();
+  const pairs = [...new Set(baseRows.map((r) => `${r.entity_type}||${r.entity_key}`))];
+  const where = pairs.map((_, idx) => `(entity_type = $${idx * 2 + 1} AND entity_key = $${idx * 2 + 2})`).join(' OR ');
+  const params = [];
+  for (const pair of pairs) {
+    const [entityType, entityKey] = pair.split('||');
+    params.push(entityType, entityKey);
+  }
+
+  const togglesResult = await query(
+    `SELECT id, entity_type, entity_key, action, old_data, new_data, created_at
+     FROM change_log
+     WHERE action IN ('undo', 'redo') AND (${where})
+     ORDER BY created_at DESC, id DESC`,
+    params
+  );
+
+  const stateMap = new Map();
+  for (const base of baseRows) {
+    const latest = togglesResult.rows.find((t) => toggleMatchesBase(base, t));
+    if (latest) stateMap.set(base.id, latest.action);
+  }
+  return stateMap;
+}
+
+async function getToggleStateMapFromRows(baseRows) {
+  if (!baseRows || baseRows.length === 0) return new Map();
+  const bySourceId = await getToggleStateMap(baseRows.map((r) => r.id));
+  if (bySourceId.size > 0) return bySourceId;
+  return getLegacyToggleStateMap(baseRows);
+}
+
+async function applyUpdate(entity_type, data) {
+  if (!data) return;
+  if (entity_type === 'students') {
+    const o = data;
+    await query(
+      `UPDATE students SET name = $2, name_kanji = $3, email = $4, phone = $5, phone_secondary = $6,
+        same_day_cancel = $7, status = $8, payment = $9, group_type = $10, group_size = $11, is_child = $12, updated_at = NOW()
+       WHERE id = $1`,
+      [
+        o.id,
+        o.name ?? '',
+        o.name_kanji ?? '',
+        o.email ?? '',
+        o.phone ?? '',
+        o.phone_secondary ?? '',
+        o.same_day_cancel ?? '',
+        o.status ?? '',
+        o.payment ?? '',
+        o.group_type ?? '',
+        o.group_size ?? null,
+        o.is_child ?? false,
+      ]
+    );
+  } else if (entity_type === 'payments') {
+    const o = data;
+    await query(
+      `UPDATE payments SET student_id = $2, year = $3, month = $4, amount = $5, discount = $6,
+        total = $7, date = $8, method = $9, staff = $10 WHERE transaction_id = $1`,
+      [
+        o.transaction_id,
+        o.student_id,
+        o.year ?? '',
+        o.month ?? '',
+        o.amount ?? 0,
+        o.discount ?? 0,
+        o.total ?? 0,
+        o.date,
+        o.method ?? '',
+        o.staff ?? '',
+      ]
+    );
+  } else if (entity_type === 'notes') {
+    const o = data;
+    await query(
+      `UPDATE notes SET student_id = $2, staff = $3, note = $4, date = $5 WHERE id = $1`,
+      [o.id, o.student_id, o.staff ?? '', o.note ?? '', o.date]
+    );
+  } else if (entity_type === 'lessons') {
+    const o = data;
+    await query(
+      `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
+       ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
+      [o.student_id, o.month, o.lessons ?? 0]
+    );
+  } else if (entity_type === 'monthly_schedule') {
+    const o = data;
+    await query(
+      `UPDATE monthly_schedule SET title = $3, date = $4::date, start = $5::timestamptz, "end" = $6::timestamptz,
+        status = $7, is_kids_lesson = $8, teacher_name = $9
+       WHERE event_id = $1 AND student_name = $2`,
+      [
+        o.event_id,
+        o.student_name,
+        o.title ?? '',
+        o.date,
+        o.start,
+        o.end,
+        o.status ?? 'scheduled',
+        o.is_kids_lesson ?? false,
+        o.teacher_name ?? '',
+      ]
+    );
+  }
+}
+
+async function applyCreate(entity_type, data) {
+  if (!data) return;
+  if (entity_type === 'students') {
+    const o = data;
+    await query(
+      `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name, name_kanji = EXCLUDED.name_kanji, email = EXCLUDED.email,
+         phone = EXCLUDED.phone, phone_secondary = EXCLUDED.phone_secondary, same_day_cancel = EXCLUDED.same_day_cancel,
+         status = EXCLUDED.status, payment = EXCLUDED.payment, group_type = EXCLUDED.group_type, group_size = EXCLUDED.group_size,
+         is_child = EXCLUDED.is_child, updated_at = NOW()`,
+      [
+        o.id,
+        o.name ?? '',
+        o.name_kanji ?? '',
+        o.email ?? '',
+        o.phone ?? '',
+        o.phone_secondary ?? '',
+        o.same_day_cancel ?? '',
+        o.status ?? '',
+        o.payment ?? '',
+        o.group_type ?? '',
+        o.group_size ?? null,
+        o.is_child ?? false,
+      ]
+    );
+  } else if (entity_type === 'payments') {
+    const o = data;
+    await query(
+      `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (transaction_id) DO UPDATE SET
+         student_id = EXCLUDED.student_id, year = EXCLUDED.year, month = EXCLUDED.month,
+         amount = EXCLUDED.amount, discount = EXCLUDED.discount, total = EXCLUDED.total,
+         date = EXCLUDED.date, method = EXCLUDED.method, staff = EXCLUDED.staff`,
+      [
+        o.transaction_id,
+        o.student_id,
+        o.year ?? '',
+        o.month ?? '',
+        o.amount ?? 0,
+        o.discount ?? 0,
+        o.total ?? 0,
+        o.date,
+        o.method ?? '',
+        o.staff ?? '',
+      ]
+    );
+  } else if (entity_type === 'notes') {
+    const o = data;
+    await query(
+      `INSERT INTO notes (id, student_id, staff, note, date) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET
+         student_id = EXCLUDED.student_id, staff = EXCLUDED.staff, note = EXCLUDED.note, date = EXCLUDED.date`,
+      [o.id, o.student_id, o.staff ?? '', o.note ?? '', o.date]
+    );
+    await query("SELECT setval('notes_id_seq', (SELECT COALESCE(MAX(id), 1) FROM notes))");
+  } else if (entity_type === 'lessons') {
+    const o = data;
+    await query(
+      `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
+       ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
+      [o.student_id, o.month, o.lessons ?? 0]
+    );
+  } else if (entity_type === 'monthly_schedule') {
+    const o = data;
+    await query(
+      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)
+       ON CONFLICT (event_id, student_name) DO UPDATE SET
+         title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
+         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name`,
+      [
+        o.event_id,
+        o.title ?? '',
+        o.date,
+        o.start,
+        o.end,
+        o.status ?? 'scheduled',
+        o.student_name,
+        o.is_kids_lesson ?? false,
+        o.teacher_name ?? '',
+      ]
+    );
+  }
+}
+
+async function applyDelete(entity_type, data) {
+  if (!data) return;
+  if (entity_type === 'students') {
+    await query('DELETE FROM students WHERE id = $1', [data.id]);
+  } else if (entity_type === 'payments') {
+    await query('DELETE FROM payments WHERE transaction_id = $1', [data.transaction_id]);
+  } else if (entity_type === 'notes') {
+    await query('DELETE FROM notes WHERE id = $1', [data.id]);
+  } else if (entity_type === 'lessons') {
+    await query('DELETE FROM lessons WHERE student_id = $1 AND month = $2', [data.student_id, data.month]);
+  } else if (entity_type === 'monthly_schedule') {
+    await query(
+      'DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2',
+      [data.event_id, data.student_name]
+    );
+  }
+}
+
 /** GET /api/change-log - list changes */
 router.get('/', async (req, res) => {
   try {
@@ -84,7 +341,7 @@ router.get('/', async (req, res) => {
     let sql = `
       SELECT id, entity_type, entity_key, action, old_data, new_data, staff_name, created_at
       FROM change_log
-      WHERE action <> 'undo'
+      WHERE action IN ('create', 'update', 'delete')
     `;
     const params = [];
     let i = 1;
@@ -124,6 +381,8 @@ router.get('/', async (req, res) => {
       }
     }
 
+    const toggleMap = await getToggleStateMapFromRows(result.rows);
+
     const rows = result.rows.map((r) => {
       let entity_label = null;
       if (r.entity_type === 'students') {
@@ -153,6 +412,7 @@ router.get('/', async (req, res) => {
         staff_name: r.staff_name,
         created_at: r.created_at,
         change_summary: buildChangeSummary(r.old_data, r.new_data, r.action) || r.action,
+        is_undone: toggleMap.get(r.id) === 'undo',
       };
     });
     res.json({ changes: rows });
@@ -175,172 +435,21 @@ router.post('/:id/undo', async (req, res) => {
     const change = changeResult.rows[0];
     const { entity_type, entity_key, action, old_data, new_data } = change;
 
-    if (action === 'undo') {
-      return res.status(400).json({ error: 'Cannot undo an undo' });
+    if (action === 'undo' || action === 'redo') {
+      return res.status(400).json({ error: `Cannot undo a ${action}` });
+    }
+
+    const toggleMap = await getToggleStateMapFromRows([change]);
+    if (toggleMap.get(changeId) === 'undo') {
+      return res.status(400).json({ error: 'Change is already undone' });
     }
 
     if (action === 'update' && old_data) {
-      if (entity_type === 'students') {
-        const o = old_data;
-        await query(
-          `UPDATE students SET name = $2, name_kanji = $3, email = $4, phone = $5, phone_secondary = $6,
-            same_day_cancel = $7, status = $8, payment = $9, group_type = $10, group_size = $11, is_child = $12, updated_at = NOW()
-           WHERE id = $1`,
-          [
-            o.id,
-            o.name ?? '',
-            o.name_kanji ?? '',
-            o.email ?? '',
-            o.phone ?? '',
-            o.phone_secondary ?? '',
-            o.same_day_cancel ?? '',
-            o.status ?? '',
-            o.payment ?? '',
-            o.group_type ?? '',
-            o.group_size ?? null,
-            o.is_child ?? false,
-          ]
-        );
-      } else if (entity_type === 'payments') {
-        const o = old_data;
-        await query(
-          `UPDATE payments SET student_id = $2, year = $3, month = $4, amount = $5, discount = $6,
-            total = $7, date = $8, method = $9, staff = $10 WHERE transaction_id = $1`,
-          [
-            o.transaction_id,
-            o.student_id,
-            o.year ?? '',
-            o.month ?? '',
-            o.amount ?? 0,
-            o.discount ?? 0,
-            o.total ?? 0,
-            o.date,
-            o.method ?? '',
-            o.staff ?? '',
-          ]
-        );
-      } else if (entity_type === 'notes') {
-        const o = old_data;
-        await query(
-          `UPDATE notes SET student_id = $2, staff = $3, note = $4, date = $5 WHERE id = $1`,
-          [o.id, o.student_id, o.staff ?? '', o.note ?? '', o.date]
-        );
-      } else if (entity_type === 'lessons') {
-        const o = old_data;
-        await query(
-          `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
-           ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
-          [o.student_id, o.month, o.lessons ?? 0]
-        );
-      } else if (entity_type === 'monthly_schedule') {
-        const o = old_data;
-        await query(
-          `UPDATE monthly_schedule SET title = $3, date = $4::date, start = $5::timestamptz, "end" = $6::timestamptz,
-            status = $7, is_kids_lesson = $8, teacher_name = $9
-           WHERE event_id = $1 AND student_name = $2`,
-          [
-            o.event_id,
-            o.student_name,
-            o.title ?? '',
-            o.date,
-            o.start,
-            o.end,
-            o.status ?? 'scheduled',
-            o.is_kids_lesson ?? false,
-            o.teacher_name ?? '',
-          ]
-        );
-      }
+      await applyUpdate(entity_type, old_data);
     } else if (action === 'create' && new_data) {
-      if (entity_type === 'students') {
-        const n = new_data;
-        await query('DELETE FROM students WHERE id = $1', [n.id]);
-      } else if (entity_type === 'payments') {
-        const n = new_data;
-        await query('DELETE FROM payments WHERE transaction_id = $1', [n.transaction_id]);
-      } else if (entity_type === 'notes') {
-        const n = new_data;
-        await query('DELETE FROM notes WHERE id = $1', [n.id]);
-      } else if (entity_type === 'lessons') {
-        const n = new_data;
-        await query('DELETE FROM lessons WHERE student_id = $1 AND month = $2', [n.student_id, n.month]);
-      } else if (entity_type === 'monthly_schedule') {
-        const n = new_data;
-        await query(
-          'DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2',
-          [n.event_id, n.student_name]
-        );
-      }
+      await applyDelete(entity_type, new_data);
     } else if (action === 'delete' && old_data) {
-      if (entity_type === 'students') {
-        const o = old_data;
-        await query(
-          `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [
-            o.id,
-            o.name ?? '',
-            o.name_kanji ?? '',
-            o.email ?? '',
-            o.phone ?? '',
-            o.phone_secondary ?? '',
-            o.same_day_cancel ?? '',
-            o.status ?? '',
-            o.payment ?? '',
-            o.group_type ?? '',
-            o.group_size ?? null,
-            o.is_child ?? false,
-          ]
-        );
-      } else if (entity_type === 'payments') {
-        const o = old_data;
-        await query(
-          `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [
-            o.transaction_id,
-            o.student_id,
-            o.year ?? '',
-            o.month ?? '',
-            o.amount ?? 0,
-            o.discount ?? 0,
-            o.total ?? 0,
-            o.date,
-            o.method ?? '',
-            o.staff ?? '',
-          ]
-        );
-      } else if (entity_type === 'notes') {
-        const o = old_data;
-        await query(
-          `INSERT INTO notes (id, student_id, staff, note, date) VALUES ($1, $2, $3, $4, $5)`,
-          [o.id, o.student_id, o.staff ?? '', o.note ?? '', o.date]
-        );
-        await query("SELECT setval('notes_id_seq', (SELECT COALESCE(MAX(id), 1) FROM notes))");
-      } else if (entity_type === 'lessons') {
-        const o = old_data;
-        await query(
-          `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)`,
-          [o.student_id, o.month, o.lessons ?? 0]
-        );
-      } else if (entity_type === 'monthly_schedule') {
-        const o = old_data;
-        await query(
-          `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
-           VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)`,
-          [
-            o.event_id,
-            o.title ?? '',
-            o.date,
-            o.start,
-            o.end,
-            o.status ?? 'scheduled',
-            o.student_name,
-            o.is_kids_lesson ?? false,
-            o.teacher_name ?? '',
-          ]
-        );
-      }
+      await applyCreate(entity_type, old_data);
     }
 
     await logChange(
@@ -350,11 +459,62 @@ router.post('/:id/undo', async (req, res) => {
         action: 'undo',
         oldData: new_data,
         newData: old_data,
+        sourceChangeId: changeId,
       },
       req
     );
 
     res.json({ ok: true, message: 'Change undone' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/change-log/:id/redo - reapply a previously undone change */
+router.post('/:id/redo', async (req, res) => {
+  try {
+    const changeId = parseInt(req.params.id, 10);
+    const changeResult = await query(
+      'SELECT id, entity_type, entity_key, action, old_data, new_data FROM change_log WHERE id = $1',
+      [changeId]
+    );
+    if (changeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Change not found' });
+    }
+
+    const change = changeResult.rows[0];
+    const { entity_type, entity_key, action, old_data, new_data } = change;
+
+    if (action === 'undo' || action === 'redo') {
+      return res.status(400).json({ error: `Cannot redo a ${action}` });
+    }
+
+    const toggleMap = await getToggleStateMapFromRows([change]);
+    if (toggleMap.get(changeId) !== 'undo') {
+      return res.status(400).json({ error: 'Change is not currently undone' });
+    }
+
+    if (action === 'update' && new_data) {
+      await applyUpdate(entity_type, new_data);
+    } else if (action === 'create' && new_data) {
+      await applyCreate(entity_type, new_data);
+    } else if (action === 'delete' && old_data) {
+      await applyDelete(entity_type, old_data);
+    }
+
+    await logChange(
+      {
+        entityType: entity_type,
+        entityKey: entity_key,
+        action: 'redo',
+        oldData: old_data,
+        newData: new_data,
+        sourceChangeId: changeId,
+      },
+      req
+    );
+
+    res.json({ ok: true, message: 'Change redone' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

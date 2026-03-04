@@ -16,8 +16,36 @@ function StatusBadge({ status }) {
 }
 
 function PaymentBadge({ payment }) {
-  const cls = payment === 'NEO' ? 'badge-pay-neo' : 'badge-pay-old'
-  return <span className={`badge ${cls}`}>{payment || 'NEO'}</span>
+  const normalized = String(payment || 'NEO')
+  const cls = normalized === 'NEO' ? 'badge-pay-neo' : 'badge-pay-old'
+  const label =
+    normalized === "Owner's Course" || normalized === "Owner's Lesson"
+      ? 'Owner'
+      : normalized
+  return <span className={`badge ${cls}`}>{label}</span>
+}
+
+function pickGuideStudent(students) {
+  if (!Array.isArray(students) || students.length === 0) return null
+
+  const byTarouTanaka = students.find((s) => String(s?.Name || '').trim().toLowerCase() === 'tarou tanaka')
+  if (byTarouTanaka) return byTarouTanaka
+
+  const byExactAdmin = students.find((s) => String(s?.Name || '').trim().toLowerCase() === 'admin')
+  if (byExactAdmin) return byExactAdmin
+
+  const byAdminKeyword = students.find((s) =>
+    /admin/i.test(`${s?.Name || ''} ${s?.漢字 || ''} ${s?.Email || ''}`)
+  )
+  if (byAdminKeyword) return byAdminKeyword
+
+  const byTrialOrDemo = students.find((s) => {
+    const status = String(s?.Status || '').toLowerCase()
+    return status.includes('trial') || status.includes('demo')
+  })
+  if (byTrialOrDemo) return byTrialOrDemo
+
+  return students[0]
 }
 
 export default function Students() {
@@ -29,6 +57,9 @@ export default function Students() {
   const [search, setSearch] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [guideAction, setGuideAction] = useState(null)
+  const [highlightAddButton, setHighlightAddButton] = useState(false)
+  const [guideTargetStudentId, setGuideTargetStudentId] = useState(null)
 
   useEffect(() => {
     if (location.state?.openAddModal) {
@@ -36,6 +67,76 @@ export default function Students() {
       navigate(location.pathname, { replace: true, state: {} })
     }
   }, [location.state?.openAddModal, location.pathname, navigate])
+
+  useEffect(() => {
+    const handleGuideEnded = () => {
+      setShowAddModal(false)
+      setSelectedStudentId(null)
+      setGuideTargetStudentId(null)
+      setGuideAction(null)
+      setHighlightAddButton(false)
+    }
+    window.addEventListener('guide:ended', handleGuideEnded)
+    return () => window.removeEventListener('guide:ended', handleGuideEnded)
+  }, [])
+
+  useEffect(() => {
+    const action = location.state?.guideAction
+    if (!action) return
+
+    const isStudentFlowAction =
+      action.startsWith('students.') || action.startsWith('payments.') || action.startsWith('notes.')
+    const keepDetailsOpenIfAlreadyOpen =
+      action === 'students.edit' || action === 'students.delete'
+
+    // Reset transient highlight state each step.
+    setGuideTargetStudentId(null)
+    setGuideAction(null)
+    setHighlightAddButton(false)
+
+    if (action === 'students.create') {
+      // Create step always starts from list + Add button highlight.
+      setShowAddModal(false)
+      setSelectedStudentId(null)
+      setHighlightAddButton(true)
+      navigate(location.pathname, { replace: true, state: {} })
+      return
+    }
+
+    if (isStudentFlowAction) {
+      // Close Add modal for non-create steps.
+      setShowAddModal(false)
+      // For edit/delete step transitions, keep details modal if user already has it open.
+      // If it's closed, this stays null and row highlight fallback will drive reopening.
+      if (!(keepDetailsOpenIfAlreadyOpen && selectedStudentId !== null)) {
+        setSelectedStudentId(null)
+      }
+      setGuideAction(action)
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location.state?.guideAction, location.state?.guideNonce, location.pathname, navigate, selectedStudentId])
+
+  useEffect(() => {
+    if (!highlightAddButton) return
+    const t = setTimeout(() => setHighlightAddButton(false), 5000)
+    return () => clearTimeout(t)
+  }, [highlightAddButton])
+
+  useEffect(() => {
+    if (!guideAction || selectedStudentId !== null) return
+    if (students.length === 0) {
+      setError('Guide step needs at least one student record.')
+      return
+    }
+    const target = pickGuideStudent(students)
+    setGuideTargetStudentId(target?.ID ?? null)
+  }, [guideAction, selectedStudentId, students])
+
+  useEffect(() => {
+    if (guideTargetStudentId == null) return
+    const t = setTimeout(() => setGuideTargetStudentId(null), 7000)
+    return () => clearTimeout(t)
+  }, [guideTargetStudentId])
 
   useEffect(() => {
     const minDelay = new Promise((r) => setTimeout(r, 1000))
@@ -64,8 +165,14 @@ export default function Students() {
         <h2 className="text-2xl font-bold text-gray-900">Student List</h2>
         <button
           type="button"
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-green-600 border border-white text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 font-medium cursor-pointer"
+          id="guide-add-student-button"
+          onClick={() => {
+            setShowAddModal(true)
+            setHighlightAddButton(false)
+          }}
+          className={`px-4 py-2 bg-green-600 border border-white text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 font-medium cursor-pointer ${
+            highlightAddButton ? 'relative z-[70] ring-4 ring-yellow-300 animate-pulse shadow-2xl' : ''
+          }`}
         >
           <UserPlus className="w-4 h-4" />
           <span>Add Student</span>
@@ -124,7 +231,6 @@ export default function Students() {
               <th className="px-3 py-2 text-center font-semibold">ID</th>
               <th className="px-3 py-2 text-left font-semibold">Name</th>
               <th className="px-3 py-2 text-center font-semibold">漢字</th>
-              <th className="px-3 py-2 text-center font-semibold">子</th>
               <th className="px-3 py-2 text-center font-semibold">email</th>
               <th className="px-3 py-2 text-center font-semibold">phone</th>
               <th className="px-3 py-2 text-center font-semibold">当日 Cancellation</th>
@@ -140,9 +246,16 @@ export default function Students() {
                 key={s.ID}
                 role="button"
                 tabIndex={0}
-                onClick={() => setSelectedStudentId(s.ID)}
-                onKeyDown={(e) => e.key === 'Enter' && setSelectedStudentId(s.ID)}
-                className="cursor-pointer"
+                onClick={() => {
+                  setGuideTargetStudentId(null)
+                  setSelectedStudentId(s.ID)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  setGuideTargetStudentId(null)
+                  setSelectedStudentId(s.ID)
+                }}
+                className={`cursor-pointer ${guideTargetStudentId === s.ID ? 'relative z-[70] outline outline-4 outline-yellow-300 animate-pulse bg-yellow-50/80' : ''}`}
               >
                 <td className="text-center px-3 py-2">{s.ID}</td>
                 <td className="text-left px-3 py-2">
@@ -151,9 +264,15 @@ export default function Students() {
                   </span>
                 </td>
                 <td className="text-center px-3 py-2">{s.漢字}</td>
-                <td className="text-center px-3 py-2">{s.子 ? '子' : ''}</td>
                 <td className="text-center px-3 py-2">{s.Email}</td>
-                <td className="text-center px-3 py-2">{s.Phone}</td>
+                <td className="text-center px-3 py-2">
+                  <span>{s.Phone}</span>
+                  {s.子 && (
+                    <span className="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                      子
+                    </span>
+                  )}
+                </td>
                 <td className="text-center px-3 py-2">{s.当日}</td>
                 <td className="text-center px-3 py-2">
                   <StatusBadge status={s.Status} />
@@ -173,12 +292,14 @@ export default function Students() {
       </p>
       </>
       )}
-      {selectedStudentId && (
+      {selectedStudentId !== null && (
         <StudentDetailsModal
           studentId={selectedStudentId}
           onClose={() => setSelectedStudentId(null)}
           onStudentDeleted={fetchStudents}
           onStudentUpdated={fetchStudents}
+          guideAction={guideAction}
+          onGuideActionHandled={() => setGuideAction(null)}
         />
       )}
       {showAddModal && (
@@ -189,6 +310,12 @@ export default function Students() {
             setSelectedStudentId(id)
             setShowAddModal(false)
           }}
+        />
+      )}
+      {(highlightAddButton || guideTargetStudentId != null) && (
+        <div
+          className="fixed inset-0 bg-black/45 z-[60]"
+          aria-hidden="true"
         />
       )}
     </div>

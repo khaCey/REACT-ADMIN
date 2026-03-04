@@ -16,7 +16,7 @@ function combinePhone(parts) {
   return filtered.length ? filtered.join('-') : ''
 }
 
-export default function EditStudentModal({ studentId, student, onSave, onDeleted, onClose }) {
+export default function EditStudentModal({ studentId, student, onSave, onDeleted, onClose, highlightDeleteButton = false }) {
   const { success } = useToast()
   const [form, setForm] = useState({
     Name: '',
@@ -242,7 +242,6 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
                   <option>NEO</option>
                   <option>OLD</option>
                   <option>Owner&apos;s Course</option>
-                  <option>SHAM</option>
                 </select>
               </div>
               <div className="sm:col-span-1">
@@ -317,7 +316,9 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
             type="button"
             onClick={() => setShowDeleteConfirm(true)}
             disabled={deleting}
-            className="rounded-md bg-rose-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 cursor-pointer"
+            className={`rounded-md bg-rose-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 cursor-pointer ${
+              highlightDeleteButton ? 'ring-4 ring-yellow-300 animate-pulse shadow-xl' : ''
+            }`}
           >
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
@@ -342,6 +343,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
           confirmLabel="Delete"
           destructive
           confirming={deleting}
+          highlightConfirm={highlightDeleteButton}
           onConfirm={handleDelete}
           onClose={() => setShowDeleteConfirm(false)}
         />

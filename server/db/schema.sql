@@ -79,13 +79,6 @@ ALTER TABLE monthly_schedule ADD CONSTRAINT monthly_schedule_pkey PRIMARY KEY (e
 
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 
--- Unpaid list
-CREATE TABLE IF NOT EXISTS unpaid (
-  id SERIAL PRIMARY KEY,
-  student_name VARCHAR(255),
-  student_id INTEGER REFERENCES students(id)
-);
-
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (
   date DATE,
@@ -104,75 +97,11 @@ CREATE TABLE IF NOT EXISTS teacher_shift_extensions (
   PRIMARY KEY (date, teacher_name)
 );
 
--- Teacher calendars
-CREATE TABLE IF NOT EXISTS teacher_calendars (
-  calendar_id VARCHAR(255) PRIMARY KEY,
-  teacher_name VARCHAR(255)
-);
-
--- Booking availability cache
-CREATE TABLE IF NOT EXISTS booking_availability (
-  date DATE,
-  time TIME,
-  teacher_count INTEGER DEFAULT 0,
-  lesson_count INTEGER DEFAULT 0,
-  available_slots INTEGER DEFAULT 0,
-  teachers TEXT,
-  has_kids_lesson BOOLEAN DEFAULT FALSE,
-  has_adult_lesson BOOLEAN DEFAULT FALSE,
-  last_updated TIMESTAMPTZ DEFAULT NOW(),
-  PRIMARY KEY (date, time)
-);
-
-CREATE INDEX IF NOT EXISTS idx_booking_availability_date ON booking_availability(date);
-
--- Lesson actions audit
-CREATE TABLE IF NOT EXISTS lesson_actions (
-  action_id VARCHAR(100) PRIMARY KEY,
-  student_id INTEGER,
-  event_id VARCHAR(255),
-  action_type VARCHAR(50),
-  old_date_time TIMESTAMPTZ,
-  new_date_time TIMESTAMPTZ,
-  reason TEXT,
-  staff_member VARCHAR(255),
-  timestamp TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Stats
 CREATE TABLE IF NOT EXISTS stats (
   month VARCHAR(7) PRIMARY KEY,
   lessons INTEGER DEFAULT 0,
   students INTEGER DEFAULT 0
-);
-
--- Manual tally
-CREATE TABLE IF NOT EXISTS manual_tally (
-  id SERIAL PRIMARY KEY,
-  event_id VARCHAR(255),
-  title VARCHAR(500),
-  start TIMESTAMPTZ,
-  "end" TIMESTAMPTZ,
-  student_name VARCHAR(255),
-  is_kids_lesson BOOLEAN DEFAULT FALSE
-);
-
--- Lessons month (unscheduled)
-CREATE TABLE IF NOT EXISTS lessons_month (
-  id SERIAL PRIMARY KEY,
-  student_name VARCHAR(255),
-  student_id INTEGER REFERENCES students(id)
-);
-
--- Lessons today
-CREATE TABLE IF NOT EXISTS lessons_today (
-  id SERIAL PRIMARY KEY,
-  student_id INTEGER,
-  student_name VARCHAR(255),
-  title VARCHAR(500),
-  start TIMESTAMPTZ,
-  "end" TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Config
@@ -207,8 +136,10 @@ CREATE TABLE IF NOT EXISTS staff (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  is_admin BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(name);
 
@@ -217,12 +148,28 @@ CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
   message TEXT NOT NULL,
+  kind VARCHAR(50) NOT NULL DEFAULT 'general',
+  slug VARCHAR(150),
+  is_system BOOLEAN NOT NULL DEFAULT FALSE,
   created_by_staff_id INTEGER NOT NULL REFERENCES staff(id),
+  target_staff_id INTEGER REFERENCES staff(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE notifications
+ADD COLUMN IF NOT EXISTS target_staff_id INTEGER REFERENCES staff(id);
+ALTER TABLE notifications
+ADD COLUMN IF NOT EXISTS kind VARCHAR(50) NOT NULL DEFAULT 'general';
+ALTER TABLE notifications
+ADD COLUMN IF NOT EXISTS slug VARCHAR(150);
+ALTER TABLE notifications
+ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_by ON notifications(created_by_staff_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_target_staff_id ON notifications(target_staff_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_kind ON notifications(kind);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_slug_unique ON notifications(slug);
 
 -- Per-staff read tracking for notifications
 CREATE TABLE IF NOT EXISTS notification_reads (
@@ -254,9 +201,19 @@ CREATE TABLE IF NOT EXISTS change_log (
   action VARCHAR(20) NOT NULL,
   old_data JSONB,
   new_data JSONB,
+  source_change_id INTEGER REFERENCES change_log(id),
   staff_id INTEGER REFERENCES staff(id),
   staff_name VARCHAR(255),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE change_log ADD COLUMN IF NOT EXISTS source_change_id INTEGER REFERENCES change_log(id);
 CREATE INDEX IF NOT EXISTS idx_change_log_entity ON change_log(entity_type, entity_key);
 CREATE INDEX IF NOT EXISTS idx_change_log_created ON change_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_change_log_source_change_id ON change_log(source_change_id);-- Removed currently-unused tables
+DROP TABLE IF EXISTS booking_availability;
+DROP TABLE IF EXISTS teacher_calendars;
+DROP TABLE IF EXISTS lesson_actions;
+DROP TABLE IF EXISTS manual_tally;
+DROP TABLE IF EXISTS lessons_month;
+DROP TABLE IF EXISTS lessons_today;
+DROP TABLE IF EXISTS unpaid;

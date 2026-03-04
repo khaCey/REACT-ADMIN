@@ -97,7 +97,7 @@ export default function UnscheduledLessons() {
           </p>
         </>
       )}
-      {selectedStudentId && (
+      {selectedStudentId !== null && (
         <StudentDetailsModal
           studentId={selectedStudentId}
           onClose={() => setSelectedStudentId(null)}

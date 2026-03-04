@@ -7,6 +7,7 @@ import Staff from './pages/Staff'
 import ChangeHistory from './pages/ChangeHistory'
 import Notifications from './pages/Notifications'
 import Login from './pages/Login'
+import { GuideTourProvider } from './context/GuideTourContext'
 
 function App() {
   return (
@@ -16,7 +17,9 @@ function App() {
         path="/"
         element={
           <ProtectedRoute>
-            <Layout />
+            <GuideTourProvider>
+              <Layout />
+            </GuideTourProvider>
           </ProtectedRoute>
         }
       >

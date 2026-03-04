@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from 'react'
+import { useState, useEffect, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
@@ -36,7 +36,7 @@ class ModalErrorBoundary extends Component {
   }
 }
 
-export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated }) {
+export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated, guideAction = null, onGuideActionHandled }) {
   const [student, setStudent] = useState(null)
   const [payments, setPayments] = useState([])
   const [notes, setNotes] = useState([])
@@ -47,9 +47,12 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [editStudentModal, setEditStudentModal] = useState(false)
   const [bookLessonModal, setBookLessonModal] = useState(false)
   const [noteSearch, setNoteSearch] = useState('')
+  const [guideFocusKey, setGuideFocusKey] = useState(null)
+  const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
+  const lastGuideActionRef = useRef(null)
 
   const fetchData = () => {
-    if (!studentId) return
+    if (studentId == null) return
     setLoading(true)
     setError(null)
     Promise.all([
@@ -70,12 +73,71 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     fetchData()
   }, [studentId])
 
+  useEffect(() => {
+    if (!guideAction || !student || loading) return
+    if (lastGuideActionRef.current === guideAction) return
+    lastGuideActionRef.current = guideAction
+    if (guideAction === 'students.edit') {
+      // If edit modal is already open, don't push user back to the Edit button.
+      if (editStudentModal) {
+        setGuideFocusKey(null)
+      } else {
+        setGuideFocusKey('student-edit')
+      }
+      setGuideHighlightDeleteInEdit(false)
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'students.delete') {
+      // Step 3 -> 4 behavior:
+      // - Keep edit modal open if already open and highlight Delete there.
+      // - Otherwise, highlight Edit first so user can open the edit modal.
+      if (editStudentModal) {
+        setGuideFocusKey(null)
+      } else {
+        setGuideFocusKey('student-delete')
+      }
+      setGuideHighlightDeleteInEdit(true)
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'payments.add') {
+      setGuideFocusKey('payments-add')
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'payments.edit' || guideAction === 'payments.delete') {
+      setGuideFocusKey(payments.length > 0 ? 'payments-first-row' : 'payments-add')
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'notes.add') {
+      setGuideFocusKey('notes-add')
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'notes.edit' || guideAction === 'notes.delete') {
+      setGuideFocusKey(notes.length > 0 ? 'notes-first-row' : 'notes-add')
+      onGuideActionHandled?.()
+      return
+    }
+    if (guideAction === 'students.view') {
+      onGuideActionHandled?.()
+    }
+  }, [guideAction, student, loading, payments, notes, editStudentModal, onGuideActionHandled])
+
+  useEffect(() => {
+    if (!guideFocusKey) return
+    const t = setTimeout(() => setGuideFocusKey(null), 7000)
+    return () => clearTimeout(t)
+  }, [guideFocusKey])
+
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) onClose()
   }
 
   useEffect(() => {
-    if (!studentId) return
+    if (studentId == null) return
     const onKey = (e) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
@@ -85,7 +147,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     }
   }, [studentId, onClose])
 
-  if (!studentId) return null
+  if (studentId == null) return null
 
   return createPortal(
     <>
@@ -95,6 +157,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       onClick={handleBackdropClick}
     >
       <div className="relative w-full max-w-[1400px] h-[90vh] rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden flex flex-col">
+        {guideFocusKey && <div className="absolute inset-0 z-[20] bg-black/45 pointer-events-none" aria-hidden="true" />}
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
             <div className="w-12 h-12 rounded-full border-4 border-gray-300 border-t-green-600 animate-spin" />
@@ -127,6 +190,11 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                     <span>{student.Email}</span>
                     <span className="mx-1">•</span>
                     <span>{student.Phone}</span>
+                    {student.子 && (
+                      <span className="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                        子
+                      </span>
+                    )}
                   </span>
                 </p>
               </div>
@@ -134,7 +202,6 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                 {student.Group === 'Group' && <span className="badge bg-purple-600 text-white">Group</span>}
                 {(student.Payment || '').toLowerCase().includes('owner') && <span className="badge bg-black text-white">Owner</span>}
                 <StatusBadge status={student.Status} />
-                {student.子 && <span className="badge badge-child">子</span>}
                 <button
                   onClick={onClose}
                   className="p-1 rounded hover:bg-white/20 cursor-pointer"
@@ -159,8 +226,13 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                     <h3 className="font-semibold text-sm">All Payments</h3>
                     <button
                       type="button"
-                      onClick={() => setPaymentModal({ mode: 'add' })}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-green-700 cursor-pointer"
+                      onClick={() => {
+                        setGuideFocusKey(null)
+                        setPaymentModal({ mode: 'add' })
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-green-700 cursor-pointer ${
+                        guideFocusKey === 'payments-add' ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl' : ''
+                      }`}
                     >
                       <Plus className="w-4 h-4" />
                       Add Payment
@@ -184,8 +256,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                         {payments.map((p, i) => (
                           <tr
                             key={p['Transaction ID']}
-                            className={`cursor-pointer hover:bg-gray-200 ${i % 2 === 1 ? 'bg-slate-200' : 'bg-white'}`}
-                            onClick={() => setPaymentModal({ mode: 'edit', payment: p })}
+                            className={`cursor-pointer hover:bg-gray-200 ${i % 2 === 1 ? 'bg-slate-200' : 'bg-white'} ${
+                              i === 0 && guideFocusKey === 'payments-first-row'
+                                ? 'relative z-[30] outline outline-4 outline-yellow-300 animate-pulse bg-yellow-50'
+                                : ''
+                            }`}
+                            onClick={() => {
+                              setGuideFocusKey(null)
+                              setPaymentModal({ mode: 'edit', payment: p })
+                            }}
                           >
                             <td className="px-3 py-2">{p['Transaction ID']}</td>
                             <td className="min-w-[7rem] px-3 py-2 whitespace-nowrap">{formatDate(p.Date)}</td>
@@ -223,8 +302,13 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                     />
                     <button
                       type="button"
-                      onClick={() => setNoteModal({ mode: 'add' })}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium hover:bg-gray-50 cursor-pointer"
+                      onClick={() => {
+                        setGuideFocusKey(null)
+                        setNoteModal({ mode: 'add' })
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium hover:bg-gray-50 cursor-pointer ${
+                        guideFocusKey === 'notes-add' ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50' : ''
+                      }`}
                     >
                       <Plus className="w-4 h-4" />
                       Add Note
@@ -262,8 +346,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                           filtered.map((n, i) => (
                             <tr
                               key={n.ID}
-                              className={`cursor-pointer hover:bg-gray-200 ${i % 2 === 1 ? 'bg-slate-200' : 'bg-white'}`}
-                              onClick={() => setNoteModal({ mode: 'edit', note: n })}
+                              className={`cursor-pointer hover:bg-gray-200 ${i % 2 === 1 ? 'bg-slate-200' : 'bg-white'} ${
+                                i === 0 && guideFocusKey === 'notes-first-row'
+                                  ? 'relative z-[30] outline outline-4 outline-yellow-300 animate-pulse bg-yellow-50'
+                                  : ''
+                              }`}
+                              onClick={() => {
+                                setGuideFocusKey(null)
+                                setNoteModal({ mode: 'edit', note: n })
+                              }}
                             >
                               <td className="px-3 py-2 whitespace-nowrap">{formatDate(n.Date)}</td>
                               <td className="px-3 py-2 break-words align-top">{n.Note}</td>
@@ -283,15 +374,26 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setBookLessonModal(true)}
+                  onClick={() => {
+                    setGuideFocusKey(null)
+                    setBookLessonModal(true)
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
                 >
                   <Calendar className="w-4 h-4" />
                   Book lesson
                 </button>
                 <button
-                  onClick={() => setEditStudentModal(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-gray-50 cursor-pointer"
+                  onClick={() => {
+                    setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
+                    setGuideFocusKey(null)
+                    setEditStudentModal(true)
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-gray-50 cursor-pointer ${
+                    guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'
+                      ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
+                      : ''
+                  }`}
                 >
                   Edit
                 </button>
@@ -332,15 +434,20 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       <EditStudentModal
         studentId={studentId}
         student={student}
+        highlightDeleteButton={guideHighlightDeleteInEdit}
         onSave={() => {
           fetchData()
           onStudentUpdated?.()
         }}
         onDeleted={() => {
+          setGuideHighlightDeleteInEdit(false)
           onStudentDeleted?.()
           onClose()
         }}
-        onClose={() => setEditStudentModal(false)}
+        onClose={() => {
+          setGuideHighlightDeleteInEdit(false)
+          setEditStudentModal(false)
+        }}
       />
     )}
     {bookLessonModal && (

@@ -78,7 +78,7 @@ export default function AddStudentModal({ onClose, onAdded }) {
       onClick={handleBackdropClick}
     >
       <div
-        className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
+        className="relative w-full max-w-xl rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
@@ -92,7 +92,7 @@ export default function AddStudentModal({ onClose, onAdded }) {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {err && <p className="text-red-600 text-sm">{err}</p>}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Name <span className="text-rose-600">*</span></label>
@@ -115,7 +115,7 @@ export default function AddStudentModal({ onClose, onAdded }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Phone <span className="text-rose-600">*</span></label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 inputMode="numeric"
                 pattern="[0-9]{3}"
@@ -148,6 +148,16 @@ export default function AddStudentModal({ onClose, onAdded }) {
                 value={form.phone3}
                 onChange={(e) => setForm((f) => ({ ...f, phone3: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
               />
+              <label htmlFor="add-modal-isChild" className="inline-flex items-center gap-2 text-sm text-slate-700 ml-2 whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  id="add-modal-isChild"
+                  checked={form.子}
+                  onChange={(e) => setForm((f) => ({ ...f, 子: e.target.checked }))}
+                  className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                />
+                <span>子 (Child)</span>
+              </label>
             </div>
           </div>
           <div>
@@ -187,16 +197,6 @@ export default function AddStudentModal({ onClose, onAdded }) {
                 </select>
               </div>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="add-modal-isChild"
-              checked={form.子}
-              onChange={(e) => setForm((f) => ({ ...f, 子: e.target.checked }))}
-              className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-            />
-            <label htmlFor="add-modal-isChild" className="text-sm text-slate-700">子 (Child)</label>
           </div>
           <div className="flex gap-3 pt-2">
             <button

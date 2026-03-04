@@ -14,7 +14,6 @@ import 'dotenv/config';
  *   - Payment.csv
  *   - Notes.csv
  *   - Lessons.csv
- *   - Unpaid.csv (optional)
  *   - Stats.csv (optional)
  */
 
@@ -76,12 +75,114 @@ const DEFAULT_PASSWORD = 'staff123';
 async function seedStaff() {
   const hash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
   for (const name of DEFAULT_STAFF) {
+    const isAdmin = String(name).toLowerCase() === 'khacey';
     await pool.query(
-      'INSERT INTO staff (name, password_hash) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING',
-      [name, hash]
+      `INSERT INTO staff (name, password_hash, is_admin)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (name) DO UPDATE SET
+         is_admin = staff.is_admin OR EXCLUDED.is_admin`,
+      [name, hash, isAdmin]
     );
   }
   console.log(`Seeded staff: ${DEFAULT_STAFF.join(', ')}.`);
+}
+
+const DEFAULT_GUIDE_NOTIFICATIONS = [
+  {
+    slug: 'guide.students',
+    title: 'ガイド: 生徒管理',
+    message: [
+      '生徒管理の操作ガイド:',
+      '1) 生徒作成: 「Add Student」を開き、名前・支払い種別・グループ・状態を入力します。',
+      '2) 生徒詳細表示: 生徒行をクリックして詳細モーダルを開きます。',
+      '3) 生徒情報編集: 詳細画面の編集から更新し、保存して履歴を残します。',
+      '4) 生徒削除: 完全に不要な場合のみ削除を実行します。',
+      'ヒント: 支払い種別と人数は料金計算に影響するため、保存前に確認してください。',
+    ].join('\n'),
+  },
+  {
+    slug: 'guide.payments',
+    title: 'ガイド: 支払い',
+    message: [
+      '支払いの操作ガイド:',
+      '1) 支払い追加: 生徒詳細から「Add Payment」を開きます。',
+      '2) 支払い編集: 支払い一覧の行をクリックして編集します。',
+      '3) 支払い削除: 編集モード内の削除操作を使います。',
+      'ヒント: 保存前にレッスン数と割引率を確認してください。',
+    ].join('\n'),
+  },
+  {
+    slug: 'guide.notes',
+    title: 'ガイド: ノート',
+    message: [
+      'ノートの操作ガイド:',
+      '1) ノート追加: 生徒詳細から「Add Note」を開きます。',
+      '2) ノート編集: ノート一覧の行をクリックして編集します。',
+      '3) ノート削除: 編集モード内の削除操作を使います。',
+      'ヒント: 後から見返せるよう、具体的な内容と文脈を残してください。',
+    ].join('\n'),
+  },
+  {
+    slug: 'guide.notifications',
+    title: 'ガイド: 通知',
+    message: [
+      '通知の操作ガイド:',
+      '1) 通知作成: わかりやすいタイトルと実行内容を記載します。',
+      '2) 既読管理: 対応後に既読にすると未読数が自動更新されます。',
+      '3) 詳細確認: 送信者と作成時刻を確認できます。',
+      '4) 通知削除: 自分が作成した通知のみ削除できます。',
+      'ヒント: メッセージは短く、次のアクションを明記してください。',
+    ].join('\n'),
+  },
+  {
+    slug: 'guide.change-history',
+    title: 'ガイド: 変更履歴',
+    message: [
+      '変更履歴の操作ガイド:',
+      '1) フィルターと詳細表示で、誰が何をいつ変更したか確認します。',
+      '2) Undo/Redo トグルは慎重に実行し、実行後の状態を確認します。',
+      '3) 実行前に項目ごとの差分を確認します。',
+      'ヒント: 同一レコードで連続トグルする場合は、毎回結果を確認してください。',
+    ].join('\n'),
+  },
+];
+
+async function seedGuideNotifications() {
+  const authorResult = await pool.query(
+    `SELECT id FROM staff
+     WHERE name = $1
+     LIMIT 1`,
+    ['Khacey']
+  );
+  const authorId = authorResult.rows[0]?.id;
+  if (!authorId) {
+    console.warn('Skipping guide notifications seed (staff author not found).');
+    return;
+  }
+
+  // Remove deprecated guide slugs so Start Guide never points to missing definitions.
+  await pool.query(
+    `DELETE FROM notifications
+     WHERE kind = 'guide'
+       AND slug = ANY($1::text[])`,
+    [['guide.staff']]
+  );
+
+  for (const guide of DEFAULT_GUIDE_NOTIFICATIONS) {
+    await pool.query(
+      `INSERT INTO notifications (title, message, kind, slug, is_system, created_by_staff_id, target_staff_id)
+       VALUES ($1, $2, 'guide', $3, TRUE, $4, NULL)
+       ON CONFLICT (slug) DO UPDATE SET
+         title = EXCLUDED.title,
+         message = EXCLUDED.message,
+         kind = 'guide',
+         is_system = TRUE,
+         created_by_staff_id = EXCLUDED.created_by_staff_id,
+         target_staff_id = NULL`,
+      [guide.title, guide.message, guide.slug, authorId]
+    );
+  }
+  console.log(`Seeded ${DEFAULT_GUIDE_NOTIFICATIONS.length} guide notifications.`);
 }
 
 function findCsv(name) {
@@ -345,26 +446,6 @@ async function importMonthlySchedule() {
   console.log(`Imported ${imported} MonthlySchedule rows (group lessons split per student).`);
 }
 
-async function importUnpaid() {
-  const path = findCsv('Unpaid.csv');
-  if (!path) {
-    console.log('Skipping Unpaid (file not found)');
-    return;
-  }
-  const rows = parseCsv(path);
-  await pool.query('TRUNCATE unpaid');
-  for (const r of rows) {
-    const name = r['Student Name'] || r.student_name || r.Name || r.name || Object.values(r)[0];
-    const id = toNum(r['Student ID'] || r.student_id || r.ID || r.id);
-    if (!name && !id) continue;
-    await pool.query(
-      'INSERT INTO unpaid (student_name, student_id) VALUES ($1, $2)',
-      [name || null, id]
-    );
-  }
-  console.log(`Imported ${rows.length} unpaid entries.`);
-}
-
 async function importStats() {
   const path = findCsv('Stats.csv');
   if (!path) {
@@ -392,6 +473,7 @@ async function main() {
   try {
     await runSchema();
     await seedStaff();
+    await seedGuideNotifications();
     if (doImport) {
       if (!existsSync(dataDir)) {
         console.log(`Creating ${dataDir} - add your CSV exports there and run again.`);
@@ -406,7 +488,6 @@ async function main() {
       await importNotes();
       await importLessons();
       await importMonthlySchedule();
-      await importUnpaid();
       await importStats();
       console.log('Migration complete.');
     } else {

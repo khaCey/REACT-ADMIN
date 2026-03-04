@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { History } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
@@ -16,6 +17,7 @@ const ACTION_LABELS = {
   create: 'Created',
   update: 'Updated',
   delete: 'Deleted',
+  redo: 'Redone',
 }
 
 function formatDateTime(iso) {
@@ -111,9 +113,9 @@ function getChangeDiffs(oldData, newData, action) {
   return diffs
 }
 
-function ChangeDetailsModal({ change, onClose, onUndo }) {
-  const [undoing, setUndoing] = useState(false)
-  const [undoError, setUndoError] = useState(null)
+function ChangeDetailsModal({ change, onClose, onUndo, onRedo, highlightToggle = false }) {
+  const [toggling, setToggling] = useState(false)
+  const [actionError, setActionError] = useState(null)
 
   if (!change) return null
 
@@ -121,20 +123,25 @@ function ChangeDetailsModal({ change, onClose, onUndo }) {
     if (e.target === e.currentTarget) onClose()
   }
 
-  const handleUndo = async () => {
-    setUndoError(null)
-    setUndoing(true)
+  const isUndone = !!change.is_undone
+
+  const handleToggle = async () => {
+    setActionError(null)
+    setToggling(true)
     try {
-      await onUndo?.(change)
-      onClose()
+      if (isUndone) {
+        await onRedo?.(change)
+      } else {
+        await onUndo?.(change)
+      }
     } catch (e) {
-      setUndoError(e.message || 'Undo failed')
+      setActionError(e.message || (isUndone ? 'Redo failed' : 'Undo failed'))
     } finally {
-      setUndoing(false)
+      setToggling(false)
     }
   }
 
-  const canUndo = change.action !== 'undo'
+  const canToggle = !['undo', 'redo'].includes(change.action)
   const diffs = getChangeDiffs(change.old_data, change.new_data, change.action)
   const hasDiffs = diffs.length > 0
 
@@ -168,9 +175,9 @@ function ChangeDetailsModal({ change, onClose, onUndo }) {
           </button>
         </header>
         <div className="p-4 overflow-auto space-y-5">
-          {undoError && (
+          {actionError && (
             <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm border border-red-100">
-              {undoError}
+              {actionError}
             </div>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -264,14 +271,16 @@ function ChangeDetailsModal({ change, onClose, onUndo }) {
           </details>
         </div>
         <footer className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200 shrink-0">
-          {canUndo && (
+          {canToggle && (
             <button
               type="button"
-              onClick={handleUndo}
-              disabled={undoing}
-              className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              onClick={handleToggle}
+              disabled={toggling}
+              className={`px-4 py-2 rounded-lg text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors ${
+                isUndone ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
+              } ${highlightToggle ? 'ring-4 ring-yellow-300 animate-pulse' : ''}`}
             >
-              {undoing ? 'Undoing…' : 'Undo'}
+              {toggling ? (isUndone ? 'Redoing…' : 'Undoing…') : (isUndone ? 'Redo' : 'Undo')}
             </button>
           )}
           <button
@@ -289,26 +298,33 @@ function ChangeDetailsModal({ change, onClose, onUndo }) {
 }
 
 export default function ChangeHistory() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { success } = useToast()
   const [changes, setChanges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [entityFilter, setEntityFilter] = useState('')
   const [selectedChange, setSelectedChange] = useState(null)
+  const [guideHighlightToggle, setGuideHighlightToggle] = useState(false)
 
-  const fetchChanges = useCallback(() => {
-    setLoading(true)
-    setError(null)
+  const fetchChanges = useCallback(({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError(null)
     const params = { limit: 100 }
     if (entityFilter) params.entity_type = entityFilter
     api
       .getChangeLog(params)
       .then((res) => setChanges(res.changes || []))
       .catch((e) => {
-        setChanges([])
-        setError(e.message || 'Could not load change history')
+        if (!silent) {
+          setChanges([])
+          setError(e.message || 'Could not load change history')
+        }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
   }, [entityFilter])
 
   useEffect(() => {
@@ -316,9 +332,31 @@ export default function ChangeHistory() {
   }, [fetchChanges])
 
   useEffect(() => {
+    const action = location.state?.guideAction
+    if (action !== 'change-history.undo-redo') return
+    // Keep modal open between guide transitions when already active.
+    if (selectedChange) {
+      setGuideHighlightToggle(true)
+    } else if (changes.length > 0) {
+      setSelectedChange(changes[0])
+      setGuideHighlightToggle(true)
+    }
+    navigate(location.pathname, { replace: true, state: {} })
+  }, [location.state?.guideAction, location.pathname, navigate, changes, selectedChange])
+
+  useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && setSelectedChange(null)
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    const handleGuideEnded = () => {
+      setSelectedChange(null)
+      setGuideHighlightToggle(false)
+    }
+    window.addEventListener('guide:ended', handleGuideEnded)
+    return () => window.removeEventListener('guide:ended', handleGuideEnded)
   }, [])
 
   return (
@@ -371,7 +409,10 @@ export default function ChangeHistory() {
                   return (
                     <tr
                       key={c.id}
-                      onClick={() => setSelectedChange(c)}
+                      onClick={() => {
+                        setGuideHighlightToggle(false)
+                        setSelectedChange(c)
+                      }}
                       className="border-b border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                     >
                       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
@@ -444,11 +485,24 @@ export default function ChangeHistory() {
       {selectedChange && (
         <ChangeDetailsModal
           change={selectedChange}
-          onClose={() => setSelectedChange(null)}
+          highlightToggle={guideHighlightToggle}
+          onClose={() => {
+            setGuideHighlightToggle(false)
+            setSelectedChange(null)
+          }}
           onUndo={async (c) => {
             await api.undoChange(c.id)
+            setChanges((prev) => prev.map((item) => (item.id === c.id ? { ...item, is_undone: true } : item)))
+            setSelectedChange((prev) => (prev && prev.id === c.id ? { ...prev, is_undone: true } : prev))
             success('Undo successful')
-            fetchChanges()
+            fetchChanges({ silent: true })
+          }}
+          onRedo={async (c) => {
+            await api.redoChange(c.id)
+            setChanges((prev) => prev.map((item) => (item.id === c.id ? { ...item, is_undone: false } : item)))
+            setSelectedChange((prev) => (prev && prev.id === c.id ? { ...prev, is_undone: false } : prev))
+            success('Redo successful')
+            fetchChanges({ silent: true })
           }}
         />
       )}

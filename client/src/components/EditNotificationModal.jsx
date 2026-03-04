@@ -4,60 +4,12 @@ import { X } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 
-export default function CreateNotificationModal({ onClose, onCreated }) {
+export default function EditNotificationModal({ notification, onClose, onSaved }) {
   const { success } = useToast()
-  const [title, setTitle] = useState('')
-  const [message, setMessage] = useState('')
-  const [targetStaffId, setTargetStaffId] = useState('')
-  const [staffOptions, setStaffOptions] = useState([])
-  const [loadingStaff, setLoadingStaff] = useState(false)
+  const [title, setTitle] = useState(notification?.title || '')
+  const [message, setMessage] = useState(notification?.message || '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
-    const trimmedTitle = title.trim()
-    const trimmedMessage = message.trim()
-    if (!trimmedTitle || !trimmedMessage) {
-      setError('Title and message are required')
-      return
-    }
-    setSubmitting(true)
-    try {
-      const payload = { title: trimmedTitle, message: trimmedMessage }
-      if (targetStaffId) payload.target_staff_id = Number.parseInt(targetStaffId, 10)
-      await api.createNotification(payload)
-      success('Notification created')
-      await onCreated?.()
-      onClose()
-    } catch (err) {
-      setError(err.message || 'Failed to create notification')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  useEffect(() => {
-    let isMounted = true
-    const loadStaff = async () => {
-      setLoadingStaff(true)
-      try {
-        const data = await api.getNotificationStaff()
-        if (!isMounted) return
-        setStaffOptions(Array.isArray(data.staff) ? data.staff : [])
-      } catch {
-        if (!isMounted) return
-        setStaffOptions([])
-      } finally {
-        if (isMounted) setLoadingStaff(false)
-      }
-    }
-    loadStaff()
-    return () => {
-      isMounted = false
-    }
-  }, [])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -71,9 +23,31 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
     }
   }, [onClose])
 
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    const trimmedTitle = title.trim()
+    const trimmedMessage = message.trim()
+    if (!trimmedTitle || !trimmedMessage) {
+      setError('Title and message are required')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await api.updateNotification(notification.id, { title: trimmedTitle, message: trimmedMessage })
+      success('Notification updated')
+      await onSaved?.()
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Failed to update notification')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return createPortal(
     <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/50"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -83,7 +57,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Create Notification</h2>
+          <h2 className="text-xl font-bold text-gray-900">Edit Notification</h2>
           <button
             type="button"
             onClick={onClose}
@@ -96,9 +70,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Title <span className="text-rose-600">*</span>
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -108,25 +80,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Send to</label>
-            <select
-              value={targetStaffId}
-              onChange={(e) => setTargetStaffId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            >
-              <option value="">All staff</option>
-              {loadingStaff && <option value="" disabled>Loading staff...</option>}
-              {staffOptions.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Message <span className="text-rose-600">*</span>
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Message</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -148,7 +102,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
               disabled={submitting}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer"
             >
-              {submitting ? 'Posting...' : 'Post Notification'}
+              {submitting ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>

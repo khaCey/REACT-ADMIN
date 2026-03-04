@@ -67,7 +67,7 @@ function useLatestByMonth(studentId, refreshTrigger) {
   const [activeMonth, setActiveMonth] = useState(null)
 
   const fetchData = () => {
-    if (!studentId) return
+    if (studentId == null) return
     setLoading(true)
     setError(null)
     api
@@ -88,7 +88,7 @@ function useLatestByMonth(studentId, refreshTrigger) {
   }
 
   useEffect(() => {
-    if (!studentId) return
+    if (studentId == null) return
     fetchData()
   }, [studentId, refreshTrigger])
 

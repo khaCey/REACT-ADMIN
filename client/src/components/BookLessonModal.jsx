@@ -249,7 +249,6 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                           const isPast = new Date(dateStr + 'T' + timeStr) <= new Date()
                           const isFull = capacity > 0 && booked >= capacity
                           const oneLeft = capacity > 0 && booked === capacity - 1
-                          const isEmpty = capacity > 0 && booked === 0
                           const statusBead =
                             !isPast && capacity > 0
                               ? isFull

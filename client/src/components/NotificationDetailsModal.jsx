@@ -18,7 +18,17 @@ export default function NotificationDetailsModal({
   notification,
   onClose,
   onMarkRead,
+  onMarkUnread,
   markingRead = false,
+  canDelete = false,
+  onDelete,
+  deleting = false,
+  canEdit = false,
+  onEdit,
+  editing = false,
+  highlightAction = null,
+  canStartGuide = false,
+  onStartGuide,
 }) {
   useEffect(() => {
     const onKey = (e) => {
@@ -58,7 +68,14 @@ export default function NotificationDetailsModal({
         </div>
         <div className="p-6 space-y-4">
           <div>
-            <p className="text-sm text-gray-500">Title</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-gray-500">Title</p>
+              {(notification.is_system || notification.kind === 'guide') && (
+                <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
+                  Guide
+                </span>
+              )}
+            </div>
             <p className="text-lg font-semibold text-gray-900 mt-1">{notification.title}</p>
           </div>
           <div>
@@ -67,10 +84,49 @@ export default function NotificationDetailsModal({
           </div>
           <div className="text-xs text-gray-500 space-y-1">
             <p>From: {notification.created_by_name || 'Unknown'}</p>
+            {(notification.kind || notification.slug) && (
+              <p>
+                Type: {notification.kind || 'general'}
+                {notification.slug ? ` · ${notification.slug}` : ''}
+              </p>
+            )}
             <p>Created: {formatDateTime(notification.created_at)}</p>
             {notification.read_at && <p>Read: {formatDateTime(notification.read_at)}</p>}
           </div>
           <div className="flex justify-end gap-3 pt-2">
+            {canStartGuide && onStartGuide && (
+              <button
+                type="button"
+                onClick={() => onStartGuide(notification)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer"
+              >
+                Start Guide
+              </button>
+            )}
+            {canEdit && onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(notification.id)}
+                disabled={editing}
+                className={`px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-60 cursor-pointer ${
+                  highlightAction === 'edit' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
+                }`}
+              >
+                {editing ? 'Opening...' : 'Edit'}
+              </button>
+            )}
+            {canDelete && onDelete && (
+              <button
+                type="button"
+                onClick={() => onDelete(notification.id)}
+                disabled={deleting}
+                className={`px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-60 cursor-pointer ${
+                  highlightAction === 'delete' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
+                }`}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -83,9 +139,23 @@ export default function NotificationDetailsModal({
                 type="button"
                 disabled={markingRead}
                 onClick={() => onMarkRead(notification.id)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 cursor-pointer"
+                className={`px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 cursor-pointer ${
+                  highlightAction === 'read-unread' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
+                }`}
               >
                 {markingRead ? 'Marking...' : 'Mark as Read'}
+              </button>
+            )}
+            {notification.is_read && onMarkUnread && (
+              <button
+                type="button"
+                disabled={markingRead}
+                onClick={() => onMarkUnread(notification.id)}
+                className={`px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-60 cursor-pointer ${
+                  highlightAction === 'read-unread' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
+                }`}
+              >
+                {markingRead ? 'Updating...' : 'Mark as Unread'}
               </button>
             )}
           </div>

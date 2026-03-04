@@ -16,7 +16,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Name required' });
     }
     const result = await query(
-      'SELECT id, name FROM staff WHERE name = $1',
+      'SELECT id, name, is_admin FROM staff WHERE name = $1',
       [String(name).trim()]
     );
     if (result.rows.length === 0) {
@@ -28,10 +28,10 @@ router.post('/login', async (req, res) => {
       [staff.id]
     );
     const token = jwt.sign(
-      { id: staff.id, name: staff.name },
+      { id: staff.id, name: staff.name, is_admin: !!staff.is_admin },
       JWT_SECRET
     );
-    res.json({ token, staff: { id: staff.id, name: staff.name } });
+    res.json({ token, staff: { id: staff.id, name: staff.name, is_admin: !!staff.is_admin } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -80,11 +80,17 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
     const payload = jwt.verify(token, JWT_SECRET);
-    const result = await query('SELECT id, name FROM staff WHERE id = $1', [payload.id]);
+    const result = await query('SELECT id, name, is_admin FROM staff WHERE id = $1', [payload.id]);
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Staff not found' });
     }
-    res.json({ staff: { id: result.rows[0].id, name: result.rows[0].name } });
+    res.json({
+      staff: {
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        is_admin: !!result.rows[0].is_admin,
+      },
+    });
   } catch (err) {
     if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
       return res.status(401).json({ error: 'Session expired or invalid' });
