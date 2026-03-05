@@ -19,6 +19,8 @@ process.on('unhandledRejection', (reason, promise) => {
 import express from 'express';
 import cors from 'cors';
 import { query } from './db/index.js';
+import { upsertMonthlySchedule } from './lib/calendarSync.js';
+import { fetchMonthlyScheduleFromSheet } from './lib/googleSheets.js';
 import studentsRouter from './routes/students.js';
 import paymentsRouter from './routes/payments.js';
 import notesRouter from './routes/notes.js';
@@ -36,7 +38,7 @@ const app = express();
 const PORT = process.env.API_PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/auth', authRouter);
 
@@ -264,7 +266,7 @@ app.use('/api/schedule', scheduleRouter);
 app.use('/api/change-log', changeLogRouter);
 app.use('/api/notifications', notificationsRouter);
 
-/** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. */
+/** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); prior months are preserved. */
 app.post('/api/calendar-poll/sync', async (req, res) => {
   try {
     const { data } = req.body || {};
@@ -272,75 +274,28 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
       return res.status(400).json({ error: 'Body must include { data: MonthlySchedule[] }' });
     }
     console.log('[calendar-poll/sync] received', data.length, 'rows');
-
-    const months = new Set();
-    for (const r of data) {
-      const d = (r.date || '').toString().trim();
-      if (/^\d{4}-\d{2}/.test(d)) months.add(d.slice(0, 7));
-    }
-
-    for (const yyyyMm of months) {
-      await query(
-        "DELETE FROM monthly_schedule WHERE to_char(date, 'YYYY-MM') = $1",
-        [yyyyMm]
-      );
-    }
-
-    let inserted = 0;
-    for (const r of data) {
-      const eventId = (r.eventID || r.event_id || '').toString().trim();
-      const studentName = (r.studentName || r.student_name || '').toString().trim();
-      if (!eventId || !studentName) continue;
-
-      const dateStr = (r.date || '').toString().trim();
-      const date = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : null;
-
-      let startTs = null;
-      const startVal = r.start || '';
-      if (startVal && date) {
-        const m = String(startVal).trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/);
-        if (m) startTs = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, '0')}:${m[5]}:00`;
-        else {
-          const d = new Date(startVal);
-          if (!isNaN(d.getTime())) startTs = d.toISOString();
-        }
-      } else if (startVal) {
-        const d = new Date(startVal);
-        if (!isNaN(d.getTime())) startTs = d.toISOString();
-      }
-
-      let endTs = null;
-      const endVal = r.end || '';
-      if (endVal && date) {
-        const m = String(endVal).trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/);
-        if (m) endTs = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, '0')}:${m[5]}:00`;
-        else {
-          const d = new Date(endVal);
-          if (!isNaN(d.getTime())) endTs = d.toISOString();
-        }
-      } else if (endVal) {
-        const d = new Date(endVal);
-        if (!isNaN(d.getTime())) endTs = d.toISOString();
-      }
-
-      const status = (r.status || 'scheduled').toString().trim() || 'scheduled';
-      const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
-        r.isKidsLesson === true || r.is_kids_lesson === true;
-      const title = (r.title || '').toString().trim();
-      const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
-
-      await query(
-        `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
-         VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)`,
-        [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName]
-      );
-      inserted++;
-    }
-
-    console.log('[calendar-poll/sync] inserted', inserted, 'rows for months', Array.from(months).sort().join(', '));
-    res.json({ ok: true, inserted, months: Array.from(months) });
+    const { upserted, months } = await upsertMonthlySchedule(data);
+    console.log('[calendar-poll/sync] upserted', upserted, 'rows for months', months.sort().join(', '));
+    res.json({ ok: true, upserted, months });
   } catch (err) {
     console.error('[calendar-poll/sync] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Sync MonthlySchedule from Google Sheets (Admin spreadsheet) into PostgreSQL. Fetches directly from Sheets API. */
+app.post('/api/calendar-poll/sync-from-sheet', async (req, res) => {
+  try {
+    const data = await fetchMonthlyScheduleFromSheet();
+    if (data.length === 0) {
+      return res.status(400).json({ error: 'No data from sheet. Ensure GOOGLE_ADMIN_SHEET_ID is set and the spreadsheet is shared with the service account.', fetched: 0 });
+    }
+    console.log('[calendar-poll/sync-from-sheet] fetched', data.length, 'rows from Sheets');
+    const { upserted, months } = await upsertMonthlySchedule(data);
+    console.log('[calendar-poll/sync-from-sheet] upserted', upserted, 'rows for months', months.sort().join(', '));
+    res.json({ ok: true, upserted, months, fetched: data.length });
+  } catch (err) {
+    console.error('[calendar-poll/sync-from-sheet] error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

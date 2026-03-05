@@ -89,6 +89,9 @@ export const api = {
   syncCalendarPoll: (data) =>
     fetchApi('/calendar-poll/sync', { method: 'POST', body: JSON.stringify({ data }) }),
 
+  syncFromSheet: () =>
+    fetchApi('/calendar-poll/sync-from-sheet', { method: 'POST' }),
+
   getCalendarEvents: (timeMin, timeMax) => {
     const params = new URLSearchParams();
     if (timeMin) params.set('timeMin', timeMin);

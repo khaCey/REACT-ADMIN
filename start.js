@@ -114,7 +114,7 @@ async function main() {
       cwd: join(rootDir, 'client'),
       stdio: 'inherit',
       shell: isWin,
-      env: { ...process.env, VITE_API_URL: `http://localhost:${apiPort}` },
+      env: { ...process.env, VITE_API_URL: `http://localhost:${apiPort}`, VITE_WIP_HIDDEN: 'true' },
     });
 
     viteProcess.on('error', (err) => {

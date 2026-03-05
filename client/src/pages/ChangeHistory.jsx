@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { History } from 'lucide-react'
+import { History, Download } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
+import BackfillScheduleModal from '../components/BackfillScheduleModal'
 
 const ENTITY_LABELS = {
   students: 'Student',
@@ -307,6 +308,7 @@ export default function ChangeHistory() {
   const [entityFilter, setEntityFilter] = useState('')
   const [selectedChange, setSelectedChange] = useState(null)
   const [guideHighlightToggle, setGuideHighlightToggle] = useState(false)
+  const [showBackfillModal, setShowBackfillModal] = useState(false)
 
   const fetchChanges = useCallback(({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -366,7 +368,15 @@ export default function ChangeHistory() {
           <History className="w-6 h-6 text-green-600" />
           Change History
         </h2>
-        <div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowBackfillModal(true)}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Backfill past schedule
+          </button>
           <select
             value={entityFilter}
             onChange={(e) => setEntityFilter(e.target.value)}
@@ -505,6 +515,9 @@ export default function ChangeHistory() {
             fetchChanges({ silent: true })
           }}
         />
+      )}
+      {showBackfillModal && (
+        <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
       )}
     </div>
   )
