@@ -15,8 +15,9 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":3002 .*LISTENING"') d
   taskkill /PID %%P /F >nul 2>&1
 )
 
+call "%PM2_BIN%" delete GreenSquareAdmin >nul 2>&1
 call "%PM2_BIN%" delete react-admin >nul 2>&1
-call "%PM2_BIN%" start ecosystem.config.cjs --only react-admin --update-env || exit /b 1
+call "%PM2_BIN%" start ecosystem.config.cjs --update-env || exit /b 1
 call "%PM2_BIN%" save --force || exit /b 1
 call "%PM2_BIN%" list || exit /b 1
 

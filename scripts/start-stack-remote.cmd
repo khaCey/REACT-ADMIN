@@ -9,6 +9,7 @@ set "PM2_BIN=C:\Users\khacey\AppData\Roaming\npm\pm2.cmd"
 cd /d C:\GitHub\REACT-ADMIN || exit /b 1
 call npm run setup || exit /b 1
 
+call "%PM2_BIN%" delete GreenSquareAdmin >nul 2>&1
 call "%PM2_BIN%" delete react-admin >nul 2>&1
 call "%PM2_BIN%" delete react-client >nul 2>&1
 

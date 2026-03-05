@@ -104,9 +104,8 @@ export default function AddStudentModal({ onClose, onAdded }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">漢字 <span className="text-rose-600">*</span></label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">漢字</label>
             <input
-              required
               className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
               value={form.漢字}
               onChange={(e) => setForm((f) => ({ ...f, 漢字: e.target.value }))}
