@@ -54,7 +54,7 @@ function readScheduleSheetsForPolling() {
   var tz = Session.getScriptTimeZone();
   var out = [];
 
-  ['MonthlySchedule', 'NextMonthSchedule'].forEach(function (sheetName) {
+  ['MonthlySchedule'].forEach(function (sheetName) {
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) return;
     var data = sheet.getDataRange().getValues();
