@@ -5,18 +5,15 @@ Offline Student Management System. One command to start.
 ## Quick Start
 
 ```bash
-cd react-app
-npm install
-cd client && npm install && cd ..
-npm start
+npm run setup   # First time: install deps + database schema + seeds
+npm start       # Start API + React app
 ```
 
-This will:
-1. Start PostgreSQL (embedded, or use existing if `DATABASE_URL` is set)
-2. Run database migrations
-3. Start the API at http://localhost:3001
-4. Start the React app at http://localhost:5173
-5. Open your browser
+`npm start` will:
+1. Use PostgreSQL (`DATABASE_URL` or embedded if unset)
+2. Start the API at http://localhost:3001
+3. Start the React app at http://localhost:5173
+4. Open your browser
 
 ## Alternative: Docker PostgreSQL
 
@@ -45,17 +42,14 @@ npm start
 - `client/` - Vite + React
 - `shared/` - feeTable, constants
 
-## Database migration
+## Database
 
 ```bash
-# Apply schema only
-npm run migrate
-
-# Apply schema + import from CSV files
-npm run migrate:import
+npm run setup    # Schema + seeds (staff, guides). Run once or after schema changes.
+npm run migrate  # Import data from migration-data/*.csv
 ```
 
-Export your Google Sheets as CSV to `migration-data/` (Students.csv, Payment.csv, Notes.csv, Lessons.csv). See `migration-data/README.md` for details.
+Export your Google Sheets as CSV to `migration-data/`. See `migration-data/README.md` for details.
 
 ## API
 

@@ -1,20 +1,12 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 /**
- * Database migration script
- * 1. Applies schema (creates/updates tables)
- * 2. Imports data from CSV files in migration-data/
+ * Database scripts:
+ *   node scripts/migrate.js         # Setup: schema + seeds (run via npm run setup)
+ *   node scripts/migrate.js --import  # Migrate: import data from migration-data/*.csv
  *
- * Usage:
- *   node scripts/migrate.js              # Schema only
- *   node scripts/migrate.js --import     # Schema + import from CSVs
- *
- * Export your Google Sheets as CSV and save to react-app/migration-data/:
- *   - Students.csv
- *   - Payment.csv
- *   - Notes.csv
- *   - Lessons.csv
- *   - Stats.csv (optional)
+ * Export your Google Sheets as CSV and save to migration-data/:
+ *   - Students.csv, Payment.csv, Notes.csv, Lessons.csv, Stats.csv, MonthlySchedule.csv
  */
 
 import { readFileSync, existsSync, readdirSync } from 'fs';
@@ -471,15 +463,12 @@ async function main() {
   console.log('Connecting to database...');
   const client = await pool.connect();
   try {
-    await runSchema();
-    await seedStaff();
-    await seedGuideNotifications();
     if (doImport) {
       if (!existsSync(dataDir)) {
         console.log(`Creating ${dataDir} - add your CSV exports there and run again.`);
         const { mkdirSync } = await import('fs');
         mkdirSync(dataDir, { recursive: true });
-        console.log('Place CSV files (Students.csv, Payment.csv, etc.) in migration-data/ and run with --import');
+        console.log('Place CSV files (Students.csv, Payment.csv, etc.) in migration-data/ and run again.');
         return;
       }
       console.log('Importing data from migration-data/...');
@@ -489,9 +478,12 @@ async function main() {
       await importLessons();
       await importMonthlySchedule();
       await importStats();
-      console.log('Migration complete.');
+      console.log('Import complete.');
     } else {
-      console.log('Schema only. Use --import to load data from migration-data/*.csv');
+      await runSchema();
+      await seedStaff();
+      await seedGuideNotifications();
+      console.log('Database setup complete. Run `npm run migrate` to import from CSV.');
     }
   } finally {
     client.release();

@@ -44,7 +44,7 @@ export default function Staff() {
         <div className="py-6 space-y-2">
           <p className="text-red-600 font-medium">{error}</p>
           <p className="text-sm text-gray-600">
-            Run the database migration in the <code className="bg-gray-100 px-1 rounded">react-app</code> folder: <code className="bg-gray-100 px-1 rounded">npm run migrate</code>. Then log out and log in again so your shift is recorded.
+            Run <code className="bg-gray-100 px-1 rounded">npm run setup</code> to set up the database, then log out and log in again so your shift is recorded.
           </p>
         </div>
       ) : shifts.length === 0 ? (

@@ -3,7 +3,7 @@
 Export your Google Sheets as CSV and place them here, then run:
 
 ```bash
-node scripts/migrate.js --import
+npm run migrate
 ```
 
 ## Required files
@@ -33,4 +33,4 @@ node scripts/migrate.js --import
 2. File → Download → Comma-separated values (.csv)
 3. Rename to match the table above (e.g. Payment.csv not Payment - Sheet1.csv)
 4. Place in this folder
-5. Run `node scripts/migrate.js --import`
+5. Run `npm run migrate`

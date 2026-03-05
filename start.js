@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 /**
- * Single-command startup: PostgreSQL + Express API + React frontend
- * Run: npm start
+ * Start API + Vite frontend. Run `npm run setup` first for deps + migrations.
  */
 
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname);
@@ -69,19 +67,7 @@ async function main() {
     console.log('Using existing PostgreSQL (DATABASE_URL)');
   }
 
-  // Run migrations
-  const dbPath = join(rootDir, 'server', 'db', 'index.js');
-  if (existsSync(dbPath)) {
-    try {
-      const { runMigrations } = await import('./server/db/index.js');
-      await runMigrations();
-      console.log('Database migrations complete');
-    } catch (err) {
-      console.error('Migration error:', err.message);
-    }
-  }
-
-  // Start Express API
+  // Start Express API (run `npm run setup` for migrations + deps)
   const serverProcess = spawn('node', ['server/index.js'], {
     cwd: rootDir,
     stdio: 'inherit',
@@ -110,7 +96,8 @@ async function main() {
   waitForApi().then(() => {
     // Start Vite dev server (shell: true needed on Windows for npm to resolve)
     const isWin = process.platform === 'win32';
-    const viteProcess = spawn(isWin ? 'npm.cmd' : 'npm', ['run', 'dev'], {
+    const viteArgs = ['run', 'dev', '--', '--host', '0.0.0.0', '--port', String(clientPort)];
+    const viteProcess = spawn(isWin ? 'npm.cmd' : 'npm', viteArgs, {
       cwd: join(rootDir, 'client'),
       stdio: 'inherit',
       shell: isWin,
