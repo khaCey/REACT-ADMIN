@@ -35,6 +35,20 @@ set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 npm start
 ```
 
+## PM2 (Production) + Auto-Start on Windows
+
+```cmd
+scripts\start-pm2-local.cmd   # Start once (API on port 3002)
+```
+
+**Auto-start on logon:** Run once as Administrator:
+
+```cmd
+scripts\setup-pm2-windows-startup.cmd
+```
+
+To remove: `scripts\remove-pm2-windows-startup.cmd`
+
 ## Project Structure
 
 - `start.js` - Single entry point
