@@ -12,6 +12,7 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":3002 .*LISTENING" 2^>
 timeout /t 2 /nobreak >nul
 
 call pm2 delete GreenSquareAdmin >nul 2>&1
+call pm2 delete GreenSquareADMIN >nul 2>&1
 call pm2 start ecosystem.config.cjs --update-env
 call pm2 save
 call pm2 list

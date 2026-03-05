@@ -10,6 +10,7 @@ cd /d C:\GitHub\REACT-ADMIN || exit /b 1
 call npm run setup || exit /b 1
 
 call "%PM2_BIN%" delete GreenSquareAdmin >nul 2>&1
+call "%PM2_BIN%" delete GreenSquareADMIN >nul 2>&1
 call "%PM2_BIN%" delete react-admin >nul 2>&1
 call "%PM2_BIN%" delete react-client >nul 2>&1
 

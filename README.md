@@ -51,6 +51,8 @@ npm run migrate  # Import data from migration-data/*.csv
 
 Export your Google Sheets as CSV to `migration-data/`. See `migration-data/README.md` for details.
 
+**Incomplete schedules (lessons showing "Unschedule"):** Ensure `MonthlySchedule.csv` is in `migration-data/` and run `npm run migrate`. Or run the GAS Backfill for the affected month/year to repopulate from the calendar.
+
 ## API
 
 - `GET /api/students` - List students

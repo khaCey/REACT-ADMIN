@@ -72,6 +72,12 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       return res.status(404).json({ error: 'Student not found' });
     }
     const studentName = (studentResult.rows[0].name || '').trim();
+    const parts = studentName.split(/\s+/).filter(Boolean);
+    const nameVariants = [studentName];
+    if (parts.length >= 2) {
+      const swapped = [...parts.slice(-1), ...parts.slice(0, -1)].join(' ');
+      if (swapped !== studentName) nameVariants.push(swapped);
+    }
 
     const now = new Date();
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -128,10 +134,10 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
-         WHERE m.student_name = $1 AND m.date IS NOT NULL
+         WHERE m.student_name = ANY($1::text[]) AND m.date IS NOT NULL
          AND to_char(m.date, 'YYYY-MM') = $2
          ORDER BY m.start ASC`,
-        [studentName, yyyyMm]
+        [nameVariants, yyyyMm]
       );
 
       const lessons = scheduleResult.rows.map((r) => {

@@ -1,9 +1,11 @@
+const path = require('path');
+
 module.exports = {
   apps: [
     {
       name: 'GreenSquareAdmin',
-      cwd: 'C:/GitHub/REACT-ADMIN',
-      script: 'server/index.js',
+      cwd: path.join(__dirname),
+      script: path.join(__dirname, 'server', 'index.js'),
       interpreter: 'node',
       restart_delay: 3000,
       max_restarts: 10,
