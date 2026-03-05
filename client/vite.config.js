@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: ['greensquarepc', 'greensquarepc.local', 'localhost'],
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
