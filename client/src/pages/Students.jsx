@@ -193,7 +193,7 @@ export default function Students() {
         </button>
       </div>
     </div>
-    <div className="mb-4 search-container">
+      <div className="mb-4 search-container">
         <label htmlFor="searchInput" className="sr-only">Search</label>
         <input
           id="searchInput"
@@ -205,7 +205,6 @@ export default function Students() {
           style={{ fontSize: '1.5rem', height: '3.5rem' }}
         />
       </div>
-    </div>
     </>
   );
 
