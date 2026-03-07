@@ -69,7 +69,6 @@ router.get('/unread', async (req, res) => {
            ON nr.notification_id = n.id
           AND nr.staff_id = $1
          WHERE nr.notification_id IS NULL
-           AND COALESCE(n.kind, 'general') <> 'guide'
            AND (n.target_staff_id IS NULL OR n.target_staff_id = $1)
          ORDER BY n.is_system DESC, n.created_at DESC
          LIMIT $2`,
@@ -82,7 +81,6 @@ router.get('/unread', async (req, res) => {
            ON nr.notification_id = n.id
           AND nr.staff_id = $1
          WHERE nr.notification_id IS NULL
-           AND COALESCE(n.kind, 'general') <> 'guide'
            AND (n.target_staff_id IS NULL OR n.target_staff_id = $1)`,
         [staffId]
       ),

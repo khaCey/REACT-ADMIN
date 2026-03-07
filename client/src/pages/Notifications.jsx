@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED, GUIDES_WIP_HIDDEN } from '../guides/wipFlags'
 
 const PAGE_SIZE = 25
 

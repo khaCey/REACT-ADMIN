@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Users, UserCheck, History } from 'lucide-react'
+import { Users, UserCheck, History, Bell } from 'lucide-react'
+import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 
 export default function Sidebar({ collapsed }) {
   const location = useLocation()
@@ -40,6 +41,21 @@ export default function Sidebar({ collapsed }) {
               <span>Staff</span>
             </Link>
           </li>
+          {!NOTIFICATIONS_WIP_DISABLED && (
+          <li>
+            <Link
+              to="/notifications"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${
+                path === '/notifications'
+                  ? 'bg-green-600 text-white'
+                  : 'text-gray-700 hover:bg-green-100 hover:text-green-700'
+              }`}
+            >
+              <Bell className="w-5 h-5" />
+              <span>Notifications</span>
+            </Link>
+          </li>
+          )}
           <li>
             <Link
               to="/change-history"
