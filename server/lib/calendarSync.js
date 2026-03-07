@@ -18,7 +18,6 @@ export async function upsertMonthlySchedule(data) {
     if (!rawEventId || !studentName) continue;
 
     const dateStr = (r.date || '').toString().trim();
-    if (/^\d{4}-\d{2}/.test(dateStr)) months.add(dateStr.slice(0, 7));
     const date = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : null;
 
     let startTs = null;
@@ -49,15 +48,30 @@ export async function upsertMonthlySchedule(data) {
       if (!isNaN(d.getTime())) endTs = d.toISOString();
     }
 
+    // Derive date from start/end when missing (handles GAS sending same ID for different occurrences)
+    let resolvedDate = date;
+    if (!resolvedDate && startVal) {
+      const d = new Date(startVal);
+      if (!isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+    }
+    if (!resolvedDate && endVal) {
+      const d = new Date(endVal);
+      if (!isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+    }
+    if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
+
     const status = (r.status || 'scheduled').toString().trim() || 'scheduled';
     const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
       r.isKidsLesson === true || r.is_kids_lesson === true;
     const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
 
-    const eventId = date ? `${rawEventId}_${date}` : rawEventId;
+    // Always append date (or fallback) so same rawEventId + different dates = unique rows
+    const eventId = resolvedDate
+      ? `${rawEventId}_${resolvedDate}`
+      : `${rawEventId}_${rows.length}`;
 
-    rows.push({ eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName });
+    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName });
   }
 
   let upserted = 0;
