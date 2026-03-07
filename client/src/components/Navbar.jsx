@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, AlertCircle, Calendar, LogOut, Bell, BookOpen } from 'lucide-react'
+import { Menu, AlertCircle, Calendar, LogOut, Bell } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
@@ -9,7 +9,7 @@ import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
@@ -22,6 +22,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const [editingNotification, setEditingNotification] = useState(null)
   const [readingId, setReadingId] = useState(null)
   const dropdownRef = useRef(null)
+  const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const {
     unreadCount,
@@ -70,14 +71,25 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   }, [isNotificationOpen])
 
   useEffect(() => {
-    const handleGuideEnded = () => {
+    const handleGuideEnded = async () => {
+      const id = guideStartedFromNotificationIdRef.current
+      if (id && !notificationsDisabled) {
+        guideStartedFromNotificationIdRef.current = null
+        try {
+          await markAsRead(id)
+          success('Notification marked as read')
+          await refreshUnread()
+        } catch {
+          // ignore
+        }
+      }
       setIsNotificationOpen(false)
       setShowCreateModal(false)
       setSelectedNotification(null)
     }
     window.addEventListener('guide:ended', handleGuideEnded)
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
-  }, [])
+  }, [notificationsDisabled, markAsRead, success, refreshUnread])
 
   useEffect(() => {
     if (!notificationsDisabled) return
@@ -222,23 +234,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                           {item.created_by_name || 'Unknown'} · {formatDateTime(item.created_at)}
                         </p>
                       </button>
-                      {(item.is_system || item.kind === 'guide') && isGuideEnabled(resolveGuideSlug(item)) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const slug = resolveGuideSlug(item)
-                            if (slug && startGuideBySlug(slug)) {
-                              setIsNotificationOpen(false)
-                              setSelectedNotification(null)
-                              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-                            }
-                          }}
-                          className="inline-flex items-center gap-1.5 px-2 py-1 bg-amber-500 text-white text-xs font-medium rounded hover:bg-amber-600 cursor-pointer"
-                        >
-                          <BookOpen className="w-3 h-3" />
-                          Start guide
-                        </button>
-                      )}
                       <button
                         type="button"
                         className="text-xs text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-50"
@@ -277,6 +272,16 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
+          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
+          onStartGuide={(n) => {
+            const slug = resolveGuideSlug(n)
+            if (slug && startGuideBySlug(slug)) {
+              guideStartedFromNotificationIdRef.current = n.id
+              setSelectedNotification(null)
+              setIsNotificationOpen(false)
+              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+            }
+          }}
         />
         )
       )}

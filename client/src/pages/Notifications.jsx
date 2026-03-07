@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bell, BookOpen } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Bell } from 'lucide-react'
 import { api } from '../api'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from '../components/CreateNotificationModal'
@@ -46,6 +46,7 @@ export default function Notifications() {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [editingNotification, setEditingNotification] = useState(null)
   const [guideFocusAction, setGuideFocusAction] = useState(null)
+  const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const {
     unreadCount,
@@ -110,7 +111,21 @@ export default function Notifications() {
   }, [notificationsDisabled, location.state?.guideAction, location.pathname, navigate])
 
   useEffect(() => {
-    const handleGuideEnded = () => {
+    const handleGuideEnded = async () => {
+      const id = guideStartedFromNotificationIdRef.current
+      if (id && !notificationsDisabled) {
+        guideStartedFromNotificationIdRef.current = null
+        try {
+          await markAsRead(id)
+          success('Notification marked as read')
+          await loadPage(offset)
+          if (selectedNotification?.id === id) {
+            setSelectedNotification((prev) => (prev ? { ...prev, is_read: true, read_at: new Date().toISOString() } : null))
+          }
+        } catch {
+          // ignore
+        }
+      }
       setShowCreateModal(false)
       setSelectedNotification(null)
       setPendingDelete(null)
@@ -120,7 +135,7 @@ export default function Notifications() {
     }
     window.addEventListener('guide:ended', handleGuideEnded)
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
-  }, [])
+  }, [notificationsDisabled, markAsRead, success, loadPage, offset, selectedNotification?.id])
 
   useEffect(() => {
     if (notificationsDisabled) return
@@ -338,23 +353,6 @@ export default function Notifications() {
                     )}
                   </p>
                 </button>
-                {(item.is_system || item.kind === 'guide') && isGuideEnabled(resolveGuideSlug(item)) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const slug = resolveGuideSlug(item)
-                      if (slug && startGuideBySlug(slug)) {
-                        setGuideFocusAction(null)
-                        setSelectedNotification(null)
-                        navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-                      }
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 cursor-pointer"
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    Start guide
-                  </button>
-                )}
                 {!item.is_read && (
                   <button
                     type="button"
@@ -363,22 +361,6 @@ export default function Notifications() {
                     className="text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-60"
                   >
                     {readingId === item.id ? 'Marking...' : 'Mark read'}
-                  </button>
-                )}
-                {(item.is_system || item.kind === 'guide') && isGuideEnabled(resolveGuideSlug(item)) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const slug = resolveGuideSlug(item)
-                      if (slug && startGuideBySlug(slug)) {
-                        setSelectedNotification(null)
-                        navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-                      }
-                    }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 cursor-pointer"
-                  >
-                    <BookOpen className="w-3.5 h-3.5" />
-                    Start guide
                   </button>
                 )}
                 {canEditNotification(item) && (
@@ -462,6 +444,16 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
+          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
+          onStartGuide={(n) => {
+            const slug = resolveGuideSlug(n)
+            if (slug && startGuideBySlug(slug)) {
+              guideStartedFromNotificationIdRef.current = n.id
+              setGuideFocusAction(null)
+              setSelectedNotification(null)
+              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+            }
+          }}
         />
       )}
       {!notificationsDisabled && pendingDelete && (
