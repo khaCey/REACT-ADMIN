@@ -37,7 +37,7 @@ function pickGuideStudent(students) {
   if (byExactAdmin) return byExactAdmin
 
   const byAdminKeyword = students.find((s) =>
-    /admin/i.test(`${s?.Name || ''} ${s?.漢字 || ''} ${s?.Email || ''}`)
+    /admin/i.test(`${s?.Name || ''} ${s?.漢孁E|| ''} ${s?.Email || ''}`)
   )
   if (byAdminKeyword) return byAdminKeyword
 
@@ -157,7 +157,7 @@ export default function Students() {
     (s) =>
       !search ||
       (s.Name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.漢字 || '').includes(search) ||
+      (s.漢孁E|| '').includes(search) ||
       (s.Email || '').toLowerCase().includes(search.toLowerCase()) ||
       (s.Phone || '').includes(search)
   )
@@ -245,7 +245,7 @@ export default function Students() {
             <tr>
               <th className="px-3 py-2 text-center font-semibold">ID</th>
               <th className="px-3 py-2 text-left font-semibold">Name</th>
-              <th className="px-3 py-2 text-center font-semibold">漢字</th>
+              <th className="px-3 py-2 text-center font-semibold">漢孁E/th>
               <th className="px-3 py-2 text-center font-semibold">email</th>
               <th className="px-3 py-2 text-center font-semibold">phone</th>
               <th className="px-3 py-2 text-center font-semibold">当日 Cancellation</th>
@@ -282,10 +282,9 @@ export default function Students() {
                 <td className="text-center px-3 py-2">{s.Email}</td>
                 <td className="text-center px-3 py-2">
                   <span>{s.Phone}</span>
-                  {s.子 && (
+                  {s.孁E&& (
                     <span className="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                      子
-                    </span>
+                      孁E                    </span>
                   )}
                 </td>
                 <td className="text-center px-3 py-2">{s.当日}</td>
