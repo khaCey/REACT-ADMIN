@@ -4,6 +4,7 @@ import { User, Type, Phone, Mail, BadgeCheck, CreditCard, CalendarX, Baby, Users
 import { api } from '../api'
 import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
+import { useGuideTour } from '../context/GuideTourContext'
 
 function splitPhone(str) {
   const d = (str || '').replace(/[^0-9]/g, '').slice(0, 11)
@@ -18,6 +19,8 @@ function combinePhone(parts) {
 
 export default function EditStudentModal({ studentId, student, onSave, onDeleted, onClose, highlightDeleteButton = false }) {
   const { success } = useToast()
+  const { activeGuideSlug } = useGuideTour()
+  const preventDelete = !!activeGuideSlug
   const [form, setForm] = useState({
     Name: '',
     漢字: '',
@@ -88,6 +91,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
   }
 
   const handleDelete = async () => {
+    if (preventDelete) return
     setDeleting(true)
     setError(null)
     try {
@@ -314,13 +318,13 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
         <footer className="flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">
           <button
             type="button"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={deleting}
+            onClick={() => !preventDelete && setShowDeleteConfirm(true)}
+            disabled={deleting || preventDelete}
             className={`rounded-md bg-rose-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 cursor-pointer ${
               highlightDeleteButton ? 'ring-4 ring-yellow-300 animate-pulse shadow-xl' : ''
             }`}
           >
-            {deleting ? 'Deleting…' : 'Delete'}
+            {deleting ? 'Deleting…' : preventDelete ? 'Delete (disabled during guide)' : 'Delete'}
           </button>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-md border border-gray-300 bg-white px-4 py-1.5 text-sm font-semibold hover:bg-gray-50 cursor-pointer">

@@ -4,6 +4,7 @@ import { STAFF_OPTIONS } from '../constants/staff'
 import { formatNumber } from '../utils/format'
 import { calculatePrice } from '../../../shared/feeTable.js'
 import { useToast } from '../context/ToastContext'
+import { useGuideTour } from '../context/GuideTourContext'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -22,6 +23,8 @@ function generateTransactionId() {
 
 export default function PaymentModal({ studentId, student, mode = 'add', payment = null, onSave, onClose }) {
   const { success } = useToast()
+  const { activeGuideSlug } = useGuideTour()
+  const preventDelete = !!activeGuideSlug
   const [form, setForm] = useState({
     transactionId: '',
     date: new Date().toISOString().slice(0, 10),
@@ -132,7 +135,7 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
   }
 
   const handleDelete = async () => {
-    if (!form.transactionId) return
+    if (preventDelete || !form.transactionId) return
     setDeleting(true)
     setError(null)
     try {
@@ -284,11 +287,11 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
             {mode === 'edit' && (
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={deleting}
+                onClick={() => !preventDelete && setShowDeleteConfirm(true)}
+                disabled={deleting || preventDelete}
                 className="rounded-md bg-rose-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 cursor-pointer"
               >
-                {deleting ? 'Deleting...' : 'Delete'}
+                {deleting ? 'Deleting...' : preventDelete ? 'Delete (disabled during guide)' : 'Delete'}
               </button>
             )}
           </div>

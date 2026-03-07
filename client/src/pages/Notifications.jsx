@@ -30,7 +30,8 @@ function formatDateTime(value) {
 export default function Notifications() {
   const { success } = useToast()
   const { staff } = useAuth()
-  const { startGuideBySlug } = useGuideTour()
+  const { startGuideBySlug, activeGuideSlug } = useGuideTour()
+  const preventDelete = !!activeGuideSlug
   const location = useLocation()
   const navigate = useNavigate()
   const [items, setItems] = useState([])
@@ -60,10 +61,11 @@ export default function Notifications() {
   }, [staff?.id, isAdminUser])
   const canDeleteNotification = useCallback((n) => {
     if (!n) return false
+    if (preventDelete) return false
     if (isAdminUser) return true
     if (n.is_system || n.kind === 'guide') return false
     return staff?.id === n.created_by_staff_id
-  }, [staff?.id, isAdminUser])
+  }, [staff?.id, isAdminUser, preventDelete])
 
   const loadPage = useCallback(async (nextOffset) => {
     if (notificationsDisabled) {
@@ -232,7 +234,7 @@ export default function Notifications() {
   }
 
   const handleDeleteConfirm = async () => {
-    if (notificationsDisabled) return
+    if (notificationsDisabled || preventDelete) return
     const id = pendingDelete?.id
     if (!id) return
     setDeletingId(id)
