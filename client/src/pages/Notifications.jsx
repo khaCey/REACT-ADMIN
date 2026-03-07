@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, BookOpen } from 'lucide-react'
 import { api } from '../api'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from '../components/CreateNotificationModal'
@@ -424,10 +424,7 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
-          canStartGuide={
-            (selectedNotification?.is_system || selectedNotification?.kind === 'guide') &&
-            isGuideEnabled(resolveGuideSlug(selectedNotification))
-          }
+          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)
             if (slug && startGuideBySlug(slug)) {

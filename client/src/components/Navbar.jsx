@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, AlertCircle, Calendar, LogOut, Bell } from 'lucide-react'
+import { Menu, AlertCircle, Calendar, LogOut, Bell, BookOpen } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
@@ -185,13 +185,26 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                   </button>
                 </div>
               </div>
-              <div className="p-3 border-b border-gray-200 bg-gray-50">
+              <div className="p-3 border-b border-gray-200 bg-gray-50 space-y-2">
                 <button
                   type="button"
                   onClick={handleViewAll}
                   className="w-full text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer"
                 >
                   View all notifications
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (startGuideBySlug('guide.notifications')) {
+                      setIsNotificationOpen(false)
+                      navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+                    }
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  Start guide
                 </button>
               </div>
 
@@ -260,10 +273,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={
-            (selectedNotification?.is_system || selectedNotification?.kind === 'guide') &&
-            isGuideEnabled(resolveGuideSlug(selectedNotification))
-          }
+          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)
             if (slug && startGuideBySlug(slug)) {

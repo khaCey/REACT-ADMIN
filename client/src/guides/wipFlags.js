@@ -5,7 +5,13 @@ const _NOTIFICATIONS_WIP_DISABLED = false
 
 // When set, only these guide slugs are enabled. Enables them even in production.
 // Use null or [] to allow all guides (subject to GUIDES_WIP_HIDDEN).
-export const ENABLED_GUIDE_SLUGS = []
+export const ENABLED_GUIDE_SLUGS = [
+  'guide.students',
+  'guide.payments',
+  'guide.notes',
+  'guide.notifications',
+  'guide.change-history',
+]
 
 const forceHideWip = import.meta.env.PRODUCTION || import.meta.env.VITE_WIP_HIDDEN === 'true'
 export const GUIDES_WIP_HIDDEN = forceHideWip ? true : _GUIDES_WIP_HIDDEN
