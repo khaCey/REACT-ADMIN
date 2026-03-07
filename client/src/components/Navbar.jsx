@@ -185,26 +185,13 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                   </button>
                 </div>
               </div>
-              <div className="p-3 border-b border-gray-200 bg-gray-50 space-y-2">
+              <div className="p-3 border-b border-gray-200 bg-gray-50">
                 <button
                   type="button"
                   onClick={handleViewAll}
                   className="w-full text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer"
                 >
                   View all notifications
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (startGuideBySlug('guide.notifications')) {
-                      setIsNotificationOpen(false)
-                      navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-                    }
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 cursor-pointer"
-                >
-                  <BookOpen className="w-4 h-4" />
-                  Start guide
                 </button>
               </div>
 
@@ -235,6 +222,23 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                           {item.created_by_name || 'Unknown'} · {formatDateTime(item.created_at)}
                         </p>
                       </button>
+                      {(item.is_system || item.kind === 'guide') && isGuideEnabled(resolveGuideSlug(item)) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const slug = resolveGuideSlug(item)
+                            if (slug && startGuideBySlug(slug)) {
+                              setIsNotificationOpen(false)
+                              setSelectedNotification(null)
+                              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 bg-amber-500 text-white text-xs font-medium rounded hover:bg-amber-600 cursor-pointer"
+                        >
+                          <BookOpen className="w-3 h-3" />
+                          Start guide
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="text-xs text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-50"
@@ -273,14 +277,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
-          onStartGuide={(n) => {
-            const slug = resolveGuideSlug(n)
-            if (slug && startGuideBySlug(slug)) {
-              setSelectedNotification(null)
-              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-            }
-          }}
         />
         )
       )}

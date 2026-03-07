@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, BookOpen } from 'lucide-react'
+import { X } from 'lucide-react'
 
 function formatDateTime(value) {
   if (!value) return 'Unknown time'
@@ -27,8 +27,6 @@ export default function NotificationDetailsModal({
   onEdit,
   editing = false,
   highlightAction = null,
-  canStartGuide = false,
-  onStartGuide,
 }) {
   useEffect(() => {
     const onKey = (e) => {
@@ -94,16 +92,6 @@ export default function NotificationDetailsModal({
             {notification.read_at && <p>Read: {formatDateTime(notification.read_at)}</p>}
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            {canStartGuide && onStartGuide && (notification.is_system || notification.kind === 'guide') && (
-              <button
-                type="button"
-                onClick={() => onStartGuide(notification)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 cursor-pointer"
-              >
-                <BookOpen className="w-4 h-4" />
-                Start guide
-              </button>
-            )}
             {canEdit && onEdit && (
               <button
                 type="button"
