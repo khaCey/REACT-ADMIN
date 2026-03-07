@@ -289,6 +289,41 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
   }
 });
 
+/** Server-side backfill: fetch from GAS Calendar Webhook and sync to DB. Uses CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY from .env (no client rebuild needed). */
+app.post('/api/calendar-poll/backfill', async (req, res) => {
+  try {
+    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    if (!url || !key) {
+      return res.status(400).json({
+        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+      });
+    }
+    const { month, year } = req.body || {};
+    let gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1`;
+    if (month && /^\d{4}-\d{2}$/.test(String(month))) {
+      gasUrl += `&month=${encodeURIComponent(month)}`;
+    } else if (year && /^\d{4}$/.test(String(year))) {
+      gasUrl += `&year=${encodeURIComponent(year)}`;
+    } else {
+      return res.status(400).json({ error: 'Body must include month (YYYY-MM) or year (YYYY)' });
+    }
+    const fetchRes = await fetch(gasUrl);
+    const json = await fetchRes.json().catch(() => ({}));
+    if (json.error) {
+      return res.status(400).json({ error: json.error });
+    }
+    const data = Array.isArray(json.data) ? json.data : [];
+    console.log('[calendar-poll/backfill] fetched', data.length, 'rows from GAS');
+    const { upserted, months } = await upsertMonthlySchedule(data);
+    console.log('[calendar-poll/backfill] upserted', upserted, 'rows for months', months.sort().join(', '));
+    res.json({ ok: true, upserted, months, fetched: data.length, backfill: json.backfill });
+  } catch (err) {
+    console.error('[calendar-poll/backfill] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** Sync MonthlySchedule from Google Sheets (Admin spreadsheet) into PostgreSQL. Fetches directly from Sheets API. */
 app.post('/api/calendar-poll/sync-from-sheet', async (req, res) => {
   try {

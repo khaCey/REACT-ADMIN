@@ -1,9 +1,8 @@
 /**
  * BackfillScheduleModal — Retroactively fetch past lessons from Google Calendar and sync to DB.
- * Uses GAS ?year= or ?month= params to fetch directly from Calendar (not cached sheets).
+ * Uses server-side backfill (CALENDAR_POLL_URL + CALENDAR_POLL_API_KEY in .env) — no client rebuild needed.
  */
 import { useState } from 'react'
-import { fetchCalendarMonth, fetchCalendarYear, isPollingConfigured } from '../api/pollingApi'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { Download, Calendar, X, FileSpreadsheet } from 'lucide-react'
@@ -17,8 +16,6 @@ export default function BackfillScheduleModal({ onClose }) {
   const [month, setMonth] = useState('01')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
-
-  const configured = isPollingConfigured()
 
   const years = (() => {
     const y = new Date().getFullYear()
@@ -40,39 +37,17 @@ export default function BackfillScheduleModal({ onClose }) {
   }
 
   const handleBackfill = async () => {
-    if (!configured) {
-      setResult({ error: 'Calendar poll URL and API key not configured' })
-      return
-    }
     setLoading(true)
     setResult(null)
     try {
-      let data = []
-      let label = ''
-      if (mode === 'year') {
-        const res = await fetchCalendarYear(year)
-        if (res._skipped) throw new Error('Calendar poll not configured')
-        data = res.data || []
-        label = `Year ${year}`
-        if (res.backfill?.months?.length) {
-          label += ` (${res.backfill.months.length} months)`
-        }
-      } else {
-        const yyyyMm = `${year}-${month}`
-        const res = await fetchCalendarMonth(yyyyMm)
-        if (res._skipped) throw new Error('Calendar poll not configured')
-        data = res.data || []
-        const mIdx = parseInt(month, 10) - 1
-        label = `${MONTHS[mIdx]} ${year}`
-      }
-      if (data.length === 0) {
-        setResult({ label, upserted: 0, message: 'No events found' })
-        success(`Backfill complete: no events in ${label}`)
-        return
-      }
-      await api.syncCalendarPoll(data)
-      setResult({ label, upserted: data.length })
-      success(`Backfilled ${data.length} lessons from ${label}`)
+      const body = mode === 'year' ? { year } : { month: `${year}-${month}` }
+      const res = await api.backfillFromCalendar(body)
+      const label = mode === 'year'
+        ? `Year ${year}${res.backfill?.months?.length ? ` (${res.backfill.months.length} months)` : ''}`
+        : `${MONTHS[parseInt(month, 10) - 1]} ${year}`
+      const upserted = res.upserted ?? res.fetched ?? 0
+      setResult({ label, upserted, message: res.fetched === 0 ? 'No events found' : null })
+      success(upserted > 0 ? `Backfilled ${upserted} lessons from ${label}` : `Backfill complete: no events in ${label}`)
     } catch (e) {
       setResult({ error: e.message || 'Backfill failed' })
     } finally {
@@ -101,13 +76,8 @@ export default function BackfillScheduleModal({ onClose }) {
           </button>
         </header>
         <div className="p-4 space-y-4">
-          {!configured && (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Set VITE_CALENDAR_POLL_URL and VITE_CALENDAR_POLL_API_KEY in client/.env
-            </p>
-          )}
           <p className="text-sm text-gray-600">
-            Fetch past lessons from Google Calendar (or from MonthlySchedule sheet) and sync to the database. Existing rows are updated (upsert).
+            Fetch past lessons from Google Calendar (or from MonthlySchedule sheet) and sync to the database. Existing rows are updated (upsert). Backfill uses CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root).
           </p>
           <button
             type="button"
@@ -197,7 +167,7 @@ export default function BackfillScheduleModal({ onClose }) {
           <button
             type="button"
             onClick={handleBackfill}
-            disabled={loading || !configured}
+            disabled={loading}
             className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <Calendar className="w-4 h-4" />

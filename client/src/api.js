@@ -89,6 +89,10 @@ export const api = {
   syncCalendarPoll: (data) =>
     fetchApi('/calendar-poll/sync', { method: 'POST', body: JSON.stringify({ data }) }),
 
+  /** Server-side backfill (uses .env on server; no client build needed) */
+  backfillFromCalendar: (body) =>
+    fetchApi('/calendar-poll/backfill', { method: 'POST', body: JSON.stringify(body) }),
+
   syncFromSheet: () =>
     fetchApi('/calendar-poll/sync-from-sheet', { method: 'POST' }),
 
