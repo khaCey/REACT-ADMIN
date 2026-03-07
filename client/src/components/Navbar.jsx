@@ -260,6 +260,17 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
+          canStartGuide={
+            (selectedNotification?.is_system || selectedNotification?.kind === 'guide') &&
+            isGuideEnabled(resolveGuideSlug(selectedNotification))
+          }
+          onStartGuide={(n) => {
+            const slug = resolveGuideSlug(n)
+            if (slug && startGuideBySlug(slug)) {
+              setSelectedNotification(null)
+              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+            }
+          }}
         />
         )
       )}

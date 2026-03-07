@@ -424,6 +424,18 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
+          canStartGuide={
+            (selectedNotification?.is_system || selectedNotification?.kind === 'guide') &&
+            isGuideEnabled(resolveGuideSlug(selectedNotification))
+          }
+          onStartGuide={(n) => {
+            const slug = resolveGuideSlug(n)
+            if (slug && startGuideBySlug(slug)) {
+              setGuideFocusAction(null)
+              setSelectedNotification(null)
+              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+            }
+          }}
         />
       )}
       {!notificationsDisabled && pendingDelete && (
