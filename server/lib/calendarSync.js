@@ -13,9 +13,9 @@ export async function upsertMonthlySchedule(data) {
   const rows = [];
 
   for (const r of data) {
-    const eventId = (r.eventID || r.event_id || '').toString().trim();
+    const rawEventId = (r.eventID || r.event_id || '').toString().trim();
     const studentName = (r.studentName || r.student_name || '').toString().trim();
-    if (!eventId || !studentName) continue;
+    if (!rawEventId || !studentName) continue;
 
     const dateStr = (r.date || '').toString().trim();
     if (/^\d{4}-\d{2}/.test(dateStr)) months.add(dateStr.slice(0, 7));
@@ -55,11 +55,22 @@ export async function upsertMonthlySchedule(data) {
     const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
 
+    const eventId = date ? `${rawEventId}_${date}` : rawEventId;
+
     rows.push({ eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName });
   }
 
   let upserted = 0;
   for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName } of rows) {
+    if (date && eventId.endsWith(`_${date}`)) {
+      const baseId = eventId.slice(0, -(`_${date}`).length);
+      if (baseId) {
+        await query(
+          `DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2 AND to_char(date, 'YYYY-MM') = $3`,
+          [baseId, studentName, date.slice(0, 7)]
+        );
+      }
+    }
     await query(
       `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
        VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)

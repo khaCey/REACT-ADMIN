@@ -40,6 +40,7 @@ export const api = {
   deleteNote: (id) => fetchApi(`/notes/${id}`, { method: 'DELETE' }),
 
   getFeatureFlags: () => fetchApi('/config/feature-flags'),
+  getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getUnreadNotifications: (limit = 20) =>
     fetchApi(`/notifications/unread?limit=${encodeURIComponent(limit)}`),

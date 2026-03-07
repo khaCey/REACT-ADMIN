@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { GUIDES_WIP_HIDDEN, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 
 const PAGE_SIZE = 25
 
@@ -424,7 +424,7 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
-          canStartGuide={!GUIDES_WIP_HIDDEN && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
+          canStartGuide={isGuideEnabled(resolveGuideSlug(selectedNotification)) && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
           onStartGuide={(n) => {
             const resolvedSlug = resolveGuideSlug(n)
             const started = resolvedSlug ? startGuideBySlug(resolvedSlug) : false

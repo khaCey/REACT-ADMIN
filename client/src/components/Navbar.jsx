@@ -9,7 +9,7 @@ import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { GUIDES_WIP_HIDDEN, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
@@ -260,7 +260,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={!GUIDES_WIP_HIDDEN && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
+          canStartGuide={isGuideEnabled(resolveGuideSlug(selectedNotification)) && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
           onStartGuide={(n) => {
             const resolvedSlug = resolveGuideSlug(n)
             const started = resolvedSlug ? startGuideBySlug(resolvedSlug) : false

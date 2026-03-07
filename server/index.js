@@ -129,15 +129,19 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
 
     const latestByMonth = {};
 
+    const normalizeName = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const normalizedVariants = nameVariants.map(normalizeName).filter(Boolean);
+
     for (const yyyyMm of allYyyyMm) {
       const scheduleResult = await query(
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
-         WHERE m.student_name = ANY($1::text[]) AND m.date IS NOT NULL
+         WHERE REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
+         AND m.date IS NOT NULL
          AND to_char(m.date, 'YYYY-MM') = $2
          ORDER BY m.start ASC`,
-        [nameVariants, yyyyMm]
+        [normalizedVariants, yyyyMm]
       );
 
       const lessons = scheduleResult.rows.map((r) => {

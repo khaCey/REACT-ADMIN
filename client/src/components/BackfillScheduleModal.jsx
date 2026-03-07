@@ -2,7 +2,7 @@
  * BackfillScheduleModal — Retroactively fetch past lessons from Google Calendar and sync to DB.
  * Uses server-side backfill (CALENDAR_POLL_URL + CALENDAR_POLL_API_KEY in .env) — no client rebuild needed.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { Download, Calendar, X, FileSpreadsheet } from 'lucide-react'
@@ -16,6 +16,11 @@ export default function BackfillScheduleModal({ onClose }) {
   const [month, setMonth] = useState('01')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [backfillConfigured, setBackfillConfigured] = useState(null)
+
+  useEffect(() => {
+    api.getCalendarPollConfigured().then((r) => setBackfillConfigured(r.configured)).catch(() => setBackfillConfigured(false))
+  }, [])
 
   const years = (() => {
     const y = new Date().getFullYear()
@@ -76,8 +81,13 @@ export default function BackfillScheduleModal({ onClose }) {
           </button>
         </header>
         <div className="p-4 space-y-4">
+          {backfillConfigured === false && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root, same folder as server) on the server. Then restart PM2.
+            </p>
+          )}
           <p className="text-sm text-gray-600">
-            Fetch past lessons from Google Calendar (or from MonthlySchedule sheet) and sync to the database. Existing rows are updated (upsert). Backfill uses CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root).
+            Fetch past lessons from Google Calendar (or from MonthlySchedule sheet) and sync to the database. Existing rows are updated (upsert).
           </p>
           <button
             type="button"

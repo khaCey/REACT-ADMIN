@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState, useCallback, useEffect } 
 import { useNavigate } from 'react-router-dom'
 import GuideWalkthroughModal from '../components/GuideWalkthroughModal'
 import { getGuideBySlug } from '../guides/guideDefinitions'
-import { GUIDES_WIP_HIDDEN } from '../guides/wipFlags'
+import { isGuideEnabled } from '../guides/wipFlags'
 
 const GuideTourContext = createContext(null)
 
@@ -40,7 +40,7 @@ export function GuideTourProvider({ children }) {
   }, [])
 
   const startGuideBySlug = useCallback((slug) => {
-    if (GUIDES_WIP_HIDDEN) return false
+    if (!isGuideEnabled(slug)) return false
     const guide = getGuideBySlug(slug)
     if (!guide) return false
     setActiveGuideSlug(slug)
@@ -70,7 +70,7 @@ export function GuideTourProvider({ children }) {
   }, [activeGuide])
 
   useEffect(() => {
-    if (GUIDES_WIP_HIDDEN) return
+    if (!activeGuideSlug || !isGuideEnabled(activeGuideSlug)) return
     if (!activeStep?.route) return
     navigate(activeStep.route, {
       state: {
@@ -92,7 +92,7 @@ export function GuideTourProvider({ children }) {
   return (
     <GuideTourContext.Provider value={value}>
       {children}
-      {!GUIDES_WIP_HIDDEN && (
+      {activeGuide && isGuideEnabled(activeGuideSlug) && (
         <GuideWalkthroughModal
           open={!!activeGuide}
           guideTitle={activeGuide?.title}

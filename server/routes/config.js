@@ -25,4 +25,10 @@ router.get('/staff', async (req, res) => {
   }
 });
 
+router.get('/calendar-poll-configured', (_req, res) => {
+  const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim();
+  const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+  res.json({ configured: !!(url && key) });
+});
+
 export default router;
