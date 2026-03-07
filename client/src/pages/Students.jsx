@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { UserPlus, BookOpen } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { useGuideTour } from '../context/GuideTourContext'
-import { isGuideEnabled } from '../guides/wipFlags'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import AddStudentModal from '../components/AddStudentModal'
 
@@ -53,7 +52,6 @@ function pickGuideStudent(students) {
 export default function Students() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { startGuideBySlug } = useGuideTour()
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -167,16 +165,6 @@ export default function Students() {
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200 gap-2">
         <h2 className="text-2xl font-bold text-gray-900">Student List</h2>
         <div className="flex items-center gap-2">
-          {isGuideEnabled('guide.students') && (
-            <button
-              type="button"
-              onClick={() => startGuideBySlug('guide.students')}
-              className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg flex items-center gap-2 text-sm font-medium cursor-pointer"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Start guide</span>
-            </button>
-          )}
           <button
             type="button"
             id="guide-add-student-button"

@@ -42,6 +42,8 @@ export const api = {
   getFeatureFlags: () => fetchApi('/config/feature-flags'),
   getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
   getStaffShifts: () => fetchApi('/auth/shifts'),
+  getStaffList: () => fetchApi('/auth/staff-list'),
+  createStaff: (data) => fetchApi('/auth/staff', { method: 'POST', body: JSON.stringify(data) }),
   getUnreadNotifications: (limit = 20) =>
     fetchApi(`/notifications/unread?limit=${encodeURIComponent(limit)}`),
   markNotificationRead: (id) =>
@@ -66,7 +68,7 @@ export const api = {
     fetchApi(`/schedule/week?week_start=${encodeURIComponent(weekStart)}`, { cache: 'no-store' }),
   getBookingWarning: (date, time, studentId) => {
     const params = new URLSearchParams({ date, time });
-    if (studentId) params.set('student_id', studentId);
+    if (studentId != null && studentId !== '') params.set('student_id', studentId);
     return fetchApi(`/schedule/booking-warning?${params.toString()}`);
   },
   bookLesson: (body) =>

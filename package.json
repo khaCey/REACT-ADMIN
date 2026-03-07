@@ -8,6 +8,7 @@
     "start": "node start.js",
     "migrate": "node scripts/migrate.js --import",
     "seed:teachers": "node scripts/seed-teacher-shifts.js",
+    "seed:practice": "node scripts/seed-practice-student.js",
     "build": "cd client && npm run build",
     "server": "node server/index.js",
     "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\""

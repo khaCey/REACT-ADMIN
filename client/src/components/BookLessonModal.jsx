@@ -79,7 +79,7 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
   }
 
   const handleConfirmBook = () => {
-    if (!pendingSlot || !studentId) return
+    if (!pendingSlot || studentId == null) return
     setBreakWarning(null)
     setSubmitting(true)
     api

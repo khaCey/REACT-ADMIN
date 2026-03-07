@@ -1,13 +1,53 @@
 /**
- * Auth routes: login (shift start), logout (shift end), me
+ * Auth routes: login (shift start), logout (shift end), me, staff list, add staff
  */
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { query } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'student-admin-secret-change-in-production';
+const DEFAULT_STAFF_PASSWORD = 'staff123';
+
+/** GET /api/auth/staff-list - staff names for login dropdown (no auth required) */
+router.get('/staff-list', async (req, res) => {
+  try {
+    const result = await query('SELECT id, name FROM staff ORDER BY name ASC');
+    res.json({ staff: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/auth/staff - add new staff (no auth required, for login page) */
+router.post('/staff', async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const password = String(req.body?.password || '').trim() || DEFAULT_STAFF_PASSWORD;
+    if (!name) {
+      return res.status(400).json({ error: 'Name required' });
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO staff (name, password_hash, is_admin)
+       VALUES ($1, $2, FALSE)
+       ON CONFLICT (name) DO NOTHING
+       RETURNING id, name`,
+      [name, hash]
+    );
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: 'Staff with this name already exists' });
+    }
+    res.status(201).json({ staff: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Staff with this name already exists' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/login', async (req, res) => {
   try {

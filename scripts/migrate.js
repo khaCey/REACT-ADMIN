@@ -79,6 +79,26 @@ async function seedStaff() {
   console.log(`Seeded staff: ${DEFAULT_STAFF.join(', ')}.`);
 }
 
+/** Practice student Tarou Tanaka with ID 0 for demos/guides */
+async function seedPracticeStudent() {
+  await pool.query(
+    `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child)
+     VALUES (0, 'Tarou Tanaka', '太郎 田中', '', '', '', '', 'Active', 'NEO', 'Single', 1, false)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       name_kanji = EXCLUDED.name_kanji,
+       status = EXCLUDED.status,
+       payment = EXCLUDED.payment,
+       group_type = EXCLUDED.group_type,
+       group_size = EXCLUDED.group_size,
+       updated_at = NOW()`
+  );
+  await pool.query(
+    `SELECT setval('students_id_seq', (SELECT COALESCE(MAX(id), 0) FROM students))`
+  );
+  console.log('Seeded practice student: Tarou Tanaka (ID 0).');
+}
+
 const DEFAULT_GUIDE_NOTIFICATIONS = [
   {
     slug: 'guide.students',
@@ -472,17 +492,20 @@ async function main() {
         return;
       }
       console.log('Importing data from migration-data/...');
+      await runSchema();
       await importStudents();
       await importPayments();
       await importNotes();
       await importLessons();
       await importMonthlySchedule();
       await importStats();
+      await seedPracticeStudent();
       console.log('Import complete.');
     } else {
       await runSchema();
       await seedStaff();
       await seedGuideNotifications();
+      await seedPracticeStudent();
       console.log('Database setup complete. Run `npm run migrate` to import from CSV.');
     }
   } finally {
