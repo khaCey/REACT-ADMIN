@@ -186,7 +186,6 @@ router.get('/', async (req, res) => {
            ON nr.notification_id = n.id
           AND nr.staff_id = $1
          WHERE (n.target_staff_id IS NULL OR n.target_staff_id = $1)
-           AND COALESCE(n.kind, 'general') <> 'guide'
          ORDER BY n.is_system DESC, n.created_at DESC
          LIMIT $2 OFFSET $3`,
         [staffId, limit, offset]
@@ -194,8 +193,7 @@ router.get('/', async (req, res) => {
       query(
         `SELECT COUNT(*)::int AS total
          FROM notifications
-         WHERE (target_staff_id IS NULL OR target_staff_id = $1)
-           AND COALESCE(kind, 'general') <> 'guide'`,
+         WHERE (target_staff_id IS NULL OR target_staff_id = $1)`,
         [staffId]
       ),
     ]);
