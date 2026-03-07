@@ -424,14 +424,6 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
-          canStartGuide={isGuideEnabled(resolveGuideSlug(selectedNotification)) && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
-          onStartGuide={(n) => {
-            const resolvedSlug = resolveGuideSlug(n)
-            const started = resolvedSlug ? startGuideBySlug(resolvedSlug) : false
-            if (!started) {
-              setError('This guide is not available yet.')
-            }
-          }}
         />
       )}
       {!notificationsDisabled && pendingDelete && (

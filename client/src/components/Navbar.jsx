@@ -260,14 +260,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={isGuideEnabled(resolveGuideSlug(selectedNotification)) && (selectedNotification.is_system || selectedNotification.kind === 'guide')}
-          onStartGuide={(n) => {
-            const resolvedSlug = resolveGuideSlug(n)
-            const started = resolvedSlug ? startGuideBySlug(resolvedSlug) : false
-            if (!started) return
-            setSelectedNotification(null)
-            setIsNotificationOpen(false)
-          }}
         />
         )
       )}
