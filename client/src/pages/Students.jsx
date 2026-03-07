@@ -192,6 +192,7 @@ export default function Students() {
           <span>Add Student</span>
         </button>
       </div>
+    </div>
       <div className="mb-4 search-container">
         <label htmlFor="searchInput" className="sr-only">Search</label>
         <input
