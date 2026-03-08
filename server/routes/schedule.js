@@ -258,8 +258,8 @@ router.post('/book', async (req, res) => {
     const eventId = `booked-${Date.now()}-${student_id}`;
     const title = `${studentName}${student.is_child ? ' 子' : ''} (Lesson)`;
     const insertResult = await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, NULL)
+      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, NULL, 'regular', $8)
        RETURNING *`,
       [
         eventId,
@@ -269,6 +269,7 @@ router.post('/book', async (req, res) => {
         endDate.toISOString(),
         studentName,
         !!student.is_child,
+        student_id,
       ]
     );
     const newRow = insertResult.rows[0];

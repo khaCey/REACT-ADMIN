@@ -23,8 +23,6 @@ export function isGuideEnabled(slug) {
   return !GUIDES_WIP_HIDDEN
 }
 
-// When guides are enabled, keep notifications visible so staff can access guide notifications.
-const _notificationsDisabled = forceHideWip ? true : _NOTIFICATIONS_WIP_DISABLED
-export const NOTIFICATIONS_WIP_DISABLED =
-  ENABLED_GUIDE_SLUGS?.length ? false : _notificationsDisabled
+// Notifications are always enabled so staff can create and view notifications (and guide notifications when guides are used).
+export const NOTIFICATIONS_WIP_DISABLED = false
 

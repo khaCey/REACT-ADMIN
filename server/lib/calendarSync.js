@@ -6,9 +6,44 @@ import { query } from '../db/index.js';
 
 /**
  * Upsert schedule rows into monthly_schedule. Returns { upserted, months }.
- * @param {Array<{eventID?: string, event_id?: string, title?: string, date?: string, start?: string, end?: string, status?: string, studentName?: string, student_name?: string, isKidsLesson?: boolean, is_kids_lesson?: boolean, teacherName?: string, teacher_name?: string}>} data
+ * @param {Array<{eventID?: string, event_id?: string, title?: string, date?: string, start?: string, end?: string, status?: string, studentName?: string, student_name?: string, isKidsLesson?: boolean, is_kids_lesson?: boolean, teacherName?: string, teacher_name?: string, lessonKind?: string, lesson_kind?: string}>} data
  */
+const LESSON_KIND_VALID = { regular: true, demo: true, owner: true };
+
+function normalizeLessonKind(val) {
+  if (val == null || val === '') return 'regular';
+  const v = String(val).trim().toLowerCase();
+  return LESSON_KIND_VALID[v] ? v : 'regular';
+}
+
+/** Normalize name for matching: trim and collapse internal spaces */
+function normalizeName(s) {
+  if (s == null || typeof s !== 'string') return '';
+  return s.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Build map: normalized student name -> student id (only when exactly one student has that name).
+ * @returns {Promise<Map<string, number>>}
+ */
+async function buildStudentNameToIdMap() {
+  const result = await query('SELECT id, name FROM students');
+  const byName = new Map(); // normalized -> [id, id, ...]
+  for (const row of result.rows) {
+    const name = normalizeName(row.name);
+    if (!name) continue;
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(row.id);
+  }
+  const singleMatch = new Map();
+  for (const [name, ids] of byName) {
+    if (ids.length === 1) singleMatch.set(name, ids[0]);
+  }
+  return singleMatch;
+}
+
 export async function upsertMonthlySchedule(data) {
+  const nameToId = await buildStudentNameToIdMap();
   const months = new Set();
   const rows = [];
 
@@ -65,6 +100,7 @@ export async function upsertMonthlySchedule(data) {
       r.isKidsLesson === true || r.is_kids_lesson === true;
     const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
+    const lessonKind = normalizeLessonKind(r.lessonKind ?? r.lesson_kind);
 
     // Append date and optionally time so same rawEventId + same day + different times = unique rows
     let eventId;
@@ -77,11 +113,12 @@ export async function upsertMonthlySchedule(data) {
       eventId = `${rawEventId}_${rows.length}`;
     }
 
-    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName });
+    const studentId = nameToId.get(normalizeName(studentName)) ?? null;
+    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId });
   }
 
   let upserted = 0;
-  for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName } of rows) {
+  for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId } of rows) {
     // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
     if (date && /_\d{2}-\d{2}-\d{2}$/.test(eventId)) {
       const oldFormatId = eventId.replace(/_\d{2}-\d{2}-\d{2}$/, '');
@@ -91,12 +128,12 @@ export async function upsertMonthlySchedule(data) {
       );
     }
     await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)
+      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name`,
-      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName]
+         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id`,
+      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId]
     );
     upserted++;
   }

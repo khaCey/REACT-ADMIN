@@ -79,6 +79,9 @@ ALTER TABLE monthly_schedule ADD CONSTRAINT monthly_schedule_pkey PRIMARY KEY (e
 
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NOT NULL DEFAULT 'regular';
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES students(id);
+
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (
   date DATE,
@@ -209,7 +212,21 @@ CREATE TABLE IF NOT EXISTS change_log (
 ALTER TABLE change_log ADD COLUMN IF NOT EXISTS source_change_id INTEGER REFERENCES change_log(id);
 CREATE INDEX IF NOT EXISTS idx_change_log_entity ON change_log(entity_type, entity_key);
 CREATE INDEX IF NOT EXISTS idx_change_log_created ON change_log(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_change_log_source_change_id ON change_log(source_change_id);-- Removed currently-unused tables
+CREATE INDEX IF NOT EXISTS idx_change_log_source_change_id ON change_log(source_change_id);
+
+-- Backups (metadata for DB backups stored in Google Drive)
+CREATE TABLE IF NOT EXISTS backups (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  file_name VARCHAR(255) NOT NULL,
+  drive_file_id VARCHAR(255),
+  web_view_link TEXT,
+  size_bytes BIGINT,
+  source VARCHAR(50) NOT NULL DEFAULT 'manual'
+);
+CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at DESC);
+
+-- Removed currently-unused tables
 DROP TABLE IF EXISTS booking_availability;
 DROP TABLE IF EXISTS teacher_calendars;
 DROP TABLE IF EXISTS lesson_actions;

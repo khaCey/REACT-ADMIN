@@ -41,6 +41,10 @@ export const api = {
 
   getFeatureFlags: () => fetchApi('/config/feature-flags'),
   getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
+  createBackup: () => fetchApi('/admin/backup', { method: 'POST' }),
+  getBackups: () => fetchApi('/admin/backups'),
+  restoreBackup: (backupId) =>
+    fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getStaffList: () => fetchApi('/auth/staff-list'),
   createStaff: (data) => fetchApi('/auth/staff', { method: 'POST', body: JSON.stringify(data) }),
@@ -63,6 +67,12 @@ export const api = {
   getUnpaidStudents: (month) =>
     fetchApi(month ? `/dashboard/unpaid?month=${encodeURIComponent(month)}` : '/dashboard/unpaid'),
   getUnscheduledLessonsStudents: () => fetchApi('/dashboard/unscheduled-lessons'),
+  getDashboardMetrics: (from, to) => {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return fetchApi(`/dashboard/metrics${params.toString() ? '?' + params.toString() : ''}`);
+  },
 
   getWeekSchedule: (weekStart) =>
     fetchApi(`/schedule/week?week_start=${encodeURIComponent(weekStart)}`, { cache: 'no-store' }),

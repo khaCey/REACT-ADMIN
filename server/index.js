@@ -32,7 +32,9 @@ import changeLogRouter from './routes/changeLog.js';
 import calendarRouter, { registerWatch } from './routes/calendar.js';
 import authRouter from './routes/auth.js';
 import notificationsRouter from './routes/notifications.js';
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, requireAdmin } from './middleware/auth.js';
+import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
+import cron from 'node-cron';
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
@@ -134,7 +136,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
 
     for (const yyyyMm of allYyyyMm) {
       const scheduleResult = await query(
-        `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status,
+        `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
          WHERE REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
@@ -158,6 +160,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           status: (r.status || 'scheduled').toLowerCase(),
           eventID: r.event_id,
           isGroup: (r.student_count || 0) > 1,
+          lessonKind: r.lesson_kind || 'regular',
         };
       });
 
@@ -172,6 +175,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           status: 'unscheduled',
           eventID: `unscheduled-${yyyyMm}-${i}`,
           isGroup: false,
+          lessonKind: 'regular',
         });
       }
       const [y, mo] = yyyyMm.split('-');
@@ -276,6 +280,47 @@ app.use('/api/schedule', scheduleRouter);
 app.use('/api/change-log', changeLogRouter);
 app.use('/api/notifications', notificationsRouter);
 
+/** Admin: create backup (pg_dump + Drive upload). Admin only. */
+app.post('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { fileId, fileName, webViewLink } = await runBackup({ source: 'manual' });
+    res.status(201).json({ ok: true, fileId, fileName, webViewLink });
+  } catch (err) {
+    console.error('[admin/backup]', err.message);
+    const code = err.message?.includes('not configured') ? 503 : 500;
+    res.status(code).json({ error: err.message || 'Backup failed' });
+  }
+});
+
+/** Admin: list backups from last 30 days. Admin only. */
+app.get('/api/admin/backups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, created_at, file_name, drive_file_id, web_view_link, size_bytes, source
+       FROM backups
+       WHERE created_at >= NOW() - INTERVAL '30 days'
+       ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[admin/backups]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to list backups' });
+  }
+});
+
+/** Admin: restore database from a backup (by id). Downloads from Drive, runs psql. Admin only. */
+app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { backupId } = req.body || {};
+    const { fileName } = await runRestore(backupId);
+    res.json({ ok: true, fileName });
+  } catch (err) {
+    console.error('[admin/restore]', err.message);
+    const status = err.message?.includes('not found') ? 404 : err.message?.includes('Invalid') ? 400 : 500;
+    res.status(status).json({ error: err.message || 'Restore failed' });
+  }
+});
+
 /** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); prior months are preserved. */
 app.post('/api/calendar-poll/sync', async (req, res) => {
   try {
@@ -359,4 +404,20 @@ app.use('/api', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API running at http://localhost:${PORT} (network: http://0.0.0.0:${PORT})`);
   registerWatch().catch(() => {});
+
+  const cronExpr = process.env.BACKUP_SCHEDULE_CRON || '0 12 * * *';
+  const tz = process.env.BACKUP_SCHEDULE_TZ || 'Asia/Tokyo';
+  cron.schedule(
+    cronExpr,
+    () => {
+      runBackup({ source: 'scheduled' })
+        .then((r) => {
+          console.log('[backup] scheduled backup ok:', r.fileName);
+          return cleanupBackupsOlderThan(30);
+        })
+        .then((deleted) => { if (deleted > 0) console.log('[backup] cleaned up', deleted, 'backup(s) older than 30 days'); })
+        .catch((err) => console.error('[backup] scheduled backup failed:', err.message));
+    },
+    { timezone: tz }
+  );
 });

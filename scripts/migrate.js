@@ -53,6 +53,28 @@ function toTimestamp(val) {
   return iso;
 }
 
+function normalizeName(s) {
+  if (s == null || typeof s !== 'string') return '';
+  return s.trim().replace(/\s+/g, ' ');
+}
+
+/** Build map: normalized student name -> student id (only when exactly one student has that name). */
+async function buildStudentNameToIdMap() {
+  const result = await pool.query('SELECT id, name FROM students');
+  const byName = new Map();
+  for (const row of result.rows) {
+    const name = normalizeName(row.name);
+    if (!name) continue;
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(row.id);
+  }
+  const singleMatch = new Map();
+  for (const [name, ids] of byName) {
+    if (ids.length === 1) singleMatch.set(name, ids[0]);
+  }
+  return singleMatch;
+}
+
 async function runSchema() {
   const schemaPath = join(rootDir, 'server', 'db', 'schema.sql');
   const schema = readFileSync(schemaPath, 'utf-8');
@@ -359,19 +381,30 @@ async function importLessons() {
     return;
   }
   const rows = parseCsv(path);
+  const nameToId = await buildStudentNameToIdMap();
+  let imported = 0;
   for (const r of rows) {
     const month = toMonthKeyYYYYMM(r.Month || r.month, toNum(r.Year || r.year) || new Date().getFullYear());
     if (!month) continue;
-    const studentId = toNum(r['Student ID'] || r.StudentID || r.student_id);
-    if (!studentId) continue;
+    let studentId = toNum(r['Student ID'] || r.StudentID || r.student_id);
+    if (!studentId) {
+      const name = r.Name || r.StudentName || r['Student Name'] || r.student_name || '';
+      const n = normalizeName(name);
+      if (n) studentId = nameToId.get(n) ?? null;
+      if (!studentId) {
+        console.warn('Skipping lesson row (no student id or unique name match):', r.Month || r.month, name || '(no name)');
+        continue;
+      }
+    }
     await pool.query(
       `INSERT INTO lessons (student_id, month, lessons)
        VALUES ($1, $2, $3)
        ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
       [studentId, month, toNum(r.Lessons || r.lessons) ?? 0]
     );
+    imported++;
   }
-  console.log(`Imported ${rows.length} lessons.`);
+  console.log(`Imported ${imported} lessons.`);
 }
 
 async function importMonthlySchedule() {
@@ -381,6 +414,7 @@ async function importMonthlySchedule() {
     return;
   }
   const rows = parseCsv(path);
+  const nameToId = await buildStudentNameToIdMap();
   await pool.query('TRUNCATE monthly_schedule');
   let imported = 0;
   for (const r of rows) {
@@ -433,15 +467,18 @@ async function importMonthlySchedule() {
             : rawEventId;
       const rawStudentName = (r.StudentName || r.student_name || '').trim();
       if (!rawStudentName) continue;
+      const rawLessonKind = (r.LessonKind || r.lesson_kind || '').trim().toLowerCase();
+      const lessonKind = ['regular', 'demo', 'owner'].includes(rawLessonKind) ? rawLessonKind : 'regular';
       const studentNames = splitStudentNames(rawStudentName);
       for (const studentName of studentNames) {
+        const studentId = nameToId.get(normalizeName(studentName)) ?? null;
         await pool.query(
-          `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)
-           VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9)
+          `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
+           VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (event_id, student_name) DO UPDATE SET
              title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
              status = EXCLUDED.status,
-             is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name`,
+             is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id`,
           [
             eventId,
             r.Title || r.title || '',
@@ -452,6 +489,8 @@ async function importMonthlySchedule() {
             studentName,
             r.IsKidsLesson === 'true' || r.IsKidsLesson === '1' || r.is_kids_lesson === true,
             r.TeacherName || r.teacher_name || '',
+            lessonKind,
+            studentId,
           ]
         );
         imported++;

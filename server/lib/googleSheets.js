@@ -47,10 +47,11 @@ export async function fetchMonthlyScheduleFromSheet() {
   if (!auth) return [];
   const sheetId = process.env.GOOGLE_ADMIN_SHEET_ID || '1upKC-iNWs7HIeKiVVAegve5O5WbNebbjMlveMcvnuow';
   const sheets = google.sheets({ version: 'v4', auth });
+  const lessonKindValid = { regular: true, demo: true, owner: true };
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: "'MonthlySchedule'!A:I",
+      range: "'MonthlySchedule'!A:J",
     });
     const rows = res.data.values || [];
     if (rows.length < 2) return [];
@@ -65,6 +66,7 @@ export async function fetchMonthlyScheduleFromSheet() {
       studentName: headers.indexOf('studentname'),
       isKidsLesson: headers.indexOf('iskidslesson'),
       teacherName: headers.indexOf('teachername'),
+      lessonKind: headers.indexOf('lessonkind'),
     };
     if (idx.eventID < 0 || idx.studentName < 0) return [];
     const out = [];
@@ -75,6 +77,8 @@ export async function fetchMonthlyScheduleFromSheet() {
       const studentName = get('studentName');
       if (!eventId || !studentName) continue;
       const isKids = get('isKidsLesson') === '子' || get('isKidsLesson') === 'true' || row[idx.isKidsLesson] === true;
+      const rawKind = (idx.lessonKind >= 0 && row[idx.lessonKind] != null ? String(row[idx.lessonKind]).trim().toLowerCase() : '');
+      const lessonKind = lessonKindValid[rawKind] ? rawKind : 'regular';
       out.push({
         eventID: eventId,
         title: get('title'),
@@ -85,6 +89,7 @@ export async function fetchMonthlyScheduleFromSheet() {
         studentName,
         isKidsLesson: isKids,
         teacherName: get('teacherName'),
+        lessonKind,
       });
     }
     return out;

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
+import AddStaffModal from '../components/AddStaffModal'
 
 function formatShiftTime(iso) {
   if (!iso) return null
@@ -19,8 +20,13 @@ export default function Staff() {
   const [shifts, setShifts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false)
 
   useEffect(() => {
+    loadShifts()
+  }, [])
+
+  const loadShifts = () => {
     setLoading(true)
     setError(null)
     api
@@ -31,12 +37,19 @@ export default function Staff() {
         setError(e.message || 'Could not load shift data')
       })
       .finally(() => setLoading(false))
-  }, [])
+  }
 
   return (
     <div className="w-full flex flex-col h-full min-h-0">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-900">Staff login</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Staff</h2>
+        <button
+          type="button"
+          onClick={() => setShowAddStaffModal(true)}
+          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer"
+        >
+          Add Staff
+        </button>
       </div>
       {loading ? (
         <p className="py-8 text-gray-500">Loading…</p>
@@ -70,6 +83,12 @@ export default function Staff() {
             ))}
           </ul>
         </div>
+      )}
+      {showAddStaffModal && (
+        <AddStaffModal
+          onClose={() => setShowAddStaffModal(false)}
+          onCreated={() => loadShifts()}
+        />
       )}
     </div>
   )

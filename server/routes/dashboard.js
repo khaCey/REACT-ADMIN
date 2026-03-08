@@ -84,6 +84,92 @@ router.get('/unscheduled-lessons', async (req, res) => {
   }
 });
 
+/** Build array of YYYY-MM from start to end (inclusive). */
+function monthRange(fromYYYYMM, toYYYYMM) {
+  const out = [];
+  const [yFrom, mFrom] = fromYYYYMM.split('-').map(Number);
+  const [yTo, mTo] = toYYYYMM.split('-').map(Number);
+  let y = yFrom;
+  let m = mFrom;
+  while (y < yTo || (y === yTo && m <= mTo)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+/** GET /metrics – time-series for dashboard charts. Query params: from (YYYY-MM), to (YYYY-MM). Default: last 12 months. */
+router.get('/metrics', async (req, res) => {
+  try {
+    const now = new Date();
+    const toParam = req.query.to;
+    const fromParam = req.query.from;
+    const to = (toParam && /^\d{4}-\d{2}$/.test(toParam))
+      ? toParam
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const toDate = new Date(to + '-01');
+    toDate.setMonth(toDate.getMonth() + 1);
+    const toEnd = toDate.toISOString().slice(0, 10);
+    let from;
+    if (fromParam && /^\d{4}-\d{2}$/.test(fromParam)) {
+      from = fromParam;
+    } else {
+      const fromDate = new Date(to + '-01');
+      fromDate.setMonth(fromDate.getMonth() - 11);
+      from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const fromStart = from + '-01';
+    const months = monthRange(from, to);
+
+    const [regularResult, demoResult, joinedResult] = await Promise.all([
+      query(
+        `SELECT to_char(date, 'YYYY-MM') as month, COUNT(DISTINCT student_name)::int as count
+         FROM monthly_schedule
+         WHERE lesson_kind = 'regular' AND (status IS NULL OR status <> 'cancelled') AND date IS NOT NULL
+         AND date >= $1::date AND date < $2::date
+         GROUP BY to_char(date, 'YYYY-MM')`,
+        [fromStart, toEnd]
+      ),
+      query(
+        `SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)::int as count
+         FROM monthly_schedule
+         WHERE lesson_kind = 'demo' AND (status IS NULL OR status <> 'cancelled') AND date IS NOT NULL
+         AND date >= $1::date AND date < $2::date
+         GROUP BY to_char(date, 'YYYY-MM')`,
+        [fromStart, toEnd]
+      ),
+      query(
+        `WITH first_payment AS (
+           SELECT student_id, MIN(month) AS first_month
+           FROM payments
+           WHERE month IS NOT NULL AND month ~ '^\\d{4}-\\d{2}$'
+           GROUP BY student_id
+         )
+         SELECT first_month AS month, COUNT(*)::int AS count
+         FROM first_payment
+         WHERE first_month >= $1 AND first_month <= $2
+         GROUP BY first_month`,
+        [from, to]
+      ),
+    ]);
+
+    const byMonth = (rows, key) => {
+      const map = {};
+      for (const r of (rows || [])) map[r.month] = r.count;
+      return months.map((month) => ({ month, count: map[month] ?? 0 }));
+    };
+
+    res.json({
+      regularStudentsPerMonth: byMonth(regularResult.rows, 'count'),
+      demoLessonsPerMonth: byMonth(demoResult.rows, 'count'),
+      studentsJoinedPerMonth: byMonth(joinedResult.rows, 'count'),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stats', async (req, res) => {
   try {
     const now = new Date();
