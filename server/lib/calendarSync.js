@@ -66,24 +66,29 @@ export async function upsertMonthlySchedule(data) {
     const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
 
-    // Always append date (or fallback) so same rawEventId + different dates = unique rows
-    const eventId = resolvedDate
-      ? `${rawEventId}_${resolvedDate}`
-      : `${rawEventId}_${rows.length}`;
+    // Append date and optionally time so same rawEventId + same day + different times = unique rows
+    let eventId;
+    if (resolvedDate && startTs) {
+      const timeSuffix = startTs.slice(11, 19).replace(/:/g, '-'); // HH-mm-ss
+      eventId = `${rawEventId}_${resolvedDate}_${timeSuffix}`;
+    } else if (resolvedDate) {
+      eventId = `${rawEventId}_${resolvedDate}`;
+    } else {
+      eventId = `${rawEventId}_${rows.length}`;
+    }
 
     rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName });
   }
 
   let upserted = 0;
   for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName } of rows) {
-    if (date && eventId.endsWith(`_${date}`)) {
-      const baseId = eventId.slice(0, -(`_${date}`).length);
-      if (baseId) {
-        await query(
-          `DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2 AND to_char(date, 'YYYY-MM') = $3`,
-          [baseId, studentName, date.slice(0, 7)]
-        );
-      }
+    // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
+    if (date && /_\d{2}-\d{2}-\d{2}$/.test(eventId)) {
+      const oldFormatId = eventId.replace(/_\d{2}-\d{2}-\d{2}$/, '');
+      await query(
+        `DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2 AND to_char(date, 'YYYY-MM') = $3`,
+        [oldFormatId, studentName, date.slice(0, 7)]
+      );
     }
     await query(
       `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name)

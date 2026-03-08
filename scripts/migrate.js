@@ -403,7 +403,6 @@ async function importMonthlySchedule() {
           date = `${y}-${m}-${day}`;
         }
       }
-      const eventId = date ? `${rawEventId}_${date}` : rawEventId;
       if (startVal && date) {
         const hm = String(startVal).trim().match(/^(\d{1,2}):(\d{2})/);
         if (hm) startTs = `${date}T${hm[1].padStart(2, '0')}:${hm[2]}:00`;
@@ -426,6 +425,12 @@ async function importMonthlySchedule() {
         const e = new Date(endVal);
         if (!isNaN(e.getTime())) endTs = e.toISOString();
       }
+      const eventId =
+        date && startTs
+          ? `${rawEventId}_${date}_${startTs.slice(11, 19).replace(/:/g, '-')}`
+          : date
+            ? `${rawEventId}_${date}`
+            : rawEventId;
       const rawStudentName = (r.StudentName || r.student_name || '').trim();
       if (!rawStudentName) continue;
       const studentNames = splitStudentNames(rawStudentName);
