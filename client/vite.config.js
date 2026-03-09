@@ -6,6 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 const apiPort = process.env.API_PORT || 3001
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    include: ['recharts'],
+  },
   server: {
     port: 5173,
     host: true,
