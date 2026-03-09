@@ -26,7 +26,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/students" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="students" element={<Students />} />
         <Route path="students/:id" element={<StudentDetail />} />
@@ -35,7 +35,7 @@ function App() {
         <Route path="change-history" element={<ChangeHistory />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
       </Route>
-      <Route path="*" element={<Navigate to="/students" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )
 }

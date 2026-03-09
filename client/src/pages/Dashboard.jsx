@@ -56,6 +56,8 @@ function getHourLabel(startTime) {
   return `${startTime.slice(0, 2)}:00`
 }
 
+const HOURLY_TIMELINE = Array.from({ length: 11 }, (_, i) => `${String(10 + i).padStart(2, '0')}:00`)
+
 function groupLessonsByHour(lessons) {
   const groups = new Map()
   for (const lesson of lessons || []) {
@@ -63,7 +65,7 @@ function groupLessonsByHour(lessons) {
     if (!groups.has(label)) groups.set(label, [])
     groups.get(label).push(lesson)
   }
-  return Array.from(groups.entries())
+  return HOURLY_TIMELINE.map((hour) => [hour, groups.get(hour) || []])
 }
 
 function lessonModeBadgeClass(mode) {
@@ -153,45 +155,51 @@ export default function Dashboard() {
                 {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => (
                   <div key={hourLabel}>
                     <h4 className="text-sm font-semibold text-gray-700 mb-2">{hourLabel}</h4>
-                    <div className={lessons.length === 1 ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-2'}>
-                      {lessons.map((lesson) => (
-                        <article
-                          key={`${lesson.event_id}_${lesson.student_name}`}
-                          role={lesson.student_id ? 'button' : undefined}
-                          tabIndex={lesson.student_id ? 0 : -1}
-                          onClick={() => {
-                            if (!lesson.student_id) return
-                            setSelectedStudentId(lesson.student_id)
-                          }}
-                          onKeyDown={(e) => {
-                            if (!lesson.student_id) return
-                            if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
-                          }}
-                          className={`rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 ${
-                            lesson.student_id ? 'cursor-pointer hover:bg-white hover:shadow-sm' : ''
-                          }`}
-                        >
-                          <p className="text-sm font-semibold text-gray-900 truncate">{lesson.student_name}</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <span className="text-xs text-gray-600 truncate">{lesson.status || 'scheduled'}</span>
-                            <div className="flex items-center gap-1.5">
-                              {lessonModeLabel(lesson.lesson_mode) && (
-                                <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
-                                  {lessonModeLabel(lesson.lesson_mode)}
+                    {lessons.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/60 px-3 py-2 text-xs text-gray-400">
+                        No lessons
+                      </div>
+                    ) : (
+                      <div className={lessons.length === 1 ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-2'}>
+                        {lessons.map((lesson) => (
+                          <article
+                            key={`${lesson.event_id}_${lesson.student_name}`}
+                            role={lesson.student_id ? 'button' : undefined}
+                            tabIndex={lesson.student_id ? 0 : -1}
+                            onClick={() => {
+                              if (!lesson.student_id) return
+                              setSelectedStudentId(lesson.student_id)
+                            }}
+                            onKeyDown={(e) => {
+                              if (!lesson.student_id) return
+                              if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
+                            }}
+                            className={`rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 ${
+                              lesson.student_id ? 'cursor-pointer hover:bg-white hover:shadow-sm' : ''
+                            }`}
+                          >
+                            <p className="text-sm font-semibold text-gray-900 truncate">{lesson.student_name}</p>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-xs text-gray-600 truncate">{lesson.status || 'scheduled'}</span>
+                              <div className="flex items-center gap-1.5">
+                                {lessonModeLabel(lesson.lesson_mode) && (
+                                  <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                    {lessonModeLabel(lesson.lesson_mode)}
+                                  </span>
+                                )}
+                                <span
+                                  className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
+                                    lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                  }`}
+                                >
+                                  {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
-                              )}
-                              <span
-                                className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
-                                  lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                }`}
-                              >
-                                {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
-                              </span>
+                              </div>
                             </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
