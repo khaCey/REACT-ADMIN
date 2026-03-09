@@ -211,7 +211,7 @@ async function applyUpdate(entity_type, data) {
     const o = data;
     await query(
       `UPDATE monthly_schedule SET title = $3, date = $4::date, start = $5::timestamptz, "end" = $6::timestamptz,
-        status = $7, is_kids_lesson = $8, teacher_name = $9, lesson_kind = $10, student_id = $11
+        status = $7, is_kids_lesson = $8, teacher_name = $9, lesson_kind = $10, student_id = $11, lesson_mode = $12
        WHERE event_id = $1 AND student_name = $2`,
       [
         o.event_id,
@@ -225,6 +225,7 @@ async function applyUpdate(entity_type, data) {
         o.teacher_name ?? '',
         o.lesson_kind ?? 'regular',
         o.student_id ?? null,
+        o.lesson_mode ?? 'unknown',
       ]
     );
   }
@@ -298,11 +299,11 @@ async function applyCreate(entity_type, data) {
   } else if (entity_type === 'monthly_schedule') {
     const o = data;
     await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id, lesson_mode)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id`,
+         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id, lesson_mode = EXCLUDED.lesson_mode`,
       [
         o.event_id,
         o.title ?? '',
@@ -315,6 +316,7 @@ async function applyCreate(entity_type, data) {
         o.teacher_name ?? '',
         o.lesson_kind ?? 'regular',
         o.student_id ?? null,
+        o.lesson_mode ?? 'unknown',
       ]
     );
   }

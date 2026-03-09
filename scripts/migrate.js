@@ -374,6 +374,13 @@ function toMonthKeyYYYYMM(val, yearFallback) {
   return monthNum ? `${year}-${monthNum}` : m;
 }
 
+function parseLessonModeFromText(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\bcafe\b|カフェ/.test(t)) return 'cafe';
+  if (/\bonline\b|オンライン|\bzoom\b|ズーム|\bmeet\b/.test(t)) return 'online';
+  return 'unknown';
+}
+
 async function importLessons() {
   const path = findCsv('Lessons.csv');
   if (!path) {
@@ -469,16 +476,25 @@ async function importMonthlySchedule() {
       if (!rawStudentName) continue;
       const rawLessonKind = (r.LessonKind || r.lesson_kind || '').trim().toLowerCase();
       const lessonKind = ['regular', 'demo', 'owner'].includes(rawLessonKind) ? rawLessonKind : 'regular';
+      const rawLessonMode = (r.LessonMode || r.lesson_mode || '').trim().toLowerCase();
+      const lessonMode = ['cafe', 'online', 'unknown'].includes(rawLessonMode)
+        ? rawLessonMode
+        : (() => {
+          const fromLocation = parseLessonModeFromText(r.Location || r.location || '');
+          return fromLocation !== 'unknown'
+            ? fromLocation
+            : parseLessonModeFromText(r.Title || r.title || '');
+        })();
       const studentNames = splitStudentNames(rawStudentName);
       for (const studentName of studentNames) {
         const studentId = nameToId.get(normalizeName(studentName)) ?? null;
         await pool.query(
-          `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
-           VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11)
+          `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+           VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT (event_id, student_name) DO UPDATE SET
              title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
              status = EXCLUDED.status,
-             is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id`,
+             is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id`,
           [
             eventId,
             r.Title || r.title || '',
@@ -490,6 +506,7 @@ async function importMonthlySchedule() {
             r.IsKidsLesson === 'true' || r.IsKidsLesson === '1' || r.is_kids_lesson === true,
             r.TeacherName || r.teacher_name || '',
             lessonKind,
+            lessonMode,
             studentId,
           ]
         );
@@ -537,6 +554,8 @@ async function main() {
       }
       console.log('Importing data from migration-data/...');
       await runSchema();
+      await seedStaff();
+      await seedGuideNotifications();
       await importStudents();
       await importPayments();
       await importNotes();
@@ -547,8 +566,6 @@ async function main() {
       console.log('Import complete.');
     } else {
       await runSchema();
-      await seedStaff();
-      await seedGuideNotifications();
       await seedPracticeStudent();
       console.log('Database setup complete. Run `npm run migrate` to import from CSV.');
     }

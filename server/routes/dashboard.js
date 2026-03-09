@@ -170,6 +170,75 @@ router.get('/metrics', async (req, res) => {
   }
 });
 
+/** GET /today-lessons - today's lesson list in Asia/Tokyo timezone. */
+router.get('/today-lessons', async (_req, res) => {
+  try {
+    const result = await query(
+      `SELECT
+         m.event_id,
+         m.student_name,
+         COALESCE(m.student_id, sm.id) AS student_id,
+         m.status,
+         COALESCE(
+           NULLIF(lower(trim(m.lesson_mode)), ''),
+           CASE
+             WHEN lower(COALESCE(m.title, '')) ~ '\\bcafe\\b|カフェ' THEN 'cafe'
+             WHEN lower(COALESCE(m.title, '')) ~ '\\bonline\\b|オンライン|\\bzoom\\b|ズーム|\\bmeet\\b' THEN 'online'
+             ELSE 'unknown'
+           END
+         ) AS lesson_mode,
+         m.date::text AS date,
+         CASE WHEN m.start IS NOT NULL THEN to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') ELSE NULL END AS start_time,
+         EXISTS (
+           SELECT 1
+           FROM payments p
+           WHERE p.student_id = COALESCE(m.student_id, sm.id)
+             AND (
+               p.month = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
+               OR p.month = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-FMMM')
+               OR (
+                 p.year = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY')
+                 AND lower(trim(COALESCE(p.month, ''))) IN (
+                   lower(to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'FMMonth')),
+                   lower(to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'Mon'))
+                 )
+               )
+               OR (
+                 p.year = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY')
+                 AND p.month = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
+               )
+               OR (
+                 p.date IS NOT NULL
+                 AND to_char(p.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
+               )
+             )
+         ) AS paid_this_month
+       FROM monthly_schedule m
+       LEFT JOIN LATERAL (
+         SELECT s.id
+         FROM students s
+         WHERE REGEXP_REPLACE(TRIM(s.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+         ORDER BY s.id
+         LIMIT 1
+       ) sm ON m.student_id IS NULL
+       WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
+         AND (m.status IS NULL OR m.status <> 'cancelled')
+       ORDER BY m.start NULLS LAST, m.student_name`
+    );
+
+    const dateResult = await query(
+      `SELECT to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM-DD') AS today`
+    );
+
+    res.json({
+      date: dateResult.rows[0]?.today || null,
+      lessons: result.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stats', async (req, res) => {
   try {
     const now = new Date();

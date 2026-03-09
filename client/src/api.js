@@ -45,6 +45,8 @@ export const api = {
   getBackups: () => fetchApi('/admin/backups'),
   restoreBackup: (backupId) =>
     fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
+  clearTable: (table) =>
+    fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getStaffList: () => fetchApi('/auth/staff-list'),
   createStaff: (data) => fetchApi('/auth/staff', { method: 'POST', body: JSON.stringify(data) }),
@@ -67,6 +69,7 @@ export const api = {
   getUnpaidStudents: (month) =>
     fetchApi(month ? `/dashboard/unpaid?month=${encodeURIComponent(month)}` : '/dashboard/unpaid'),
   getUnscheduledLessonsStudents: () => fetchApi('/dashboard/unscheduled-lessons'),
+  getTodayLessons: () => fetchApi('/dashboard/today-lessons'),
   getDashboardMetrics: (from, to) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);

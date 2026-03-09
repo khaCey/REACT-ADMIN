@@ -124,14 +124,14 @@ export default function Students() {
   }, [highlightAddButton])
 
   useEffect(() => {
-    if (!guideAction || selectedStudentId !== null) return
+    if (!guideAction || selectedStudentId !== null || loading) return
     if (students.length === 0) {
       setError('Guide step needs at least one student record.')
       return
     }
     const target = pickGuideStudent(students)
     setGuideTargetStudentId(target?.ID ?? null)
-  }, [guideAction, selectedStudentId, students])
+  }, [guideAction, selectedStudentId, students, loading])
 
   useEffect(() => {
     if (guideTargetStudentId == null) return

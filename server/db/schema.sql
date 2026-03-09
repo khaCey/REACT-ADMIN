@@ -81,6 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NOT NULL DEFAULT 'regular';
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES students(id);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_mode VARCHAR(20) NOT NULL DEFAULT 'unknown';
 
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (

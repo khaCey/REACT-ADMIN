@@ -321,6 +321,38 @@ app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+const ADMIN_CLEARABLE_TABLES = new Set([
+  'backups',
+  'change_log',
+  'feature_flags',
+  'lessons',
+  'monthly_schedule',
+  'notification_reads',
+  'notifications',
+  'notes',
+  'payments',
+  'staff_shifts',
+  'stats',
+  'teacher_shift_extensions',
+  'teacher_schedules',
+]);
+
+/** Admin: empty a table (TRUNCATE). Admin only. */
+app.post('/api/admin/clear-table', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const table = String(req.body?.table || '').trim().toLowerCase();
+    if (!table) return res.status(400).json({ error: 'Table is required' });
+    if (!ADMIN_CLEARABLE_TABLES.has(table)) {
+      return res.status(400).json({ error: 'Table is not allowed to be cleared' });
+    }
+    await query(`TRUNCATE TABLE ${table} RESTART IDENTITY CASCADE`);
+    res.json({ ok: true, table });
+  } catch (err) {
+    console.error('[admin/clear-table]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to clear table' });
+  }
+});
+
 /** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); prior months are preserved. */
 app.post('/api/calendar-poll/sync', async (req, res) => {
   try {

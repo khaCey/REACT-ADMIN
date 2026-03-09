@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import FeatureListModal from './FeatureListModal'
 
 export default function Layout() {
+  const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [featureModalMode, setFeatureModalMode] = useState(null)
+  const isStudentsListPage = location.pathname === '/students'
 
   return (
     <>
@@ -23,7 +25,7 @@ export default function Layout() {
         }`}
       >
         <div className="p-6 w-full flex flex-col h-full min-h-0">
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className={`flex-1 min-h-0 flex flex-col ${isStudentsListPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
             <Outlet />
           </div>
         </div>

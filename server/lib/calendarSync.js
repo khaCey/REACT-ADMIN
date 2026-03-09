@@ -6,14 +6,32 @@ import { query } from '../db/index.js';
 
 /**
  * Upsert schedule rows into monthly_schedule. Returns { upserted, months }.
- * @param {Array<{eventID?: string, event_id?: string, title?: string, date?: string, start?: string, end?: string, status?: string, studentName?: string, student_name?: string, isKidsLesson?: boolean, is_kids_lesson?: boolean, teacherName?: string, teacher_name?: string, lessonKind?: string, lesson_kind?: string}>} data
+ * @param {Array<{eventID?: string, event_id?: string, title?: string, date?: string, start?: string, end?: string, status?: string, studentName?: string, student_name?: string, isKidsLesson?: boolean, is_kids_lesson?: boolean, teacherName?: string, teacher_name?: string, lessonKind?: string, lesson_kind?: string, lessonMode?: string, lesson_mode?: string}>} data
  */
 const LESSON_KIND_VALID = { regular: true, demo: true, owner: true };
+const LESSON_MODE_VALID = { cafe: true, online: true, unknown: true };
 
 function normalizeLessonKind(val) {
   if (val == null || val === '') return 'regular';
   const v = String(val).trim().toLowerCase();
   return LESSON_KIND_VALID[v] ? v : 'regular';
+}
+
+function parseLessonModeFromText(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\bcafe\b|カフェ/.test(t)) return 'cafe';
+  if (/\bonline\b|オンライン|\bzoom\b|ズーム|\bmeet\b/.test(t)) return 'online';
+  return 'unknown';
+}
+
+function normalizeLessonMode(val, title, location) {
+  if (val != null && val !== '') {
+    const v = String(val).trim().toLowerCase();
+    if (LESSON_MODE_VALID[v]) return v;
+  }
+  const byLocation = parseLessonModeFromText(location);
+  if (byLocation !== 'unknown') return byLocation;
+  return parseLessonModeFromText(title);
 }
 
 /** Normalize name for matching: trim and collapse internal spaces */
@@ -101,6 +119,11 @@ export async function upsertMonthlySchedule(data) {
     const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
     const lessonKind = normalizeLessonKind(r.lessonKind ?? r.lesson_kind);
+    const lessonMode = normalizeLessonMode(
+      r.lessonMode ?? r.lesson_mode,
+      title,
+      r.location ?? r.Location ?? r.lessonLocation ?? r.lesson_location ?? ''
+    );
 
     // Append date and optionally time so same rawEventId + same day + different times = unique rows
     let eventId;
@@ -114,11 +137,11 @@ export async function upsertMonthlySchedule(data) {
     }
 
     const studentId = nameToId.get(normalizeName(studentName)) ?? null;
-    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId });
+    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId });
   }
 
   let upserted = 0;
-  for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId } of rows) {
+  for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId } of rows) {
     // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
     if (date && /_\d{2}-\d{2}-\d{2}$/.test(eventId)) {
       const oldFormatId = eventId.replace(/_\d{2}-\d{2}-\d{2}$/, '');
@@ -128,12 +151,12 @@ export async function upsertMonthlySchedule(data) {
       );
     }
     await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, student_id = EXCLUDED.student_id`,
-      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, studentId]
+         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id`,
+      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId]
     );
     upserted++;
   }

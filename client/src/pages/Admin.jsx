@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Shield, Database, Download, RotateCcw } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2 } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
@@ -20,6 +20,26 @@ export default function Admin() {
   const [backupError, setBackupError] = useState('')
   const [restoreBackupId, setRestoreBackupId] = useState(null)
   const [restoreConfirming, setRestoreConfirming] = useState(false)
+  const [tableToClear, setTableToClear] = useState('monthly_schedule')
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [clearingTable, setClearingTable] = useState(false)
+  const [clearError, setClearError] = useState('')
+
+  const clearableTables = [
+    { value: 'monthly_schedule', label: 'monthly_schedule' },
+    { value: 'payments', label: 'payments' },
+    { value: 'notes', label: 'notes' },
+    { value: 'lessons', label: 'lessons' },
+    { value: 'teacher_schedules', label: 'teacher_schedules' },
+    { value: 'teacher_shift_extensions', label: 'teacher_shift_extensions' },
+    { value: 'staff_shifts', label: 'staff_shifts' },
+    { value: 'notifications', label: 'notifications' },
+    { value: 'notification_reads', label: 'notification_reads' },
+    { value: 'change_log', label: 'change_log' },
+    { value: 'stats', label: 'stats' },
+    { value: 'backups', label: 'backups' },
+    { value: 'feature_flags', label: 'feature_flags' },
+  ]
 
   const fetchBackups = useCallback(async () => {
     setBackupsLoading(true)
@@ -64,6 +84,22 @@ export default function Admin() {
       setBackupError(err.message || 'Restore failed')
     } finally {
       setRestoreConfirming(false)
+    }
+  }
+
+  const handleClearTableConfirm = async () => {
+    if (!tableToClear) return
+    setClearingTable(true)
+    setClearError('')
+    try {
+      await api.clearTable(tableToClear)
+      success(`Cleared table: ${tableToClear}`)
+      setClearConfirmOpen(false)
+      if (tableToClear === 'backups') await fetchBackups()
+    } catch (err) {
+      setClearError(err.message || 'Failed to clear table')
+    } finally {
+      setClearingTable(false)
     }
   }
 
@@ -148,6 +184,38 @@ export default function Admin() {
             Backfill past schedule
           </button>
         </section>
+
+        <section className="rounded-lg border border-rose-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
+            <Trash2 className="w-5 h-5 text-rose-600" />
+            Empty database table
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Permanently remove all rows from a selected table. This cannot be undone unless you restore a backup.
+          </p>
+          {clearError && <p className="text-sm text-red-600 mb-2">{clearError}</p>}
+          <div className="flex items-center gap-2">
+            <select
+              value={tableToClear}
+              onChange={(e) => setTableToClear(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white text-gray-800"
+            >
+              {clearableTables.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setClearConfirmOpen(true)}
+              className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium cursor-pointer flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Empty table
+            </button>
+          </div>
+        </section>
       </div>
 
       {showBackfillModal && (
@@ -162,6 +230,17 @@ export default function Admin() {
           confirming={restoreConfirming}
           onConfirm={handleRestoreConfirm}
           onClose={() => !restoreConfirming && setRestoreBackupId(null)}
+        />
+      )}
+      {clearConfirmOpen && (
+        <ConfirmActionModal
+          title="Empty table"
+          message={`This will permanently remove all rows from "${tableToClear}" and reset identity values. This action cannot be undone without restore. Continue?`}
+          confirmLabel="Empty table"
+          destructive
+          confirming={clearingTable}
+          onConfirm={handleClearTableConfirm}
+          onClose={() => !clearingTable && setClearConfirmOpen(false)}
         />
       )}
     </div>
