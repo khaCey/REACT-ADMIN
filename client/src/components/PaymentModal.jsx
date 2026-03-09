@@ -6,6 +6,7 @@ import { calculatePrice } from '../../../shared/feeTable.js'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import ConfirmActionModal from './ConfirmActionModal'
+import { useAuth } from '../context/AuthContext'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
@@ -24,6 +25,7 @@ function generateTransactionId() {
 export default function PaymentModal({ studentId, student, mode = 'add', payment = null, onSave, onClose }) {
   const { success } = useToast()
   const { activeGuideSlug } = useGuideTour()
+  const { staff: currentStaff } = useAuth()
   const preventDelete = !!activeGuideSlug
   const [form, setForm] = useState({
     transactionId: '',
@@ -50,6 +52,10 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
     return val
   }
 
+  const defaultStaffName = currentStaff?.name && String(currentStaff.name).trim()
+    ? String(currentStaff.name).trim()
+    : 'Staff'
+
   useEffect(() => {
     if (mode === 'edit' && payment) {
       const d = payment.Date || payment.date || ''
@@ -66,7 +72,7 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
         discount: String(payment.Discount ?? payment.discount ?? '0'),
         total: payment.Total ?? payment.price ?? '',
         method: payment.Method || payment.method || 'Card',
-        staff: payment.Staff || payment.staff || '',
+        staff: payment.Staff || payment.staff || defaultStaffName,
       })
     } else {
       setForm((f) => ({
@@ -74,11 +80,11 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
         transactionId: generateTransactionId(),
         date: new Date().toISOString().slice(0, 10),
         month: MONTHS[new Date().getMonth()],
-        staff: 'Staff',
+        staff: defaultStaffName,
         year: String(new Date().getFullYear()),
       }))
     }
-  }, [mode, payment])
+  }, [mode, payment, defaultStaffName])
 
   const discountNum = Number(form.discount) || 0
   const priceNum = Number(form.price) || 0

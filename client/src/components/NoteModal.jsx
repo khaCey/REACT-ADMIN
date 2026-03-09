@@ -4,10 +4,12 @@ import { STAFF_OPTIONS } from '../constants/staff'
 import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
+import { useAuth } from '../context/AuthContext'
 
 export default function NoteModal({ studentId, mode = 'add', note = null, onSave, onClose }) {
   const { success } = useToast()
   const { activeGuideSlug } = useGuideTour()
+  const { staff: currentStaff } = useAuth()
   const preventDelete = !!activeGuideSlug
   const [date, setDate] = useState('')
   const [staff, setStaff] = useState('Staff')
@@ -17,18 +19,22 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
   const [error, setError] = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
+  const defaultStaffName = currentStaff?.name && String(currentStaff.name).trim()
+    ? String(currentStaff.name).trim()
+    : 'Staff'
+
   useEffect(() => {
     if (mode === 'edit' && note) {
       const d = note.Date || note.date || ''
       setDate(d ? new Date(d).toISOString().slice(0, 10) : '')
-      setStaff(note.Staff || note.staff || '')
+      setStaff(note.Staff || note.staff || defaultStaffName)
       setNoteText(note.Note || note.note || '')
     } else {
       setDate(new Date().toISOString().slice(0, 10))
-      setStaff('Staff')
+      setStaff(defaultStaffName)
       setNoteText('')
     }
-  }, [mode, note])
+  }, [mode, note, defaultStaffName])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
