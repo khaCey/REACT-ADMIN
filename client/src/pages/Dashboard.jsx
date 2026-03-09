@@ -116,7 +116,7 @@ export default function Dashboard() {
   }, [fetchDashboard])
 
   return (
-    <div className="w-full flex flex-col h-full min-h-0 overflow-y-auto pr-1">
+    <div className="w-full flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
         <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <LayoutDashboard className="w-6 h-6 text-green-600" />
@@ -140,8 +140,8 @@ export default function Dashboard() {
       {loading ? (
         <p className="py-8 text-gray-500">Loading…</p>
       ) : metrics ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full min-h-0">
+          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm h-full min-h-0 flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Today's lessons</h3>
               <p className="text-xl font-semibold text-gray-700">
@@ -151,55 +151,56 @@ export default function Dashboard() {
             {todayLessons.length === 0 ? (
               <p className="text-sm text-gray-500 py-4">No lessons scheduled for today.</p>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-0 flex-1 min-h-0 overflow-y-auto pr-1">
                 {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => (
-                  <div key={hourLabel}>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">{hourLabel}</h4>
-                    {lessons.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/60 px-3 py-2 text-xs text-gray-400">
-                        No lessons
-                      </div>
-                    ) : (
-                      <div className={lessons.length === 1 ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-2'}>
-                        {lessons.map((lesson) => (
-                          <article
-                            key={`${lesson.event_id}_${lesson.student_name}`}
-                            role={lesson.student_id ? 'button' : undefined}
-                            tabIndex={lesson.student_id ? 0 : -1}
-                            onClick={() => {
-                              if (!lesson.student_id) return
-                              setSelectedStudentId(lesson.student_id)
-                            }}
-                            onKeyDown={(e) => {
-                              if (!lesson.student_id) return
-                              if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
-                            }}
-                            className={`rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 ${
-                              lesson.student_id ? 'cursor-pointer hover:bg-white hover:shadow-sm' : ''
-                            }`}
-                          >
-                            <p className="text-sm font-semibold text-gray-900 truncate">{lesson.student_name}</p>
-                            <div className="flex items-center justify-between mt-1">
-                              <span className="text-xs text-gray-600 truncate">{lesson.status || 'scheduled'}</span>
-                              <div className="flex items-center gap-1.5">
+                  <div key={hourLabel} className="h-[60px] p-0 m-0 flex items-start border-b border-gray-100">
+                    <div className="w-14 h-[60px] leading-[60px] text-sm font-semibold text-gray-700 p-0 m-0">
+                      {hourLabel}
+                    </div>
+                    <div className="flex-1 h-[60px] p-0 m-0">
+                      {lessons.length > 0 ? (
+                        <div className={lessons.length === 1 ? 'grid grid-cols-1 gap-1 h-[50px]' : 'grid grid-cols-1 sm:grid-cols-2 gap-1 h-[50px]'}>
+                          {lessons.map((lesson) => (
+                            <article
+                              key={`${lesson.event_id}_${lesson.student_name}`}
+                              role={lesson.student_id ? 'button' : undefined}
+                              tabIndex={lesson.student_id ? 0 : -1}
+                              onClick={() => {
+                                if (!lesson.student_id) return
+                                setSelectedStudentId(lesson.student_id)
+                              }}
+                              onKeyDown={(e) => {
+                                if (!lesson.student_id) return
+                                if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
+                              }}
+                              className={`h-[50px] rounded border border-gray-200 bg-gray-50 px-2 flex items-center justify-between overflow-hidden ${
+                                lesson.student_id ? 'cursor-pointer hover:bg-white' : ''
+                              }`}
+                            >
+                              <span className="text-sm font-semibold text-gray-900 truncate">{lesson.student_name}</span>
+                              <div className="flex items-center gap-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`inline-flex rounded px-1.5 py-0 text-xs font-medium ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 <span
-                                  className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
+                                  className={`inline-flex rounded px-1.5 py-0 text-xs font-medium ${
                                     lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                   }`}
                                 >
                                   {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
                               </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="h-[50px] rounded border border-dashed border-gray-200 bg-gray-50/60 px-2 flex items-center">
+                          <span className="text-xs text-gray-400">No lessons</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
