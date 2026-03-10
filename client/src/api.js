@@ -49,7 +49,13 @@ export const api = {
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getStaffList: () => fetchApi('/auth/staff-list'),
+  getStaff: () => fetchApi('/staff'),
+  updateStaff: (id, data) => fetchApi(`/staff/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteStaff: (id) => fetchApi(`/staff/${id}`, { method: 'DELETE' }),
   createStaff: (data) => fetchApi('/auth/staff', { method: 'POST', body: JSON.stringify(data) }),
+  getShiftsWeek: (weekStart) =>
+    fetchApi(`/shifts/week?week_start=${encodeURIComponent(weekStart)}`),
+  assignShift: (body) => fetchApi('/shifts/assign', { method: 'PUT', body: JSON.stringify(body) }),
   getUnreadNotifications: (limit = 20) =>
     fetchApi(`/notifications/unread?limit=${encodeURIComponent(limit)}`),
   markNotificationRead: (id) =>

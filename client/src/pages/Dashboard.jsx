@@ -9,7 +9,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-import { LayoutDashboard } from 'lucide-react'
+import { LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 
@@ -48,7 +48,7 @@ function formatJapaneseDateLabel(yyyyMmDd) {
   const date = new Date(y, m - 1, d)
   const weekdays = ['日', '月', '火', '水', '木', '金', '土']
   const w = weekdays[date.getDay()] || ''
-  return `${w} - ${d}日${m}月`
+  return `${w} - ${m}月${d}日`
 }
 
 function getHourLabel(startTime) {
@@ -57,6 +57,35 @@ function getHourLabel(startTime) {
 }
 
 const HOURLY_TIMELINE = Array.from({ length: 11 }, (_, i) => `${String(10 + i).padStart(2, '0')}:00`)
+
+const MIN_CHART_END_MONTH = '2015-01'
+const CHART_RANGE_YEARS_OPTIONS = [1, 2, 3, 4, 5]
+
+function getCurrentMonthYYYYMM() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Subtract n months from YYYY-MM, return YYYY-MM */
+function subtractMonths(yyyyMm, n) {
+  const [y, m] = yyyyMm.split('-').map(Number)
+  const d = new Date(y, m - 1 - n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Add one month to YYYY-MM, return YYYY-MM */
+function addOneMonth(yyyyMm) {
+  const [y, m] = yyyyMm.split('-').map(Number)
+  const d = new Date(y, m, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function formatEndMonthLabel(yyyyMm) {
+  if (!yyyyMm) return ''
+  const [y, m] = yyyyMm.split('-').map(Number)
+  const d = new Date(y, m - 1, 1)
+  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+}
 
 function groupLessonsByHour(lessons) {
   const groups = new Map()
@@ -83,6 +112,9 @@ function lessonModeLabel(mode) {
 }
 
 export default function Dashboard() {
+  const currentMonth = getCurrentMonthYYYYMM()
+  const [chartEndMonth, setChartEndMonth] = useState(() => currentMonth)
+  const [chartRangeYears, setChartRangeYears] = useState(1)
   const [metrics, setMetrics] = useState(null)
   const [todayLessons, setTodayLessons] = useState([])
   const [todayDate, setTodayDate] = useState('')
@@ -93,9 +125,12 @@ export default function Dashboard() {
   const fetchDashboard = useCallback(async () => {
     setLoading(true)
     setError('')
+    const monthsBack = chartRangeYears * 12 - 1
+    const from = subtractMonths(chartEndMonth, monthsBack)
+    const to = chartEndMonth
     try {
       const [metricsData, todayData] = await Promise.all([
-        api.getDashboardMetrics(),
+        api.getDashboardMetrics(from, to),
         api.getTodayLessons(),
       ])
       setMetrics(metricsData)
@@ -109,7 +144,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [chartEndMonth, chartRangeYears])
 
   useEffect(() => {
     fetchDashboard()
@@ -160,7 +195,9 @@ export default function Dashboard() {
                     <div className="flex-1 h-[60px] p-0 m-0">
                       {lessons.length > 0 ? (
                         <div className={lessons.length === 1 ? 'grid grid-cols-1 gap-1 h-[50px]' : 'grid grid-cols-1 sm:grid-cols-2 gap-1 h-[50px]'}>
-                          {lessons.map((lesson) => (
+                          {lessons.map((lesson) => {
+                            const isCancelled = (lesson.status || '').toLowerCase() === 'cancelled'
+                            return (
                             <article
                               key={`${lesson.event_id}_${lesson.student_name}`}
                               role={lesson.student_id ? 'button' : undefined}
@@ -173,27 +210,32 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`h-[50px] rounded border border-gray-200 bg-gray-50 px-2 flex items-center justify-between overflow-hidden ${
-                                lesson.student_id ? 'cursor-pointer hover:bg-white' : ''
+                              className={`h-[50px] rounded border px-2 flex items-center justify-between overflow-hidden ${
+                                isCancelled
+                                  ? 'opacity-60 border-gray-200 bg-gray-100 text-gray-500'
+                                  : `border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`
                               }`}
                             >
-                              <span className="text-sm font-semibold text-gray-900 truncate">{lesson.student_name}</span>
+                              <span className={`text-sm font-semibold truncate ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                                {lesson.student_name}
+                                {isCancelled && <span className="ml-1 text-xs font-normal">(Cancelled)</span>}
+                              </span>
                               <div className="flex items-center gap-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`inline-flex rounded px-1.5 py-0 text-xs font-medium ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`inline-flex rounded px-1.5 py-0 text-xs font-medium ${isCancelled ? 'bg-gray-200 text-gray-500' : lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 <span
                                   className={`inline-flex rounded px-1.5 py-0 text-xs font-medium ${
-                                    lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                    isCancelled ? 'bg-gray-200 text-gray-500' : lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                   }`}
                                 >
                                   {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
                               </div>
                             </article>
-                          ))}
+                          )})}
                         </div>
                       ) : (
                         <div className="h-[50px] rounded border border-dashed border-gray-200 bg-gray-50/60 px-2 flex items-center">
@@ -208,7 +250,50 @@ export default function Dashboard() {
           </section>
 
           <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 mb-1">Metrics per month</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Metrics per month ({chartRangeYears} {chartRangeYears === 1 ? 'year' : 'years'} ending {formatEndMonthLabel(chartEndMonth)})
+              </h3>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <div className="flex items-center gap-1">
+                <span className="text-sm text-gray-600">Range:</span>
+                <select
+                  value={chartRangeYears}
+                  onChange={(e) => setChartRangeYears(Number(e.target.value))}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900"
+                >
+                  {CHART_RANGE_YEARS_OPTIONS.map((years) => (
+                    <option key={years} value={years}>
+                      {years} {years === 1 ? 'year' : 'years'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setChartEndMonth((m) => (m <= MIN_CHART_END_MONTH ? m : subtractMonths(m, 1)))}
+                  disabled={chartEndMonth <= MIN_CHART_END_MONTH}
+                  className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <span className="min-w-[5.5rem] text-center text-sm font-medium text-gray-900">
+                  {formatEndMonthLabel(chartEndMonth)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setChartEndMonth((m) => (m >= currentMonth ? m : addOneMonth(m)))}
+                  disabled={chartEndMonth >= currentMonth}
+                  className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
             <p className="text-sm text-gray-500 mb-4">
               Regular students (with at least one regular lesson), demo lessons, and students who made their first payment in that month.
             </p>

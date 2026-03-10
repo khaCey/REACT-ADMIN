@@ -8,6 +8,8 @@ export default function Sidebar({ collapsed }) {
   const { staff } = useAuth()
   const path = location.pathname
   const isAdmin = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
+  const isOperator = !!staff?.is_operator
+  const canAccessStaff = isAdmin || isOperator
 
   return (
     <aside
@@ -44,6 +46,7 @@ export default function Sidebar({ collapsed }) {
               <span>Students</span>
             </Link>
           </li>
+          {canAccessStaff && (
           <li>
             <Link
               to="/staff"
@@ -57,6 +60,7 @@ export default function Sidebar({ collapsed }) {
               <span>Staff</span>
             </Link>
           </li>
+          )}
           {!NOTIFICATIONS_WIP_DISABLED && (
           <li>
             <Link

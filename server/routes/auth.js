@@ -5,7 +5,7 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { query } from '../db/index.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdminOrOperator } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'student-admin-secret-change-in-production';
@@ -21,8 +21,8 @@ router.get('/staff-list', async (req, res) => {
   }
 });
 
-/** POST /api/auth/staff - add new staff (no auth required, for login page) */
-router.post('/staff', async (req, res) => {
+/** POST /api/auth/staff - add new staff (admin or operator only) */
+router.post('/staff', requireAuth, requireAdminOrOperator, async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
     const password = String(req.body?.password || '').trim() || DEFAULT_STAFF_PASSWORD;
@@ -31,8 +31,8 @@ router.post('/staff', async (req, res) => {
     }
     const hash = await bcrypt.hash(password, 10);
     const result = await query(
-      `INSERT INTO staff (name, password_hash, is_admin)
-       VALUES ($1, $2, FALSE)
+      `INSERT INTO staff (name, password_hash, is_admin, is_operator, staff_type, active)
+       VALUES ($1, $2, FALSE, FALSE, 'japanese_staff', TRUE)
        ON CONFLICT (name) DO NOTHING
        RETURNING id, name`,
       [name, hash]
@@ -56,7 +56,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Name required' });
     }
     const result = await query(
-      'SELECT id, name, is_admin FROM staff WHERE name = $1',
+      'SELECT id, name, is_admin, is_operator FROM staff WHERE name = $1',
       [String(name).trim()]
     );
     if (result.rows.length === 0) {
@@ -68,10 +68,10 @@ router.post('/login', async (req, res) => {
       [staff.id]
     );
     const token = jwt.sign(
-      { id: staff.id, name: staff.name, is_admin: !!staff.is_admin },
+      { id: staff.id, name: staff.name, is_admin: !!staff.is_admin, is_operator: !!staff.is_operator },
       JWT_SECRET
     );
-    res.json({ token, staff: { id: staff.id, name: staff.name, is_admin: !!staff.is_admin } });
+    res.json({ token, staff: { id: staff.id, name: staff.name, is_admin: !!staff.is_admin, is_operator: !!staff.is_operator } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -120,15 +120,17 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
     const payload = jwt.verify(token, JWT_SECRET);
-    const result = await query('SELECT id, name, is_admin FROM staff WHERE id = $1', [payload.id]);
+    const result = await query('SELECT id, name, is_admin, is_operator FROM staff WHERE id = $1', [payload.id]);
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Staff not found' });
     }
+    const row = result.rows[0];
     res.json({
       staff: {
-        id: result.rows[0].id,
-        name: result.rows[0].name,
-        is_admin: !!result.rows[0].is_admin,
+        id: row.id,
+        name: row.name,
+        is_admin: !!row.is_admin,
+        is_operator: !!row.is_operator,
       },
     });
   } catch (err) {

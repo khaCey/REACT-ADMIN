@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
+import StaffRoute from './components/StaffRoute'
 import Dashboard from './pages/Dashboard'
 import Students from './pages/Students'
 import StudentDetail from './pages/StudentDetail'
@@ -30,7 +31,7 @@ function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="students" element={<Students />} />
         <Route path="students/:id" element={<StudentDetail />} />
-        <Route path="staff" element={<Staff />} />
+        <Route path="staff" element={<StaffRoute><Staff /></StaffRoute>} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="change-history" element={<ChangeHistory />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />

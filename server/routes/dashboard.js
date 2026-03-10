@@ -222,7 +222,6 @@ router.get('/today-lessons', async (_req, res) => {
          LIMIT 1
        ) sm ON m.student_id IS NULL
        WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
-         AND (m.status IS NULL OR m.status <> 'cancelled')
        ORDER BY m.start NULLS LAST, m.student_name`
     );
 

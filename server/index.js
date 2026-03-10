@@ -31,6 +31,8 @@ import scheduleRouter from './routes/schedule.js';
 import changeLogRouter from './routes/changeLog.js';
 import calendarRouter, { registerWatch } from './routes/calendar.js';
 import authRouter from './routes/auth.js';
+import staffRouter from './routes/staff.js';
+import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
@@ -206,6 +208,8 @@ app.use('/api/lessons', lessonsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/config', configRouter);
 app.use('/api/calendar', calendarRouter);
+app.use('/api/staff', staffRouter);
+app.use('/api/shifts', shiftsRouter);
 
 app.get('/api/schedule/week', async (req, res) => {
   try {
