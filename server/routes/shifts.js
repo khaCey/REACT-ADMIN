@@ -1,6 +1,6 @@
 /**
  * Shift management: week view and assign (admin or operator).
- * Shift types: weekday_morning (Tue–Fri 10–16), weekday_evening (Tue–Fri 16–21), weekend (Sat/Sun/Mon 10–21).
+ * Shift types: weekday_morning (Tue–Fri 10–16), weekday_evening (Tue–Fri 16–21), weekend (Sat/Sun/Mon 10–17).
  */
 import { Router } from 'express';
 import { query } from '../db/index.js';
@@ -11,7 +11,7 @@ const router = Router();
 const SHIFT_DEFAULTS = {
   weekday_morning: { start: '10:00', end: '16:00' },
   weekday_evening: { start: '16:00', end: '21:00' },
-  weekend: { start: '10:00', end: '21:00' },
+  weekend: { start: '10:00', end: '17:00' },
 };
 
 /** Normalize to YYYY-MM-DD (node-pg may return Date objects). */
@@ -43,7 +43,7 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
     if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
       return res.status(400).json({ error: 'Query week_start required (YYYY-MM-DD)' });
     }
-    const startDate = new Date(weekStart + 'T12:00:00');
+    const startDate = new Date(weekStart + 'T12:00:00Z');
     if (isNaN(startDate.getTime())) {
       return res.status(400).json({ error: 'Invalid week_start date' });
     }
@@ -59,9 +59,9 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
     const slots = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(startDate);
-      d.setDate(d.getDate() + i);
+      d.setUTCDate(d.getUTCDate() + i);
       const dateStr = d.toISOString().slice(0, 10);
-      const dow = d.getDay();
+      const dow = d.getUTCDay();
       if ([2, 3, 4, 5].includes(dow)) {
         slots.push({ date: dateStr, shift_type: 'weekday_morning', ...SHIFT_DEFAULTS.weekday_morning });
         slots.push({ date: dateStr, shift_type: 'weekday_evening', ...SHIFT_DEFAULTS.weekday_evening });
@@ -74,8 +74,8 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
     for (const row of result.rows) {
       const dateStr = toDateStr(row.date);
       if (!dateStr) continue;
-      const d = new Date(dateStr + 'T12:00:00');
-      const dow = d.getDay();
+      const d = new Date(dateStr + 'T12:00:00Z');
+      const dow = d.getUTCDay();
       const startStr = row.start_time ? String(row.start_time).slice(0, 5) : '';
       const endStr = row.end_time ? String(row.end_time).slice(0, 5) : '';
       const shiftType = getShiftType(dow, startStr, endStr);
@@ -136,8 +136,8 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
     }
     // teacherName remains null to clear assignment
 
-    const d = new Date(dateStr + 'T12:00:00');
-    const dow = d.getDay();
+    const d = new Date(dateStr + 'T12:00:00Z');
+    const dow = d.getUTCDay();
     const defaults = SHIFT_DEFAULTS[shiftType];
     if (!defaults) return res.status(400).json({ error: 'Invalid shift_type' });
 

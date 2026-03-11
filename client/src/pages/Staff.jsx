@@ -28,11 +28,19 @@ function getMonday(d) {
   return date
 }
 
+/** Format a Date as YYYY-MM-DD in local calendar date */
+function toLocalDateString(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function formatWeekLabel(weekStart) {
-  const mon = new Date(weekStart + 'T12:00:00')
+  const mon = new Date(weekStart + 'T12:00:00Z')
   const sun = new Date(mon)
-  sun.setDate(sun.getDate() + 6)
-  return `${mon.getDate()} ${mon.toLocaleDateString(undefined, { month: 'short' })} – ${sun.getDate()} ${sun.toLocaleDateString(undefined, { month: 'short' })} ${sun.getFullYear()}`
+  sun.setUTCDate(sun.getUTCDate() + 6)
+  return `${mon.getUTCDate()} ${mon.toLocaleDateString(undefined, { month: 'short' })} – ${sun.getUTCDate()} ${sun.toLocaleDateString(undefined, { month: 'short' })} ${sun.getUTCFullYear()}`
 }
 
 const STAFF_TYPE_LABELS = { japanese_staff: 'Japanese Staff', english_teacher: 'English Teacher' }
@@ -47,7 +55,7 @@ export default function Staff() {
   const [weekSlots, setWeekSlots] = useState([])
   const [weekStart, setWeekStart] = useState(() => {
     const m = getMonday(new Date())
-    return m.toISOString().slice(0, 10)
+    return toLocalDateString(m)
   })
   const [loading, setLoading] = useState(true)
   const [loadingShifts, setLoadingShifts] = useState(false)
@@ -117,11 +125,11 @@ export default function Staff() {
     [weekSlots]
   )
   const weekDates = useCallback(() => {
-    const mon = new Date(weekStart + 'T12:00:00')
+    const mon = new Date(weekStart + 'T12:00:00Z')
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(mon)
-      d.setDate(d.getDate() + i)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      d.setUTCDate(d.getUTCDate() + i)
+      return d.toISOString().slice(0, 10)
     })
   }, [weekStart])
 
@@ -207,8 +215,8 @@ export default function Staff() {
               <button
                 type="button"
                 onClick={() => {
-                  const m = getMonday(new Date(weekStart + 'T12:00:00'))
-                  m.setDate(m.getDate() - 7)
+                  const m = new Date(weekStart + 'T12:00:00Z')
+                  m.setUTCDate(m.getUTCDate() - 7)
                   setWeekStart(m.toISOString().slice(0, 10))
                 }}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
@@ -222,8 +230,8 @@ export default function Staff() {
               <button
                 type="button"
                 onClick={() => {
-                  const m = getMonday(new Date(weekStart + 'T12:00:00'))
-                  m.setDate(m.getDate() + 7)
+                  const m = new Date(weekStart + 'T12:00:00Z')
+                  m.setUTCDate(m.getUTCDate() + 7)
                   setWeekStart(m.toISOString().slice(0, 10))
                 }}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
@@ -242,12 +250,12 @@ export default function Staff() {
                     <tr className="bg-gray-50">
                       <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700 w-40">Shift</th>
                       {dates.map((date) => {
-                        const d = new Date(date + 'T12:00:00')
-                        const dayIdx = d.getDay()
+                        const d = new Date(date + 'T12:00:00Z')
+                        const dayIdx = d.getUTCDay()
                         const name = DAY_NAMES[dayIdx === 0 ? 6 : dayIdx - 1]
                         return (
                           <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-[140px]">
-                            {name} {d.getDate()}
+                            {name} {d.getUTCDate()}
                           </th>
                         )
                       })}
@@ -263,8 +271,8 @@ export default function Staff() {
                           {label}
                         </td>
                         {dates.map((date) => {
-                          const d = new Date(date + 'T12:00:00')
-                          const dow = d.getDay()
+                          const d = new Date(date + 'T12:00:00Z')
+                          const dow = d.getUTCDay()
                           const isWeekend = [0, 1, 6].includes(dow)
                           const isWeekday = [2, 3, 4, 5].includes(dow)
                           const shiftType =
@@ -421,7 +429,7 @@ export default function Staff() {
 
 function AdjustTimesForm({ slot, onSave, onClose }) {
   const [start, setStart] = useState(slot?.start_time?.slice(0, 5) ?? '10:00')
-  const [end, setEnd] = useState(slot?.end_time?.slice(0, 5) ?? '21:00')
+  const [end, setEnd] = useState(slot?.end_time?.slice(0, 5) ?? '17:00')
 
   return (
     <div className="mt-2 p-2 rounded border border-gray-200 bg-white space-y-2">

@@ -178,6 +178,7 @@ router.get('/today-lessons', async (_req, res) => {
          m.event_id,
          m.student_name,
          COALESCE(m.student_id, sm.id) AS student_id,
+         sg.group_type,
          m.status,
          COALESCE(
            NULLIF(lower(trim(m.lesson_mode)), ''),
@@ -221,6 +222,7 @@ router.get('/today-lessons', async (_req, res) => {
          ORDER BY s.id
          LIMIT 1
        ) sm ON m.student_id IS NULL
+       LEFT JOIN students sg ON sg.id = COALESCE(m.student_id, sm.id)
        WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
        ORDER BY m.start NULLS LAST, m.student_name`
     );
