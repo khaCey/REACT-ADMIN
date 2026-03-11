@@ -213,24 +213,24 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`h-[50px] rounded border px-2 flex items-center justify-between overflow-hidden ${colSpan} ${
+                              className={`h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroup ? 'px-1' : 'px-2'} ${colSpan} ${
                                 isCancelled
                                   ? 'opacity-60 border-gray-200 bg-gray-100 text-gray-500'
                                   : `border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`
                               }`}
                             >
-                              <span className={`text-sm font-semibold truncate ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                              <span className={`truncate font-semibold ${isGroup ? 'text-[9px]' : 'text-sm'} ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
                                 {lesson.student_name}
-                                {isCancelled && <span className="ml-1 text-xs font-normal">(Cancelled)</span>}
+                                {isCancelled && <span className={isGroup ? 'ml-0.5 text-[8px] font-normal' : 'ml-1 text-xs font-normal'}>(Cancelled)</span>}
                               </span>
                               <div className="flex items-center gap-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`inline-flex rounded px-1.5 py-0 font-medium ${isGroup ? 'text-[10px]' : 'text-xs'} ${isCancelled ? 'bg-gray-200 text-gray-500' : lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${isCancelled ? 'bg-gray-200 text-gray-500' : lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 <span
-                                  className={`inline-flex rounded px-1.5 py-0 font-medium ${isGroup ? 'text-[10px]' : 'text-xs'} ${
+                                  className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${
                                     isCancelled ? 'bg-gray-200 text-gray-500' : lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                   }`}
                                 >
