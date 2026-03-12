@@ -117,7 +117,13 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
       const override = overridesByKey[key];
       let startTime = s.start;
       let endTime = s.end;
-      if (override?.start_time) startTime = override.start_time;
+      if (override?.start_time) {
+        if (s.shift_type === 'weekday_evening' && override.start_time < '14:00') {
+          // Ignore invalid evening override (e.g. 12:00 from stale link); keep default 16:00
+        } else {
+          startTime = override.start_time;
+        }
+      }
       if (override?.end_time) endTime = override.end_time;
       if (assigned?.start_time) startTime = assigned.start_time;
       if (assigned?.end_time) endTime = assigned.end_time;

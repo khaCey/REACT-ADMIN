@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useAuth } from '../context/AuthContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
+import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
 
 function formatShiftTime(iso) {
   if (!iso) return null
@@ -64,6 +65,7 @@ export default function Staff() {
   })
   const [loading, setLoading] = useState(true)
   const [loadingShifts, setLoadingShifts] = useState(false)
+  const [shiftLoadError, setShiftLoadError] = useState(null)
   const [error, setError] = useState(null)
   const [showAddStaffModal, setShowAddStaffModal] = useState(false)
   const [selectedStaff, setSelectedStaff] = useState(null)
@@ -79,10 +81,17 @@ export default function Staff() {
 
   const loadWeek = useCallback(() => {
     setLoadingShifts(true)
+    setShiftLoadError(null)
     api
       .getShiftsWeek(weekStart)
-      .then((res) => setWeekSlots(res.week || []))
-      .catch(() => setWeekSlots([]))
+      .then((res) => {
+        setWeekSlots(res.week || [])
+        setShiftLoadError(null)
+      })
+      .catch((e) => {
+        setShiftLoadError(e?.message || 'Failed to refresh shifts')
+        // Keep previous weekSlots so the table does not disappear
+      })
       .finally(() => setLoadingShifts(false))
   }, [weekStart])
 
@@ -246,6 +255,12 @@ export default function Staff() {
               </button>
             </div>
 
+            {shiftLoadError && (
+              <div className="mb-3 py-2 px-3 rounded-lg bg-amber-50 text-amber-800 text-sm">
+                {shiftLoadError}
+              </div>
+            )}
+
             {loadingShifts ? (
               <p className="py-4 text-gray-500 text-sm">Loading shifts…</p>
             ) : (
@@ -346,15 +361,6 @@ export default function Staff() {
                                     {isAdjusting ? 'Cancel' : 'Adjust'}
                                   </button>
                                 </div>
-                                {isAdjusting && adjustSlot && adjustSlot.date === date && adjustSlot.shift_type === shiftType && (
-                                  <AdjustTimesForm
-                                    slot={adjustSlot}
-                                    onSave={(start, end) => {
-                                      handleAssignShift(adjustSlot, adjustSlot.staff_name, start, end)
-                                    }}
-                                    onClose={() => setAdjustSlot(null)}
-                                  />
-                                )}
                               </div>
                             </td>
                           )
@@ -428,48 +434,16 @@ export default function Staff() {
           }}
         />
       )}
-    </div>
-  )
-}
 
-function AdjustTimesForm({ slot, onSave, onClose }) {
-  const [start, setStart] = useState(slot?.start_time?.slice(0, 5) ?? '10:00')
-  const [end, setEnd] = useState(slot?.end_time?.slice(0, 5) ?? '17:00')
-
-  return (
-    <div className="mt-2 p-2 rounded border border-gray-200 bg-white space-y-2">
-      <div className="flex gap-2 items-center">
-        <label className="text-xs text-gray-600">Start</label>
-        <input
-          type="time"
-          value={start}
-          onChange={(e) => setStart(e.target.value)}
-          className="text-sm border border-gray-300 rounded px-2 py-1"
+      {adjustSlot && (
+        <AdjustShiftTimeModal
+          slot={adjustSlot}
+          onSave={(start, end) => {
+            handleAssignShift(adjustSlot, adjustSlot.staff_name, start, end)
+          }}
+          onClose={() => setAdjustSlot(null)}
         />
-        <label className="text-xs text-gray-600">End</label>
-        <input
-          type="time"
-          value={end}
-          onChange={(e) => setEnd(e.target.value)}
-          className="text-sm border border-gray-300 rounded px-2 py-1"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => onSave(start, end)}
-          className="px-2 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer"
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 cursor-pointer"
-        >
-          Cancel
-        </button>
-      </div>
+      )}
     </div>
   )
 }
