@@ -94,6 +94,12 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
     const week = slots.map((s) => {
       const key = `${s.date}:${s.shift_type}`;
       const assigned = byKey[key];
+      let startTime = assigned?.start_time ?? s.start;
+      let endTime = assigned?.end_time ?? s.end;
+      if (s.shift_type === 'weekend' && startTime === '16:00' && endTime === '21:00') {
+        startTime = SHIFT_DEFAULTS.weekend.start;
+        endTime = SHIFT_DEFAULTS.weekend.end;
+      }
       return {
         date: s.date,
         shift_type: s.shift_type,
@@ -101,8 +107,8 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
         default_start: s.start,
         default_end: s.end,
         staff_name: assigned?.staff_name ?? null,
-        start_time: assigned?.start_time ?? s.start,
-        end_time: assigned?.end_time ?? s.end,
+        start_time: startTime,
+        end_time: endTime,
       };
     });
 

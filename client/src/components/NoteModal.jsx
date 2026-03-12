@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { STAFF_OPTIONS } from '../constants/staff'
+import { formatDateTimeUTC } from '../utils/format'
 import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
@@ -46,14 +47,12 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
           'Student ID': studentId,
           Staff: staff,
           Note: noteText,
-          Date: date || undefined,
         })
         success('Note created')
       } else {
         await api.updateNote(note.ID, {
           Staff: staff,
           Note: noteText,
-          Date: date,
         })
         success('Note updated')
       }
@@ -109,13 +108,18 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
           <div>
             <label className="block text-gray-600 mb-1">Date</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
-            />
+            {mode === 'edit' && note ? (
+              <p className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700" aria-readonly>
+                {formatDateTimeUTC(note.Date || note.date)}
+              </p>
+            ) : (
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2"
+              />
+            )}
           </div>
           <div>
             <label className="block text-gray-600 mb-1">Staff</label>

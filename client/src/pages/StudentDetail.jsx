@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { api } from '../api'
-import { formatMonth, formatDate } from '../utils/format'
+import { formatMonth, formatDate, formatDateUTC } from '../utils/format'
 
 function StatusBadge({ status }) {
   const cls =
@@ -135,7 +135,7 @@ export default function StudentDetail() {
               <tbody>
                 {notes.slice(0, 10).map((n) => (
                   <tr key={n.ID}>
-                    <td className="min-w-[7rem] whitespace-nowrap">{formatDate(n.Date)}</td>
+                    <td className="min-w-[7rem] whitespace-nowrap">{formatDateUTC(n.Date)}</td>
                     <td>{n.Staff}</td>
                     <td>{n.Note}</td>
                   </tr>

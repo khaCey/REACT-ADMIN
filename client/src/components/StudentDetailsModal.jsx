@@ -2,7 +2,7 @@ import { useState, useEffect, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
-import { formatMonth, formatNumber, formatDate } from '../utils/format'
+import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import PaymentModal from './PaymentModal'
 import NoteModal from './NoteModal'
 import EditStudentModal from './EditStudentModal'
@@ -356,7 +356,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                                 setNoteModal({ mode: 'edit', note: n })
                               }}
                             >
-                              <td className="px-3 py-2 whitespace-nowrap">{formatDate(n.Date)}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">{formatDateUTC(n.Date)}</td>
                               <td className="px-3 py-2 break-words align-top">{n.Note}</td>
                               <td className="px-3 py-2 whitespace-nowrap">{n.Staff}</td>
                             </tr>

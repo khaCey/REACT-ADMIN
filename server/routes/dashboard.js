@@ -224,6 +224,7 @@ router.get('/today-lessons', async (_req, res) => {
        ) sm ON m.student_id IS NULL
        LEFT JOIN students sg ON sg.id = COALESCE(m.student_id, sm.id)
        WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
+         AND (m.status IS NULL OR lower(trim(m.status)) <> 'cancelled')
        ORDER BY m.start NULLS LAST, m.student_name`
     );
 

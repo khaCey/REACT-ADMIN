@@ -45,6 +45,11 @@ function formatWeekLabel(weekStart) {
 
 const STAFF_TYPE_LABELS = { japanese_staff: 'Japanese Staff', english_teacher: 'English Teacher' }
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const SHIFT_DEFAULT_TIMES = {
+  weekday_morning: { start: '10:00', end: '16:00' },
+  weekday_evening: { start: '16:00', end: '21:00' },
+  weekend: { start: '10:00', end: '17:00' },
+}
 
 export default function Staff() {
   const { staff: authStaff } = useAuth()
@@ -321,31 +326,31 @@ export default function Staff() {
                                     </option>
                                   ))}
                                 </select>
-                                {slot?.staff_name && (
-                                  <div className="flex items-center gap-1 text-xs text-gray-500">
-                                    <Clock className="w-3.5 h-3.5" />
-                                    <span>
-                                      {slot.start_time}–{slot.end_time}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setAdjustSlot(
-                                          isAdjusting ? null : { date, shift_type: shiftType, ...slot }
-                                        )
-                                      }}
-                                      className="text-green-600 hover:underline cursor-pointer"
-                                    >
-                                      {isAdjusting ? 'Cancel' : 'Adjust'}
-                                    </button>
-                                  </div>
-                                )}
-                                {isAdjusting && slot && (
+                                <div className="flex items-center gap-1 text-xs text-gray-500">
+                                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                                  <span>
+                                    {(slot?.start_time ?? SHIFT_DEFAULT_TIMES[shiftType]?.start ?? '—')}–{(slot?.end_time ?? SHIFT_DEFAULT_TIMES[shiftType]?.end ?? '—')}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const defaults = SHIFT_DEFAULT_TIMES[shiftType]
+                                      const slotData = slot
+                                        ? { ...slot, date, shift_type: shiftType }
+                                        : { date, shift_type: shiftType, start_time: defaults?.start, end_time: defaults?.end }
+                                      setAdjustSlot(isAdjusting ? null : slotData)
+                                    }}
+                                    className="text-green-600 hover:underline cursor-pointer shrink-0"
+                                  >
+                                    {isAdjusting ? 'Cancel' : 'Adjust'}
+                                  </button>
+                                </div>
+                                {isAdjusting && adjustSlot && adjustSlot.date === date && adjustSlot.shift_type === shiftType && (
                                   <AdjustTimesForm
-                                    slot={slot}
+                                    slot={adjustSlot}
                                     onSave={(start, end) => {
-                                      handleAssignShift(slot, slot.staff_name, start, end)
+                                      handleAssignShift(adjustSlot, adjustSlot.staff_name, start, end)
                                     }}
                                     onClose={() => setAdjustSlot(null)}
                                   />

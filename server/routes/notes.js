@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
       sql += ' WHERE student_id = $1';
       params.push(student_id);
     }
-    sql += ' ORDER BY date DESC';
+    sql += ' ORDER BY date DESC, id DESC';
     const result = await query(sql, params);
     res.json(result.rows.map((r) => ({
       ID: r.id,
@@ -32,13 +32,12 @@ router.post('/', async (req, res) => {
     const body = req.body;
     const result = await query(
       `INSERT INTO notes (student_id, staff, note, date)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+       VALUES ($1, $2, $3, NOW())
        RETURNING *`,
       [
         body['Student ID'] ?? body.student_id,
         body.Staff ?? body.staff ?? '',
         body.Note ?? body.note ?? '',
-        body.Date ?? body.date ?? null,
       ]
     );
     const newRow = result.rows[0];
@@ -62,9 +61,9 @@ router.put('/:id', async (req, res) => {
     }
     const oldRow = oldResult.rows[0];
     await query(
-      `UPDATE notes SET staff = COALESCE($2, staff), note = COALESCE($3, note), date = COALESCE($4::timestamptz, date)
+      `UPDATE notes SET staff = COALESCE($2, staff), note = COALESCE($3, note)
        WHERE id = $1`,
-      [id, body.Staff ?? body.staff, body.Note ?? body.note, body.Date ?? body.date]
+      [id, body.Staff ?? body.staff, body.Note ?? body.note]
     );
     const newRow = (await query('SELECT * FROM notes WHERE id = $1', [id])).rows[0];
     await logChange(

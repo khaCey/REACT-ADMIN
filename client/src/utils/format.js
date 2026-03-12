@@ -30,3 +30,29 @@ export function formatDate(val) {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${mo}-${day}`
 }
+
+const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** Format ISO date string as YYYY-MM-DD using UTC components (date only, no time) */
+export function formatDateUTC(val) {
+  if (!val) return ''
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return String(val)
+  const y = d.getUTCFullYear()
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${mo}-${day}`
+}
+
+/** Format ISO date string as "4 Mar 2026, 15:30 UTC" using UTC components */
+export function formatDateTimeUTC(val) {
+  if (!val) return ''
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return String(val)
+  const day = d.getUTCDate()
+  const month = MONTH_NAMES_SHORT[d.getUTCMonth()] || ''
+  const year = d.getUTCFullYear()
+  const h = String(d.getUTCHours()).padStart(2, '0')
+  const m = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${day} ${month} ${year}, ${h}:${m} UTC`
+}
