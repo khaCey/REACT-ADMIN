@@ -92,6 +92,15 @@ CREATE TABLE IF NOT EXISTS teacher_schedules (
   PRIMARY KEY (date, teacher_name, start_time)
 );
 
+-- Shift slot time overrides (custom start/end when no staff assigned, or to show adjusted times)
+CREATE TABLE IF NOT EXISTS shift_slot_overrides (
+  date DATE,
+  shift_type VARCHAR(50),
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  PRIMARY KEY (date, shift_type)
+);
+
 -- Teacher shift extensions: up to 2 hours before/after base shift (minutes, max 120 each)
 CREATE TABLE IF NOT EXISTS teacher_shift_extensions (
   date DATE NOT NULL,

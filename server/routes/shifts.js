@@ -22,7 +22,7 @@ function toDateStr(val) {
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
 }
 
-/** 0=Sun, 1=Mon, ..., 6=Sat. Weekday = Tue–Fri (2–5), Weekend = Sat/Sun/Mon (0,1,6). */
+/** 0=Sun, 1=Mon, ..., 6=Sat. Weekday = Tue–Fri (2–5), Weekend = Sat/Sun/Mon (0,1,6). Relaxed ranges so custom times (e.g. 10–17, 17–21) still classify. */
 function getShiftType(dow, startStr, endStr) {
   const start = (startStr || '').slice(0, 5);
   const end = (endStr || '').slice(0, 5);
@@ -30,8 +30,8 @@ function getShiftType(dow, startStr, endStr) {
     return 'weekend';
   }
   if ([2, 3, 4, 5].includes(dow)) {
-    if (start >= '09:00' && start <= '11:00' && end >= '15:00' && end <= '17:30') return 'weekday_morning';
-    if (start >= '15:00' && start <= '19:00' && end >= '20:00' && end <= '22:00') return 'weekday_evening';
+    if (start >= '06:00' && start <= '12:00' && end >= '12:00' && end <= '20:00') return 'weekday_morning';
+    if (start >= '12:00' && start <= '20:00' && end >= '18:00' && end <= '23:00') return 'weekday_evening';
   }
   return null;
 }
@@ -48,13 +48,33 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
       return res.status(400).json({ error: 'Invalid week_start date' });
     }
 
-    const result = await query(
-      `SELECT date, teacher_name, start_time, end_time
-       FROM teacher_schedules
-       WHERE date >= $1::date AND date < $1::date + interval '7 days'
-       ORDER BY date, start_time`,
-      [weekStart]
-    );
+    const [schedResult, overridesResult] = await Promise.all([
+      query(
+        `SELECT date, teacher_name, start_time, end_time
+         FROM teacher_schedules
+         WHERE date >= $1::date AND date < $1::date + interval '7 days'
+         ORDER BY date, start_time`,
+        [weekStart]
+      ),
+      query(
+        `SELECT date, shift_type, start_time, end_time
+         FROM shift_slot_overrides
+         WHERE date >= $1::date AND date < $1::date + interval '7 days'`,
+        [weekStart]
+      ),
+    ]);
+    const result = schedResult;
+
+    const overridesByKey = {};
+    for (const row of overridesResult.rows) {
+      const dateStr = toDateStr(row.date);
+      if (!dateStr) continue;
+      const key = `${dateStr}:${row.shift_type}`;
+      overridesByKey[key] = {
+        start_time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+        end_time: row.end_time ? String(row.end_time).slice(0, 5) : null,
+      };
+    }
 
     const slots = [];
     for (let i = 0; i < 7; i++) {
@@ -94,8 +114,13 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
     const week = slots.map((s) => {
       const key = `${s.date}:${s.shift_type}`;
       const assigned = byKey[key];
-      let startTime = assigned?.start_time ?? s.start;
-      let endTime = assigned?.end_time ?? s.end;
+      const override = overridesByKey[key];
+      let startTime = s.start;
+      let endTime = s.end;
+      if (override?.start_time) startTime = override.start_time;
+      if (override?.end_time) endTime = override.end_time;
+      if (assigned?.start_time) startTime = assigned.start_time;
+      if (assigned?.end_time) endTime = assigned.end_time;
       if (s.shift_type === 'weekend' && startTime === '16:00' && endTime === '21:00') {
         startTime = SHIFT_DEFAULTS.weekend.start;
         endTime = SHIFT_DEFAULTS.weekend.end;
@@ -180,6 +205,66 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
          VALUES ($1::date, $2, $3::time, $4::time)
          ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
         [dateStr, teacherName, startTime, endTime]
+      );
+      await query(
+        'DELETE FROM shift_slot_overrides WHERE date = $1::date AND shift_type = $2',
+        [dateStr, shiftType]
+      );
+    } else if (customStart || customEnd) {
+      await query(
+        `INSERT INTO shift_slot_overrides (date, shift_type, start_time, end_time)
+         VALUES ($1::date, $2, $3::time, $4::time)
+         ON CONFLICT (date, shift_type) DO UPDATE SET start_time = $3::time, end_time = $4::time`,
+        [dateStr, shiftType, startTime, endTime]
+      );
+    }
+
+    const isWeekday = [2, 3, 4, 5].includes(dow);
+    if (isWeekday && shiftType === 'weekday_morning' && (typeof customEnd === 'string' && customEnd.trim())) {
+      const handover = customEnd.trim().slice(0, 5);
+      const eveningDefault = SHIFT_DEFAULTS.weekday_evening;
+      const eveningEnd = eveningDefault.end;
+      for (const row of existing.rows) {
+        const st = row.start_time ? String(row.start_time).slice(0, 5) : '';
+        const et = row.end_time ? String(row.end_time).slice(0, 5) : '';
+        if (getShiftType(dow, st, et) === 'weekday_evening') {
+          const rowEnd = et || eveningEnd;
+          await query(
+            'DELETE FROM teacher_schedules WHERE date = $1::date AND teacher_name = $2 AND start_time = $3::time',
+            [dateStr, row.teacher_name, row.start_time]
+          );
+          await query(
+            `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time) VALUES ($1::date, $2, $3::time, $4::time)`,
+            [dateStr, row.teacher_name, handover, rowEnd]
+          );
+        }
+      }
+      await query(
+        `INSERT INTO shift_slot_overrides (date, shift_type, start_time, end_time)
+         VALUES ($1::date, 'weekday_evening', $2::time, $3::time)
+         ON CONFLICT (date, shift_type) DO UPDATE SET start_time = $2::time`,
+        [dateStr, handover, eveningEnd]
+      );
+    }
+    if (isWeekday && shiftType === 'weekday_evening' && (typeof customStart === 'string' && customStart.trim())) {
+      const handover = customStart.trim().slice(0, 5);
+      const morningDefault = SHIFT_DEFAULTS.weekday_morning;
+      const morningStart = morningDefault.start;
+      for (const row of existing.rows) {
+        const st = row.start_time ? String(row.start_time).slice(0, 5) : '';
+        const et = row.end_time ? String(row.end_time).slice(0, 5) : '';
+        if (getShiftType(dow, st, et) === 'weekday_morning') {
+          await query(
+            'UPDATE teacher_schedules SET end_time = $1::time WHERE date = $2::date AND teacher_name = $3 AND start_time = $4::time',
+            [handover, dateStr, row.teacher_name, row.start_time]
+          );
+        }
+      }
+      await query(
+        `INSERT INTO shift_slot_overrides (date, shift_type, start_time, end_time)
+         VALUES ($1::date, 'weekday_morning', $2::time, $3::time)
+         ON CONFLICT (date, shift_type) DO UPDATE SET end_time = $3::time`,
+        [dateStr, morningStart, handover]
       );
     }
 
