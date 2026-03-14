@@ -1,0 +1,11 @@
+---
+description: Commit and push to GitHub after every change
+alwaysApply: true
+---
+
+# Git: Commit and push after every change
+
+- After **every** code change (or set of related changes), **commit** and **push** to GitHub (origin).
+- Stage only the files you modified (do not add untracked secrets or local config unless the user asks).
+- Use a clear, concise commit message that describes what was done.
+- If the user has not asked to commit, still commit and push when you have finished implementing their request.

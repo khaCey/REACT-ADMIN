@@ -26,6 +26,10 @@ export default function Admin() {
   const [clearError, setClearError] = useState('')
   const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
   const [fetchScheduleError, setFetchScheduleError] = useState('')
+  const [staffList, setStaffList] = useState([])
+  const [fetchOneStaffId, setFetchOneStaffId] = useState('')
+  const [fetchOneLoading, setFetchOneLoading] = useState(false)
+  const [fetchOneError, setFetchOneError] = useState('')
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -58,6 +62,10 @@ export default function Admin() {
   useEffect(() => {
     fetchBackups()
   }, [fetchBackups])
+
+  useEffect(() => {
+    api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
+  }, [])
 
   const handleCreateBackup = async () => {
     setBackupError('')
@@ -195,6 +203,53 @@ export default function Admin() {
           <p className="text-sm text-gray-600 mb-4">
             Fetch English teachers&apos; schedules from their Google Calendars via GAS and save to the database. Uses each staff&apos;s calendar ID; replaces their shifts in the next 31 days.
           </p>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <label className="text-sm font-medium text-gray-700">Fetch one staff:</label>
+            <select
+              value={fetchOneStaffId}
+              onChange={(e) => {
+                setFetchOneStaffId(e.target.value)
+                setFetchOneError('')
+              }}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
+            >
+              <option value="">— Select staff —</option>
+              {staffList.filter((s) => s.calendar_id).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={async () => {
+                const id = fetchOneStaffId ? parseInt(fetchOneStaffId, 10) : null
+                if (!id || fetchOneLoading) return
+                setFetchOneError('')
+                setFetchOneLoading(true)
+                try {
+                  const res = await api.fetchStaffScheduleForStaff(id)
+                  const name = res.teacherName ?? staffList.find((s) => s.id === id)?.name
+                  const msg =
+                    res.eventsStored != null
+                      ? `Fetched ${res.eventsStored} events for ${name}.`
+                      : 'Schedule fetched.'
+                  success(msg)
+                } catch (err) {
+                  setFetchOneError(err.message || 'Failed to fetch schedule')
+                } finally {
+                  setFetchOneLoading(false)
+                }
+              }}
+              disabled={!fetchOneStaffId || fetchOneLoading}
+              className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Calendar className="w-4 h-4" />
+              {fetchOneLoading ? 'Fetching…' : 'Fetch schedule'}
+            </button>
+            {fetchOneError && <span className="text-sm text-red-600">{fetchOneError}</span>}
+          </div>
+          <p className="text-sm text-gray-500 mb-3">Or fetch all English teachers at once:</p>
           {fetchScheduleError && <p className="text-sm text-red-600 mb-2">{fetchScheduleError}</p>}
           <button
             type="button"
@@ -221,7 +276,7 @@ export default function Admin() {
             className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50"
           >
             <Calendar className="w-4 h-4" />
-            {fetchScheduleLoading ? 'Fetching…' : 'Fetch Staff Schedule'}
+            {fetchScheduleLoading ? 'Fetching…' : 'Fetch Staff Schedule (all)'}
           </button>
         </section>
 
