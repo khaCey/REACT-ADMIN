@@ -103,7 +103,7 @@ export const GUIDE_DEFINITIONS = {
       },
       {
         title: '既読 / 未読を切り替える',
-        description: '既読 / 未読を切り替えるには、通知詳細の「Mark as Read」または「Mark as Unread」を押します。未読数の変化を確認します。',
+        description: '既読 / 未読を切り替えるには、通知詳細の「既読にする」または「Mark as Unread」を押します。未読数の変化を確認します。',
         route: '/notifications',
         action: 'notifications.read-unread',
       },

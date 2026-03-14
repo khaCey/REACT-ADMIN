@@ -159,6 +159,9 @@ export default function Dashboard() {
     fetchDashboard()
   }, [fetchDashboard])
 
+  const showPaymentBadges = (lesson) =>
+    lesson.is_last_lesson_of_month === true || lesson.is_last_lesson_of_month === 't'
+
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -242,11 +245,26 @@ export default function Dashboard() {
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
-                                <span
-                                  className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
-                                >
-                                  {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
-                                </span>
+                                {showPaymentBadges(lesson) && (
+                                  <>
+                                    <span
+                                      className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                                    >
+                                      {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
+                                    </span>
+                                    {todayDate && (
+                                      <span
+                                        className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} bg-slate-100 text-slate-700`}
+                                      >
+                                        {(() => {
+                                          const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
+                                          const next = new Date(y, m, 1)
+                                          return `${next.getMonth() + 1}月分のお月謝`
+                                        })()}
+                                      </span>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             </article>
                           )})}

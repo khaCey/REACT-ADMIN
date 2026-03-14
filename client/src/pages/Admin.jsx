@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2 } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
@@ -24,6 +24,8 @@ export default function Admin() {
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [clearingTable, setClearingTable] = useState(false)
   const [clearError, setClearError] = useState('')
+  const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
+  const [fetchScheduleError, setFetchScheduleError] = useState('')
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -182,6 +184,44 @@ export default function Admin() {
           >
             <Download className="w-4 h-4" />
             Backfill past schedule
+          </button>
+        </section>
+
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
+            <Calendar className="w-5 h-5 text-gray-600" />
+            Fetch Staff Schedule
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Fetch English teachers&apos; schedules from their Google Calendars via GAS and save to the database. Uses each staff&apos;s calendar ID; replaces their shifts in the next 31 days.
+          </p>
+          {fetchScheduleError && <p className="text-sm text-red-600 mb-2">{fetchScheduleError}</p>}
+          <button
+            type="button"
+            onClick={async () => {
+              setFetchScheduleError('')
+              setFetchScheduleLoading(true)
+              try {
+                const res = await api.fetchStaffSchedule()
+                const msg = res.eventsStored != null
+                  ? `Fetched for ${res.staffProcessed ?? 0} staff, ${res.eventsStored} events stored.`
+                  : 'Fetch complete.'
+                if (res.errors?.length) {
+                  success(`${msg} ${res.errors.length} error(s).`)
+                } else {
+                  success(msg)
+                }
+              } catch (err) {
+                setFetchScheduleError(err.message || 'Failed to fetch staff schedule')
+              } finally {
+                setFetchScheduleLoading(false)
+              }
+            }}
+            disabled={fetchScheduleLoading}
+            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50"
+          >
+            <Calendar className="w-4 h-4" />
+            {fetchScheduleLoading ? 'Fetching…' : 'Fetch Staff Schedule'}
           </button>
         </section>
 

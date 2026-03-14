@@ -213,7 +213,14 @@ router.get('/today-lessons', async (_req, res) => {
                  AND to_char(p.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
                )
              )
-         ) AS paid_this_month
+         ) AS paid_this_month,
+         NOT EXISTS (
+           SELECT 1 FROM monthly_schedule m2
+           WHERE m2.student_name = m.student_name
+             AND to_char(m2.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
+             AND (m2.status IS NULL OR lower(trim(m2.status)) <> 'cancelled')
+             AND (m2.date > m.date OR (m2.date = m.date AND m2.start > m.start))
+         ) AS is_last_lesson_of_month
        FROM monthly_schedule m
        LEFT JOIN LATERAL (
          SELECT s.id

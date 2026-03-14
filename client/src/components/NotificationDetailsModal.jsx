@@ -144,7 +144,7 @@ export default function NotificationDetailsModal({
                   highlightAction === 'read-unread' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
                 }`}
               >
-                {markingRead ? 'Marking...' : 'Mark as Read'}
+                {markingRead ? 'Marking...' : '既読にする'}
               </button>
             )}
             {notification.is_read && onMarkUnread && (

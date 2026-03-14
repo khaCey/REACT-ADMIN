@@ -357,6 +357,108 @@ app.post('/api/admin/clear-table', requireAuth, requireAdmin, async (req, res) =
   }
 });
 
+/** Parse ISO dateTime to Asia/Tokyo date (YYYY-MM-DD) and time (HH:MM). */
+function isoToTokyoDateAndTime(iso) {
+  if (!iso || typeof iso !== 'string') return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const dateStr = `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}-${String(jst.getUTCDate()).padStart(2, '0')}`;
+  const timeStr = `${String(jst.getUTCHours()).padStart(2, '0')}:${String(jst.getUTCMinutes()).padStart(2, '0')}`;
+  return { date: dateStr, time: timeStr };
+}
+
+/** Admin: fetch English teachers' schedules from GAS (by calendarId) and store in teacher_schedules. */
+app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    if (!url || !key) {
+      return res.status(400).json({
+        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+      });
+    }
+
+    const staffResult = await query(
+      `SELECT id, name, calendar_id FROM staff
+       WHERE staff_type = 'english_teacher'
+         AND calendar_id IS NOT NULL AND TRIM(calendar_id) != ''
+       ORDER BY name ASC`
+    );
+    const staffList = staffResult.rows;
+
+    const now = new Date();
+    const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const timeMax = new Date(timeMin.getTime() + 31 * 24 * 60 * 60 * 1000);
+    const timeMinISO = timeMin.toISOString();
+    const timeMaxISO = timeMax.toISOString();
+    const rangeStart = timeMinISO.slice(0, 10);
+    const rangeEnd = timeMaxISO.slice(0, 10);
+
+    let totalStored = 0;
+    const errors = [];
+
+    for (const staff of staffList) {
+      const calendarId = String(staff.calendar_id || '').trim();
+      const teacherName = staff.name;
+      if (!calendarId) continue;
+
+      const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
+      let json;
+      try {
+        const fetchRes = await fetch(gasUrl);
+        json = await fetchRes.json().catch(() => ({}));
+      } catch (err) {
+        errors.push({ staff: teacherName, error: err.message });
+        continue;
+      }
+      if (json.error) {
+        errors.push({ staff: teacherName, error: json.error });
+        continue;
+      }
+      const events = Array.isArray(json) ? json : [];
+      const rows = [];
+      for (const ev of events) {
+        const start = ev.start?.dateTime || ev.start;
+        const end = ev.end?.dateTime || ev.end;
+        if (!start || !end) continue;
+        const startParsed = isoToTokyoDateAndTime(typeof start === 'string' ? start : start.dateTime);
+        const endParsed = isoToTokyoDateAndTime(typeof end === 'string' ? end : end.dateTime);
+        if (!startParsed || !endParsed) continue;
+        rows.push({
+          date: startParsed.date,
+          start_time: startParsed.time,
+          end_time: endParsed.time,
+        });
+      }
+
+      await query(
+        `DELETE FROM teacher_schedules WHERE teacher_name = $1 AND date >= $2::date AND date <= $3::date`,
+        [teacherName, rangeStart, rangeEnd]
+      );
+      for (const row of rows) {
+        await query(
+          `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time)
+           VALUES ($1::date, $2, $3::time, $4::time)
+           ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
+          [row.date, teacherName, row.start_time, row.end_time]
+        );
+        totalStored++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      staffProcessed: staffList.length,
+      eventsStored: totalStored,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (err) {
+    console.error('[admin/fetch-staff-schedule]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); prior months are preserved. */
 app.post('/api/calendar-poll/sync', async (req, res) => {
   try {

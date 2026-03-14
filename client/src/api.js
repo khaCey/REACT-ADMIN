@@ -47,6 +47,8 @@ export const api = {
     fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
   clearTable: (table) =>
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
+  fetchStaffSchedule: () =>
+    fetchApi('/admin/fetch-staff-schedule', { method: 'POST' }),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getStaffList: () => fetchApi('/auth/staff-list'),
   getStaff: () => fetchApi('/staff'),
