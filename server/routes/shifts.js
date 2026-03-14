@@ -149,6 +149,32 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
   }
 });
 
+/** GET /api/shifts/teacher-calendar?week_start=YYYY-MM-DD - raw teacher_schedules for the week (for visualizer). */
+router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const weekStart = req.query.week_start;
+    if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+      return res.status(400).json({ error: 'Query week_start required (YYYY-MM-DD)' });
+    }
+    const result = await query(
+      `SELECT date, teacher_name, start_time, end_time
+       FROM teacher_schedules
+       WHERE date >= $1::date AND date < $1::date + interval '7 days'
+       ORDER BY teacher_name, date, start_time`,
+      [weekStart]
+    );
+    const events = result.rows.map((r) => ({
+      date: toDateStr(r.date),
+      teacher_name: r.teacher_name,
+      start_time: r.start_time ? String(r.start_time).slice(0, 5) : '',
+      end_time: r.end_time ? String(r.end_time).slice(0, 5) : '',
+    }));
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** PUT /api/shifts/assign - assign staff to a (date, shift_type); optional start_time/end_time override */
 router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
   try {

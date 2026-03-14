@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2 } from 'lucide-react'
+import { X, Trash2, Calendar } from 'lucide-react'
 import { api } from '../api'
+import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STAFF_TYPE_OPTIONS = [
@@ -16,6 +17,7 @@ const ROLE_OPTIONS = [
 ]
 
 export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
+  const { success } = useToast()
   const [calendar_id, setCalendarId] = useState(staff?.calendar_id ?? '')
   const [staff_type, setStaffType] = useState(staff?.staff_type ?? 'japanese_staff')
   const [role, setRole] = useState(() =>
@@ -26,6 +28,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [error, setError] = useState('')
+  const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
 
   useEffect(() => {
     if (staff) {
@@ -121,13 +124,43 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Calendar ID</label>
-            <input
-              type="text"
-              value={calendar_id}
-              onChange={(e) => setCalendarId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              placeholder="Google Calendar ID"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={calendar_id}
+                onChange={(e) => setCalendarId(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                placeholder="Google Calendar ID"
+              />
+              {staff.calendar_id && (
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.preventDefault()
+                    if (!staff?.id || fetchScheduleLoading) return
+                    setError('')
+                    setFetchScheduleLoading(true)
+                    try {
+                      const res = await api.fetchStaffScheduleForStaff(staff.id)
+                      const msg = res.eventsStored != null
+                        ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staff.name}.`
+                        : 'Schedule fetched.'
+                      success(msg)
+                    } catch (err) {
+                      setError(err.message || 'Failed to fetch schedule')
+                    } finally {
+                      setFetchScheduleLoading(false)
+                    }
+                  }}
+                  disabled={fetchScheduleLoading}
+                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                  title="Fetch next 31 days from this staff's Google Calendar and save to database"
+                >
+                  <Calendar className="w-4 h-4" />
+                  {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
+                </button>
+              )}
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>

@@ -70,6 +70,8 @@ export default function Staff() {
   const [showAddStaffModal, setShowAddStaffModal] = useState(false)
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [adjustSlot, setAdjustSlot] = useState(null)
+  const [teacherCalendarEvents, setTeacherCalendarEvents] = useState([])
+  const [teacherCalendarLoading, setTeacherCalendarLoading] = useState(false)
 
   const loadStaff = useCallback(() => {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
@@ -111,6 +113,19 @@ export default function Staff() {
     loadWeek()
   }, [loadWeek])
 
+  const loadTeacherCalendar = useCallback(() => {
+    setTeacherCalendarLoading(true)
+    api
+      .getTeacherCalendar(weekStart)
+      .then((res) => setTeacherCalendarEvents(res.events || []))
+      .catch(() => setTeacherCalendarEvents([]))
+      .finally(() => setTeacherCalendarLoading(false))
+  }, [weekStart])
+
+  useEffect(() => {
+    loadTeacherCalendar()
+  }, [loadTeacherCalendar])
+
   const handleAssignShift = (slot, staffIdOrName, customStart, customEnd) => {
     const body = {
       date: slot.date,
@@ -128,7 +143,10 @@ export default function Staff() {
     setLoadingShifts(true)
     api
       .assignShift(body)
-      .then(() => loadWeek())
+      .then(() => {
+        loadWeek()
+        loadTeacherCalendar()
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingShifts(false))
     setAdjustSlot(null)
@@ -367,6 +385,77 @@ export default function Staff() {
                         })}
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Teacher calendar</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Time blocks from teacher_schedules for this week (from Google Calendar fetch or shift assignment).
+            </p>
+            {teacherCalendarLoading ? (
+              <p className="py-4 text-gray-500 text-sm">Loading…</p>
+            ) : (
+              <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
+                <table className="min-w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="px-3 py-2 text-left text-sm font-semibold text-gray-700 w-36">Teacher</th>
+                      {dates.map((date) => {
+                        const d = new Date(date + 'T12:00:00Z')
+                        const dayIdx = d.getUTCDay()
+                        const name = DAY_NAMES[dayIdx === 0 ? 6 : dayIdx - 1]
+                        return (
+                          <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-[140px]">
+                            {name} {d.getUTCDate()}
+                          </th>
+                        )
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(() => {
+                      const byTeacherAndDate = {}
+                      for (const ev of teacherCalendarEvents) {
+                        const t = ev.teacher_name || '—'
+                        if (!byTeacherAndDate[t]) byTeacherAndDate[t] = {}
+                        const d = ev.date
+                        if (!byTeacherAndDate[t][d]) byTeacherAndDate[t][d] = []
+                        byTeacherAndDate[t][d].push(`${ev.start_time || '—'}–${ev.end_time || '—'}`)
+                      }
+                      const teachers = Object.keys(byTeacherAndDate).sort()
+                      if (teachers.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
+                              No schedule data for this week. Assign shifts above or fetch from Google Calendar (Edit staff → Fetch schedule).
+                            </td>
+                          </tr>
+                        )
+                      }
+                      return teachers.map((teacher) => (
+                        <tr key={teacher}>
+                          <td className="px-3 py-2 text-sm font-medium text-gray-900 border-r border-gray-100">
+                            {teacher}
+                          </td>
+                          {dates.map((date) => (
+                            <td key={date} className="px-2 py-2 text-sm text-gray-600 align-top min-w-[140px]">
+                              {(byTeacherAndDate[teacher][date] || []).map((block, i) => (
+                                <div key={i} className="text-xs py-0.5">
+                                  {block}
+                                </div>
+                              ))}
+                              {!(byTeacherAndDate[teacher][date]?.length) && (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    })()}
                   </tbody>
                 </table>
               </div>
