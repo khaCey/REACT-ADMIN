@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, Calendar } from 'lucide-react'
 import { api } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
@@ -54,9 +55,13 @@ const SHIFT_DEFAULT_TIMES = {
 
 export default function Staff() {
   const { staff: authStaff } = useAuth()
+  const { success } = useToast()
   const isAdmin = !!authStaff?.is_admin || String(authStaff?.name || '').trim().toLowerCase() === 'khacey'
 
   const [staffList, setStaffList] = useState([])
+  const [fetchScheduleStaffId, setFetchScheduleStaffId] = useState('')
+  const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
+  const [fetchScheduleError, setFetchScheduleError] = useState('')
   const [shiftLog, setShiftLog] = useState([])
   const [weekSlots, setWeekSlots] = useState([])
   const [weekStart, setWeekStart] = useState(() => {
@@ -396,6 +401,56 @@ export default function Staff() {
             <p className="text-sm text-gray-600 mb-3">
               Time blocks from teacher_schedules for this week (from Google Calendar fetch or shift assignment).
             </p>
+            {isAdmin && (
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <label className="text-sm font-medium text-gray-700">Fetch schedule for:</label>
+                <select
+                  value={fetchScheduleStaffId}
+                  onChange={(e) => {
+                    setFetchScheduleStaffId(e.target.value)
+                    setFetchScheduleError('')
+                  }}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
+                >
+                  <option value="">— Select staff —</option>
+                  {staffList.filter((s) => s.calendar_id).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const id = fetchScheduleStaffId ? parseInt(fetchScheduleStaffId, 10) : null
+                    if (!id || fetchScheduleLoading) return
+                    setFetchScheduleError('')
+                    setFetchScheduleLoading(true)
+                    try {
+                      const res = await api.fetchStaffScheduleForStaff(id)
+                      const msg =
+                        res.eventsStored != null
+                          ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
+                          : 'Schedule fetched.'
+                      success(msg)
+                      loadTeacherCalendar()
+                    } catch (err) {
+                      setFetchScheduleError(err.message || 'Failed to fetch schedule')
+                    } finally {
+                      setFetchScheduleLoading(false)
+                    }
+                  }}
+                  disabled={!fetchScheduleStaffId || fetchScheduleLoading}
+                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Calendar className="w-4 h-4" />
+                  {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
+                </button>
+                {fetchScheduleError && (
+                  <span className="text-sm text-red-600">{fetchScheduleError}</span>
+                )}
+              </div>
+            )}
             {teacherCalendarLoading ? (
               <p className="py-4 text-gray-500 text-sm">Loading…</p>
             ) : (
