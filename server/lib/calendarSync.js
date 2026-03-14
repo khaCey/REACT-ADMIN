@@ -41,6 +41,21 @@ function normalizeName(s) {
 }
 
 /**
+ * Parse a date+time string as Asia/Tokyo and return ISO string in UTC.
+ * Source data (CSV, Sheets, GAS) is Japan-facing; we store UTC in the DB.
+ * @param {string} dateStr - YYYY-MM-DD
+ * @param {string} timePart - HH or H:MM from regex
+ * @returns {string|null} ISO timestamp in UTC, or null if invalid
+ */
+function parseTokyoToUTC(dateStr, hour, minute) {
+  if (!dateStr || hour == null || minute == null) return null;
+  const isoTokyo = `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+09:00`;
+  const d = new Date(isoTokyo);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+/**
  * Build map: normalized student name -> student id (only when exactly one student has that name).
  * @returns {Promise<Map<string, number>>}
  */
@@ -77,8 +92,10 @@ export async function upsertMonthlySchedule(data) {
     const startVal = r.start || '';
     if (startVal && date) {
       const m = String(startVal).trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/);
-      if (m) startTs = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, '0')}:${m[5]}:00`;
-      else {
+      if (m) {
+        startTs = parseTokyoToUTC(`${m[1]}-${m[2]}-${m[3]}`, m[4], m[5]);
+      }
+      if (!startTs) {
         const d = new Date(startVal);
         if (!isNaN(d.getTime())) startTs = d.toISOString();
       }
@@ -91,8 +108,10 @@ export async function upsertMonthlySchedule(data) {
     const endVal = r.end || '';
     if (endVal && date) {
       const m = String(endVal).trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/);
-      if (m) endTs = `${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, '0')}:${m[5]}:00`;
-      else {
+      if (m) {
+        endTs = parseTokyoToUTC(`${m[1]}-${m[2]}-${m[3]}`, m[4], m[5]);
+      }
+      if (!endTs) {
         const d = new Date(endVal);
         if (!isNaN(d.getTime())) endTs = d.toISOString();
       }

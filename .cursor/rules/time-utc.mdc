@@ -1,0 +1,12 @@
+---
+description: Use UTC for all time-related system logic; convert to local only for display
+alwaysApply: true
+---
+
+# Time: Use UTC
+
+- **Store and compute in UTC.** Use PostgreSQL `TIMESTAMPTZ` and keep server-side timestamps in UTC. Compare and sort times in UTC.
+- **Convert only for display.** Convert to a local timezone (e.g. Asia/Tokyo) only when returning data to the client or rendering in the UI.
+- **Ingest with explicit timezone.** When reading from CSV, Sheets, or external APIs, interpret datetime strings in the source’s intended timezone (e.g. Asia/Tokyo for Japan-facing data), then normalize to UTC before writing to the DB. Do not rely on server or session timezone.
+
+Example (backend): store `start` as UTC; in the API use `to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI')` for display. On ingest, parse "2026-03-14 13:00" as 13:00 JST and insert the equivalent UTC instant.

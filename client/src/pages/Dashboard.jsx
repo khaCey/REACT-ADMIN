@@ -52,8 +52,12 @@ function formatJapaneseDateLabel(yyyyMmDd) {
 }
 
 function getHourLabel(startTime) {
-  if (!startTime || !/^\d{2}:\d{2}$/.test(startTime)) return '時間未設定'
-  return `${startTime.slice(0, 2)}:00`
+  if (!startTime || typeof startTime !== 'string') return null
+  const trimmed = startTime.trim()
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  const hour = String(parseInt(match[1], 10)).padStart(2, '0')
+  return `${hour}:00`
 }
 
 const HOURLY_TIMELINE = Array.from({ length: 11 }, (_, i) => `${String(10 + i).padStart(2, '0')}:00`)
@@ -91,10 +95,15 @@ function groupLessonsByHour(lessons) {
   const groups = new Map()
   for (const lesson of lessons || []) {
     const label = getHourLabel(lesson.start_time)
-    if (!groups.has(label)) groups.set(label, [])
-    groups.get(label).push(lesson)
+    if (label) {
+      if (!groups.has(label)) groups.set(label, [])
+      groups.get(label).push(lesson)
+    }
   }
-  return HOURLY_TIMELINE.map((hour) => [hour, groups.get(hour) || []])
+  const timelineSet = new Set(HOURLY_TIMELINE)
+  const extraHours = [...groups.keys()].filter((h) => !timelineSet.has(h)).sort()
+  const orderedHours = [...HOURLY_TIMELINE, ...extraHours]
+  return orderedHours.map((hour) => [hour, groups.get(hour) || []])
 }
 
 function lessonModeBadgeClass(mode) {
@@ -195,10 +204,20 @@ export default function Dashboard() {
                     <div className="flex-1 h-[60px] p-0 m-0">
                       {lessons.length > 0 ? (
                         <div className="grid grid-cols-4 gap-1 h-[50px]">
-                          {lessons.map((lesson) => {
+                          {lessons.map((lesson, idx) => {
                             const isGroup = (lesson.group_type || '').toString().trim().toLowerCase() === 'group'
                             const hasGroupInHour = lessons.some((l) => (l.group_type || '').toString().trim().toLowerCase() === 'group')
-                            const colSpan = hasGroupInHour ? (isGroup ? 'col-span-1' : 'col-span-2') : 'col-span-4'
+                            let colSpan
+                            if (hasGroupInHour) {
+                              colSpan = isGroup ? 'col-span-1' : 'col-span-2'
+                            } else if (lessons.length > 1) {
+                              const n = lessons.length
+                              if (n === 2) colSpan = 'col-span-2'
+                              else if (n === 3) colSpan = idx < 2 ? 'col-span-1' : 'col-span-2'
+                              else colSpan = 'col-span-1'
+                            } else {
+                              colSpan = 'col-span-4'
+                            }
                             return (
                             <article
                               key={`${lesson.event_id}_${lesson.student_name}`}
