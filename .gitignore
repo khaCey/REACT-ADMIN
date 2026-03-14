@@ -6,3 +6,7 @@ client/.env
 *-service-account*.json
 *service-account*.json
 *credentials*.json
+student-admin-*.json
+
+# Temp / askpass
+.tmp_askpass.cmd
