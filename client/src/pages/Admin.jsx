@@ -203,7 +203,7 @@ export default function Admin() {
             Fetch Staff Schedule
           </h3>
           <p className="text-sm text-gray-600 mb-4">
-            Fetch English teachers&apos; schedules from their Google Calendars via GAS and save to the database. Uses each staff&apos;s calendar ID; replaces their shifts in the next 31 days.
+            Fetch English teachers&apos; schedules from their Google Calendars via GAS and save to the database. Uses each staff&apos;s calendar ID; replaces their shifts in the next 31 days. Set <code className="bg-gray-100 px-1 rounded">STAFF_SCHEDULE_GAS_URL</code> in .env to the GAS that returns teacher calendar events (not the student-schedule GAS).
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <label className="text-sm font-medium text-gray-700">Fetch one staff:</label>

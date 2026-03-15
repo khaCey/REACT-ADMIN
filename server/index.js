@@ -376,14 +376,20 @@ function normaliseGasEvents(json) {
   return [];
 }
 
+/** URL and key for staff-schedule GAS only. Use STAFF_SCHEDULE_GAS_URL so you do not call the student-schedule GAS (CALENDAR_POLL_URL). */
+function getStaffScheduleGasConfig() {
+  const url = (process.env.STAFF_SCHEDULE_GAS_URL || process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+  const key = (process.env.STAFF_SCHEDULE_API_KEY || process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+  return { url, key };
+}
+
 /** Admin: test GAS staff-schedule endpoint – returns URL, status, and response preview (no DB writes). */
 app.get('/api/admin/test-gas', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const baseUrl = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
-    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    const { url: baseUrl, key } = getStaffScheduleGasConfig();
     if (!baseUrl || !key) {
       return res.status(400).json({
-        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+        error: 'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for a GAS that returns teacher calendar events, not the student schedule.',
       });
     }
 
@@ -433,7 +439,7 @@ app.get('/api/admin/test-gas', requireAuth, requireAdmin, async (req, res) => {
       responseKeys,
       eventCount,
       message: fetchRes.ok
-        ? (eventCount > 0 ? `GAS returned ${eventCount} events.` : 'GAS returned 0 events; check calendar has events in the next 31 days or GAS accepts calendarId/timeMin/timeMax.')
+        ? (eventCount > 0 ? `GAS returned ${eventCount} events.` : 'GAS returned 0 events or wrong format. Use STAFF_SCHEDULE_GAS_URL to a GAS that lists teacher calendar events by calendarId (not the student-schedule GAS).')
         : `GAS responded with ${fetchRes.status}. Check URL and deployment.`,
     });
   } catch (err) {
@@ -445,11 +451,10 @@ app.get('/api/admin/test-gas', requireAuth, requireAdmin, async (req, res) => {
 /** Admin: fetch English teachers' schedules from GAS (by calendarId) and store in teacher_schedules. */
 app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
-    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    const { url, key } = getStaffScheduleGasConfig();
     if (!url || !key) {
       return res.status(400).json({
-        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+        error: 'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for teacher calendar fetch, not the student-schedule endpoint.',
       });
     }
 
@@ -492,7 +497,7 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
       }
       const events = normaliseGasEvents(json);
       if (events.length === 0 && !Array.isArray(json)) {
-        console.warn('[fetch-staff-schedule] GAS returned 0 events for', teacherName, '; response keys:', Object.keys(json || {}).join(', '), '- ensure CALENDAR_POLL_URL points to a GAS that accepts calendarId, timeMin, timeMax');
+        console.warn('[fetch-staff-schedule] GAS returned 0 events for', teacherName, '; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
       }
       const rows = [];
       for (const ev of events) {
@@ -542,11 +547,10 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
     const staffId = parseInt(req.params.id, 10);
     if (Number.isNaN(staffId)) return res.status(400).json({ error: 'Invalid staff id' });
 
-    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
-    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    const { url, key } = getStaffScheduleGasConfig();
     if (!url || !key) {
       return res.status(400).json({
-        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+        error: 'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for teacher calendar fetch, not the student-schedule endpoint.',
       });
     }
 
@@ -577,7 +581,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
     if (!fetchRes.ok) {
       const body = await fetchRes.text();
       console.warn('[fetch-staff-schedule/:id] GAS responded with', fetchRes.status, body.slice(0, 200));
-      return res.status(400).json({ error: `GAS returned ${fetchRes.status}. Ensure CALENDAR_POLL_URL is the deployed Web App URL that accepts calendarId, timeMin, timeMax.` });
+      return res.status(400).json({ error: `GAS returned ${fetchRes.status}. Use STAFF_SCHEDULE_GAS_URL for a Web App that lists teacher calendar events by calendarId (not the student-schedule GAS).` });
     }
     const json = await fetchRes.json().catch((e) => {
       console.warn('[fetch-staff-schedule/:id] GAS response was not JSON:', e.message);
@@ -588,7 +592,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
     }
     const events = normaliseGasEvents(json);
     if (events.length === 0 && !Array.isArray(json)) {
-      console.warn('[fetch-staff-schedule/:id] GAS returned 0 events; response keys:', Object.keys(json || {}).join(', '), '- ensure CALENDAR_POLL_URL points to a GAS that accepts calendarId, timeMin, timeMax');
+      console.warn('[fetch-staff-schedule/:id] GAS returned 0 events; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
     }
     const rows = [];
     for (const ev of events) {
