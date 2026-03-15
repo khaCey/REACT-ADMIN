@@ -51,6 +51,8 @@ export const api = {
     fetchApi('/admin/fetch-staff-schedule', { method: 'POST' }),
   fetchStaffScheduleForStaff: (staffId) =>
     fetchApi(`/admin/fetch-staff-schedule/${staffId}`, { method: 'POST' }),
+  testGas: (calendarId) =>
+    fetchApi(`/admin/test-gas${calendarId ? `?calendarId=${encodeURIComponent(calendarId)}` : ''}`),
   getStaffShifts: () => fetchApi('/auth/shifts'),
   getStaffList: () => fetchApi('/auth/staff-list'),
   getStaff: () => fetchApi('/staff'),

@@ -30,6 +30,8 @@ export default function Admin() {
   const [fetchOneStaffId, setFetchOneStaffId] = useState('')
   const [fetchOneLoading, setFetchOneLoading] = useState(false)
   const [fetchOneError, setFetchOneError] = useState('')
+  const [testGasLoading, setTestGasLoading] = useState(false)
+  const [testGasResult, setTestGasResult] = useState(null)
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -249,6 +251,45 @@ export default function Admin() {
             </button>
             {fetchOneError && <span className="text-sm text-red-600">{fetchOneError}</span>}
           </div>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <button
+              type="button"
+              onClick={async () => {
+                setTestGasResult(null)
+                setTestGasLoading(true)
+                try {
+                  const calendarId = fetchOneStaffId ? staffList.find((s) => String(s.id) === String(fetchOneStaffId))?.calendar_id : null
+                  const res = await api.testGas(calendarId || undefined)
+                  setTestGasResult(res)
+                } catch (err) {
+                  setTestGasResult({ error: err.message || 'Test failed' })
+                } finally {
+                  setTestGasLoading(false)
+                }
+              }}
+              disabled={testGasLoading}
+              className="px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 text-sm font-medium cursor-pointer disabled:opacity-50"
+            >
+              {testGasLoading ? 'Testing…' : 'Test GAS'}
+            </button>
+            <span className="text-xs text-gray-500">Uses selected staff&apos;s calendar ID, or first staff with calendar_id.</span>
+          </div>
+          {testGasResult && (
+            <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm font-mono overflow-x-auto">
+              {testGasResult.error ? (
+                <p className="text-red-600">{testGasResult.error}</p>
+              ) : (
+                <>
+                  <p><span className="font-semibold">Status:</span> {testGasResult.status} {testGasResult.ok ? '✓' : '✗'}</p>
+                  <p><span className="font-semibold">Event count:</span> {testGasResult.eventCount ?? '—'}</p>
+                  <p><span className="font-semibold">Message:</span> {testGasResult.message}</p>
+                  {testGasResult.responseKeys != null && <p><span className="font-semibold">Response keys:</span> {testGasResult.responseKeys.join(', ') || '—'}</p>}
+                  <p className="mt-1 break-all"><span className="font-semibold">URL:</span> {testGasResult.url}</p>
+                  {testGasResult.bodyPreview && <pre className="mt-2 text-xs whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{testGasResult.bodyPreview}</pre>}
+                </>
+              )}
+            </div>
+          )}
           <p className="text-sm text-gray-500 mb-3">Or fetch all English teachers at once:</p>
           {fetchScheduleError && <p className="text-sm text-red-600 mb-2">{fetchScheduleError}</p>}
           <button

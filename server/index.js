@@ -368,6 +368,80 @@ function isoToTokyoDateAndTime(iso) {
   return { date: dateStr, time: timeStr };
 }
 
+/** Normalize GAS response to an array of events (raw array or { events } or { items }). */
+function normaliseGasEvents(json) {
+  if (Array.isArray(json)) return json;
+  if (json && Array.isArray(json.events)) return json.events;
+  if (json && Array.isArray(json.items)) return json.items;
+  return [];
+}
+
+/** Admin: test GAS staff-schedule endpoint – returns URL, status, and response preview (no DB writes). */
+app.get('/api/admin/test-gas', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const baseUrl = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    if (!baseUrl || !key) {
+      return res.status(400).json({
+        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+      });
+    }
+
+    let calendarId = (req.query.calendarId || '').toString().trim();
+    if (!calendarId) {
+      const row = await query(
+        `SELECT calendar_id FROM staff WHERE calendar_id IS NOT NULL AND TRIM(calendar_id) != '' LIMIT 1`
+      );
+      if (row.rows[0]) calendarId = String(row.rows[0].calendar_id).trim();
+    }
+    if (!calendarId) {
+      return res.status(400).json({
+        error: 'Pass calendarId in query (e.g. ?calendarId=xxx@group.calendar.google.com) or ensure at least one staff has a calendar_id set.',
+      });
+    }
+
+    const now = new Date();
+    const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const timeMax = new Date(timeMin.getTime() + 31 * 24 * 60 * 60 * 1000);
+    const timeMinISO = timeMin.toISOString();
+    const timeMaxISO = timeMax.toISOString();
+
+    const gasUrl = `${baseUrl}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
+    const fetchRes = await fetch(gasUrl);
+    const contentType = fetchRes.headers.get('content-type') || '';
+    const body = await fetchRes.text();
+    const bodyPreview = body.length > 500 ? body.slice(0, 500) + '...' : body;
+
+    let json = null;
+    let eventCount = 0;
+    let responseKeys = null;
+    try {
+      json = JSON.parse(body);
+      responseKeys = json !== null && typeof json === 'object' ? Object.keys(json) : [];
+      eventCount = normaliseGasEvents(json).length;
+    } catch {
+      // not JSON
+    }
+
+    res.json({
+      url: gasUrl,
+      status: fetchRes.status,
+      ok: fetchRes.ok,
+      contentType,
+      bodyPreview,
+      isJson: json !== null,
+      responseKeys,
+      eventCount,
+      message: fetchRes.ok
+        ? (eventCount > 0 ? `GAS returned ${eventCount} events.` : 'GAS returned 0 events; check calendar has events in the next 31 days or GAS accepts calendarId/timeMin/timeMax.')
+        : `GAS responded with ${fetchRes.status}. Check URL and deployment.`,
+    });
+  } catch (err) {
+    console.error('[admin/test-gas]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** Admin: fetch English teachers' schedules from GAS (by calendarId) and store in teacher_schedules. */
 app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -416,7 +490,10 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         errors.push({ staff: teacherName, error: json.error });
         continue;
       }
-      const events = Array.isArray(json) ? json : [];
+      const events = normaliseGasEvents(json);
+      if (events.length === 0 && !Array.isArray(json)) {
+        console.warn('[fetch-staff-schedule] GAS returned 0 events for', teacherName, '; response keys:', Object.keys(json || {}).join(', '), '- ensure CALENDAR_POLL_URL points to a GAS that accepts calendarId, timeMin, timeMax');
+      }
       const rows = [];
       for (const ev of events) {
         const start = ev.start?.dateTime || ev.start;
@@ -496,11 +573,23 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
 
     const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
     const fetchRes = await fetch(gasUrl);
-    const json = await fetchRes.json().catch(() => ({}));
+    const contentType = fetchRes.headers.get('content-type') || '';
+    if (!fetchRes.ok) {
+      const body = await fetchRes.text();
+      console.warn('[fetch-staff-schedule/:id] GAS responded with', fetchRes.status, body.slice(0, 200));
+      return res.status(400).json({ error: `GAS returned ${fetchRes.status}. Ensure CALENDAR_POLL_URL is the deployed Web App URL that accepts calendarId, timeMin, timeMax.` });
+    }
+    const json = await fetchRes.json().catch((e) => {
+      console.warn('[fetch-staff-schedule/:id] GAS response was not JSON:', e.message);
+      return {};
+    });
     if (json.error) {
       return res.status(400).json({ error: json.error });
     }
-    const events = Array.isArray(json) ? json : [];
+    const events = normaliseGasEvents(json);
+    if (events.length === 0 && !Array.isArray(json)) {
+      console.warn('[fetch-staff-schedule/:id] GAS returned 0 events; response keys:', Object.keys(json || {}).join(', '), '- ensure CALENDAR_POLL_URL points to a GAS that accepts calendarId, timeMin, timeMax');
+    }
     const rows = [];
     for (const ev of events) {
       const start = ev.start?.dateTime || ev.start;
