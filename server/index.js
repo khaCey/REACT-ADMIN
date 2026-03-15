@@ -385,6 +385,15 @@ function isoToTokyoDateAndTime(iso) {
   return { date: dateStr, time: timeStr };
 }
 
+/** Add one day to YYYY-MM-DD. Corrects for GAS/Calendar API returning dates one day early. */
+function addOneDay(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dateStr;
+  const d = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10) + 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
 /** Current month in Japan (Asia/Tokyo): { year, month } and ISO range for that month (start of first day JST, start of first day next month JST). */
 function getCurrentMonthJapanRange() {
   const now = new Date();
@@ -537,7 +546,7 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         const endParsed = isoToTokyoDateAndTime(typeof end === 'string' ? end : end.dateTime);
         if (!startParsed || !endParsed) continue;
         rows.push({
-          date: startParsed.date,
+          date: addOneDay(startParsed.date),
           start_time: startParsed.time,
           end_time: endParsed.time,
         });
@@ -626,7 +635,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       const endParsed = isoToTokyoDateAndTime(typeof end === 'string' ? end : end.dateTime);
       if (!startParsed || !endParsed) continue;
       rows.push({
-        date: startParsed.date,
+        date: addOneDay(startParsed.date),
         start_time: startParsed.time,
         end_time: endParsed.time,
       });
