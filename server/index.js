@@ -357,15 +357,40 @@ app.post('/api/admin/clear-table', requireAuth, requireAdmin, async (req, res) =
   }
 });
 
-/** Parse ISO dateTime to Asia/Tokyo date (YYYY-MM-DD) and time (HH:MM). */
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Parse ISO dateTime to Asia/Tokyo calendar date (YYYY-MM-DD) and time (HH:MM). Uses instant + 9h then day boundary so the date is correct for Japan. */
 function isoToTokyoDateAndTime(iso) {
   if (!iso || typeof iso !== 'string') return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  const dateStr = `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}-${String(jst.getUTCDate()).padStart(2, '0')}`;
-  const timeStr = `${String(jst.getUTCHours()).padStart(2, '0')}:${String(jst.getUTCMinutes()).padStart(2, '0')}`;
+  const utcMs = new Date(iso).getTime();
+  if (Number.isNaN(utcMs)) return null;
+  const jstMs = utcMs + JST_OFFSET_MS;
+  const jstDay = Math.floor(jstMs / MS_PER_DAY);
+  const d = new Date(jstDay * MS_PER_DAY);
+  const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const hours = Math.floor((jstMs % MS_PER_DAY) / (60 * 60 * 1000));
+  const minutes = Math.floor((jstMs % (60 * 60 * 1000)) / (60 * 1000));
+  const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   return { date: dateStr, time: timeStr };
+}
+
+/** Current month in Japan (Asia/Tokyo): { year, month } and ISO range for that month (start of first day JST, start of first day next month JST). */
+function getCurrentMonthJapanRange() {
+  const now = new Date();
+  const jstMs = now.getTime() + JST_OFFSET_MS;
+  const jstDay = Math.floor(jstMs / MS_PER_DAY);
+  const d = new Date(jstDay * MS_PER_DAY);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  const timeMinUTC = Date.UTC(year, month - 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
+  const timeMaxUTC = Date.UTC(year, month, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
+  const timeMinISO = new Date(timeMinUTC).toISOString();
+  const timeMaxISO = new Date(timeMaxUTC).toISOString();
+  const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const rangeEnd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
 }
 
 /** Normalize GAS response to an array of events (raw array or { events } or { items }). */
@@ -466,13 +491,7 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
     );
     const staffList = staffResult.rows;
 
-    const now = new Date();
-    const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const timeMax = new Date(timeMin.getTime() + 31 * 24 * 60 * 60 * 1000);
-    const timeMinISO = timeMin.toISOString();
-    const timeMaxISO = timeMax.toISOString();
-    const rangeStart = timeMinISO.slice(0, 10);
-    const rangeEnd = timeMaxISO.slice(0, 10);
+    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentMonthJapanRange();
 
     let totalStored = 0;
     const errors = [];
@@ -567,13 +586,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
     }
 
     const teacherName = staff.name;
-    const now = new Date();
-    const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const timeMax = new Date(timeMin.getTime() + 31 * 24 * 60 * 60 * 1000);
-    const timeMinISO = timeMin.toISOString();
-    const timeMaxISO = timeMax.toISOString();
-    const rangeStart = timeMinISO.slice(0, 10);
-    const rangeEnd = timeMaxISO.slice(0, 10);
+    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentMonthJapanRange();
 
     const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
     const fetchRes = await fetch(gasUrl);
