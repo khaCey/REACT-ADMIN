@@ -176,12 +176,17 @@ export default function Staff() {
     [weekSlots]
   )
   const weekDates = useCallback(() => {
-    const mon = new Date(weekStart + 'T12:00:00Z')
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(mon)
-      d.setUTCDate(d.getUTCDate() + i)
-      return d.toISOString().slice(0, 10)
-    })
+    try {
+      const mon = new Date((weekStart || '').toString().trim() + 'T12:00:00Z')
+      if (Number.isNaN(mon.getTime())) return []
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(mon)
+        d.setUTCDate(d.getUTCDate() + i)
+        return d.toISOString().slice(0, 10)
+      })
+    } catch {
+      return []
+    }
   }, [weekStart])
 
   const dates = weekDates()
@@ -499,92 +504,107 @@ export default function Staff() {
             ) : (
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
                 {(() => {
-                  const englishTeachers = staffList
-                    .filter((s) => s.staff_type === 'english_teacher')
-                    .map((s) => s.name)
-                    .sort()
-                  const englishTeacherSet = new Set(englishTeachers)
-                  const byTeacherAndDate = {}
-                  for (const ev of teacherCalendarEvents) {
-                    const t = ev.teacher_name || '—'
-                    if (!englishTeacherSet.has(t)) continue
-                    if (!byTeacherAndDate[t]) byTeacherAndDate[t] = {}
-                    const d = ev.date
-                    if (!byTeacherAndDate[t][d]) byTeacherAndDate[t][d] = []
-                    byTeacherAndDate[t][d].push({
-                      start_time: ev.start_time || '',
-                      end_time: ev.end_time || '',
-                    })
-                  }
-                  if (englishTeachers.length === 0) {
+                  try {
+                    const events = Array.isArray(teacherCalendarEvents) ? teacherCalendarEvents : []
+                    const staff = Array.isArray(staffList) ? staffList : []
+                    const englishTeachers = staff
+                      .filter((s) => s && s.staff_type === 'english_teacher')
+                      .map((s) => s.name)
+                      .filter(Boolean)
+                      .sort()
+                    const englishTeacherSet = new Set(englishTeachers)
+                    const byTeacherAndDate = {}
+                    for (const ev of events) {
+                      if (!ev || typeof ev !== 'object') continue
+                      const t = (ev.teacher_name != null && String(ev.teacher_name)) || '—'
+                      if (!englishTeacherSet.has(t)) continue
+                      const d = ev.date != null ? String(ev.date).slice(0, 10) : ''
+                      if (!d) continue
+                      if (!byTeacherAndDate[t]) byTeacherAndDate[t] = {}
+                      if (!byTeacherAndDate[t][d]) byTeacherAndDate[t][d] = []
+                      byTeacherAndDate[t][d].push({
+                        start_time: ev.start_time != null ? String(ev.start_time) : '',
+                        end_time: ev.end_time != null ? String(ev.end_time) : '',
+                      })
+                    }
+                    const dateList = Array.isArray(dates) ? dates : []
+                    if (englishTeachers.length === 0) {
+                      return (
+                        <div className="px-4 py-6 text-center text-sm text-gray-500">
+                          No English teachers in staff list. Add staff with type &quot;English Teacher&quot; to see the calendar.
+                        </div>
+                      )
+                    }
+                    const hourLabels = Array.from(
+                      { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
+                      (_, i) => `${String(TEACHER_CALENDAR_START_HOUR + i).padStart(2, '0')}:00`
+                    )
+                    const timelineHeight = hourLabels.length * TEACHER_CALENDAR_ROW_HEIGHT
+                    return englishTeachers.map((teacher) => (
+                      <div key={teacher} className="border-b border-gray-100 last:border-b-0">
+                        <div className="px-3 py-2 text-sm font-semibold text-gray-900 bg-gray-50/80">
+                          {teacher}
+                        </div>
+                        <div className="flex min-w-[600px]">
+                          <div
+                            className="w-14 shrink-0 flex flex-col border-r border-gray-100"
+                            style={{ height: timelineHeight }}
+                          >
+                            {hourLabels.map((label) => (
+                              <div
+                                key={label}
+                                className="text-xs font-medium text-gray-500 flex items-center pr-1 justify-end border-b border-gray-50"
+                                style={{ height: TEACHER_CALENDAR_ROW_HEIGHT }}
+                              >
+                                {label}
+                              </div>
+                            ))}
+                          </div>
+                          {dateList.map((date) => {
+                            const blocks = (byTeacherAndDate[teacher] && byTeacherAndDate[teacher][date]) || []
+                            return (
+                              <div
+                                key={date}
+                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative"
+                                style={{ height: timelineHeight }}
+                              >
+                                {blocks.map((block, i) => {
+                                  const startMin = minutesFromTimelineStart(block.start_time)
+                                  const endMin = minutesFromTimelineStart(block.end_time)
+                                  const duration = Math.max(1, endMin - startMin)
+                                  const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
+                                  const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
+                                  return (
+                                    <div
+                                      key={i}
+                                      className="absolute left-0.5 right-0.5 rounded border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+                                      style={{
+                                        top: `${topPct}%`,
+                                        height: `${heightPct}%`,
+                                        minHeight: 14,
+                                      }}
+                                      title={`${block.start_time} – ${block.end_time}`}
+                                    >
+                                      <span className="text-[10px] font-medium text-gray-700 truncate px-0.5">
+                                        {block.start_time}–{block.end_time}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  } catch (err) {
+                    console.error('[Staff] Teacher calendar render error:', err)
                     return (
-                      <div className="px-4 py-6 text-center text-sm text-gray-500">
-                        No English teachers in staff list. Add staff with type &quot;English Teacher&quot; to see the calendar.
+                      <div className="px-4 py-6 text-center text-sm text-red-600">
+                        Could not display teacher calendar. Check console for details.
                       </div>
                     )
                   }
-                  const hourLabels = Array.from(
-                    { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
-                    (_, i) => `${String(TEACHER_CALENDAR_START_HOUR + i).padStart(2, '0')}:00`
-                  )
-                  const timelineHeight = hourLabels.length * TEACHER_CALENDAR_ROW_HEIGHT
-                  return englishTeachers.map((teacher) => (
-                    <div key={teacher} className="border-b border-gray-100 last:border-b-0">
-                      <div className="px-3 py-2 text-sm font-semibold text-gray-900 bg-gray-50/80">
-                        {teacher}
-                      </div>
-                      <div className="flex min-w-[600px]">
-                        <div
-                          className="w-14 shrink-0 flex flex-col border-r border-gray-100"
-                          style={{ height: timelineHeight }}
-                        >
-                          {hourLabels.map((label) => (
-                            <div
-                              key={label}
-                              className="text-xs font-medium text-gray-500 flex items-center pr-1 justify-end border-b border-gray-50"
-                              style={{ height: TEACHER_CALENDAR_ROW_HEIGHT }}
-                            >
-                              {label}
-                            </div>
-                          ))}
-                        </div>
-                        {dates.map((date) => {
-                          const blocks = byTeacherAndDate[teacher][date] || []
-                          return (
-                            <div
-                              key={date}
-                              className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative"
-                              style={{ height: timelineHeight }}
-                            >
-                              {blocks.map((block, i) => {
-                                const startMin = minutesFromTimelineStart(block.start_time)
-                                const endMin = minutesFromTimelineStart(block.end_time)
-                                const duration = Math.max(1, endMin - startMin)
-                                const topPct = (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
-                                const heightPct = (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
-                                return (
-                                  <div
-                                    key={i}
-                                    className="absolute left-0.5 right-0.5 rounded border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-                                    style={{
-                                      top: `${topPct}%`,
-                                      height: `${heightPct}%`,
-                                      minHeight: 14,
-                                    }}
-                                    title={`${block.start_time} – ${block.end_time}`}
-                                  >
-                                    <span className="text-[10px] font-medium text-gray-700 truncate px-0.5">
-                                      {block.start_time}–{block.end_time}
-                                    </span>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))
                 })()}
               </div>
             )}
