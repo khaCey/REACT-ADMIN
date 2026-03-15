@@ -399,7 +399,7 @@ export default function Staff() {
           <section className="mb-8">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Teacher calendar</h3>
             <p className="text-sm text-gray-600 mb-3">
-              Time blocks from teacher_schedules for this week (from Google Calendar fetch or shift assignment).
+              Time blocks from teacher_schedules for this week (English teachers only; from Google Calendar fetch or shift assignment).
             </p>
             {isAdmin && (
               <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -413,7 +413,7 @@ export default function Staff() {
                   className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
                 >
                   <option value="">— Select staff —</option>
-                  {staffList.filter((s) => s.calendar_id).map((s) => (
+                  {staffList.filter((s) => s.calendar_id && s.staff_type === 'english_teacher').map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -473,25 +473,30 @@ export default function Staff() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {(() => {
+                      const englishTeachers = staffList
+                        .filter((s) => s.staff_type === 'english_teacher')
+                        .map((s) => s.name)
+                        .sort()
+                      const englishTeacherSet = new Set(englishTeachers)
                       const byTeacherAndDate = {}
                       for (const ev of teacherCalendarEvents) {
                         const t = ev.teacher_name || '—'
+                        if (!englishTeacherSet.has(t)) continue
                         if (!byTeacherAndDate[t]) byTeacherAndDate[t] = {}
                         const d = ev.date
                         if (!byTeacherAndDate[t][d]) byTeacherAndDate[t][d] = []
                         byTeacherAndDate[t][d].push(`${ev.start_time || '—'}–${ev.end_time || '—'}`)
                       }
-                      const teachers = Object.keys(byTeacherAndDate).sort()
-                      if (teachers.length === 0) {
+                      if (englishTeachers.length === 0) {
                         return (
                           <tr>
                             <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
-                              No schedule data for this week. Assign shifts above or fetch from Google Calendar (Edit staff → Fetch schedule).
+                              No English teachers in staff list. Add staff with type &quot;English Teacher&quot; to see the calendar.
                             </td>
                           </tr>
                         )
                       }
-                      return teachers.map((teacher) => (
+                      return englishTeachers.map((teacher) => (
                         <tr key={teacher}>
                           <td className="px-3 py-2 text-sm font-medium text-gray-900 border-r border-gray-100">
                             {teacher}
