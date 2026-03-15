@@ -360,11 +360,21 @@ app.post('/api/admin/clear-table', requireAuth, requireAdmin, async (req, res) =
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** Normalize ISO string: if it has no timezone (Z or +HH:MM), treat as JST so we never depend on server local time. */
+function normalizeIsoToUtc(iso) {
+  if (!iso || typeof iso !== 'string') return null;
+  const s = iso.trim();
+  if (!s) return null;
+  const hasTz = /Z$/i.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
+  const toParse = hasTz ? s : s.replace(/\.\d{3}$/, '') + '+09:00';
+  const utcMs = new Date(toParse).getTime();
+  return Number.isNaN(utcMs) ? null : utcMs;
+}
+
 /** Parse ISO dateTime to Asia/Tokyo calendar date (YYYY-MM-DD) and time (HH:MM). Uses instant + 9h then day boundary so the date is correct for Japan. */
 function isoToTokyoDateAndTime(iso) {
-  if (!iso || typeof iso !== 'string') return null;
-  const utcMs = new Date(iso).getTime();
-  if (Number.isNaN(utcMs)) return null;
+  const utcMs = normalizeIsoToUtc(iso);
+  if (utcMs == null) return null;
   const jstMs = utcMs + JST_OFFSET_MS;
   const jstDay = Math.floor(jstMs / MS_PER_DAY);
   const d = new Date(jstDay * MS_PER_DAY);
