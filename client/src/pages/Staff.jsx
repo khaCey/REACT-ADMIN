@@ -567,6 +567,22 @@ export default function Staff() {
                             </span>
                           ))}
                         </div>
+                        <div className="flex min-w-[600px] border-b border-gray-200">
+                          <div className="w-14 shrink-0" />
+                          {dateList.map((date) => {
+                            const d = new Date(date + 'T12:00:00Z')
+                            const dayIdx = d.getUTCDay()
+                            const dayName = DAY_NAMES[dayIdx === 0 ? 6 : dayIdx - 1]
+                            return (
+                              <div
+                                key={date}
+                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                              >
+                                {dayName} {d.getUTCDate()}
+                              </div>
+                            )
+                          })}
+                        </div>
                         <div className="flex min-w-[600px]">
                           <div
                             className="w-14 shrink-0 flex flex-col border-r border-gray-100"
