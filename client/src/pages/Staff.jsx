@@ -51,6 +51,17 @@ const TEACHER_CALENDAR_START_HOUR = 10
 const TEACHER_CALENDAR_END_HOUR = 21
 const TEACHER_CALENDAR_TOTAL_MINUTES = (TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR) * 60
 const TEACHER_CALENDAR_ROW_HEIGHT = 24
+/** Card colours per teacher (one calendar, different colour per staff). */
+const TEACHER_CARD_COLORS = [
+  'bg-blue-100 border-blue-300 text-blue-900',
+  'bg-amber-100 border-amber-300 text-amber-900',
+  'bg-emerald-100 border-emerald-300 text-emerald-900',
+  'bg-violet-100 border-violet-300 text-violet-900',
+  'bg-rose-100 border-rose-300 text-rose-900',
+  'bg-cyan-100 border-cyan-300 text-cyan-900',
+  'bg-orange-100 border-orange-300 text-orange-900',
+  'bg-slate-100 border-slate-300 text-slate-800',
+]
 
 /** Parse "HH:MM" or "HH:MM:SS" to minutes from TEACHER_CALENDAR_START_HOUR (10). Clamp to [0, TEACHER_CALENDAR_TOTAL_MINUTES]. */
 function minutesFromTimelineStart(timeStr) {
@@ -513,16 +524,16 @@ export default function Staff() {
                       .filter(Boolean)
                       .sort()
                     const englishTeacherSet = new Set(englishTeachers)
-                    const byTeacherAndDate = {}
+                    const byDate = {}
                     for (const ev of events) {
                       if (!ev || typeof ev !== 'object') continue
                       const t = (ev.teacher_name != null && String(ev.teacher_name)) || '—'
                       if (!englishTeacherSet.has(t)) continue
                       const d = ev.date != null ? String(ev.date).slice(0, 10) : ''
                       if (!d) continue
-                      if (!byTeacherAndDate[t]) byTeacherAndDate[t] = {}
-                      if (!byTeacherAndDate[t][d]) byTeacherAndDate[t][d] = []
-                      byTeacherAndDate[t][d].push({
+                      if (!byDate[d]) byDate[d] = []
+                      byDate[d].push({
+                        teacher: t,
                         start_time: ev.start_time != null ? String(ev.start_time) : '',
                         end_time: ev.end_time != null ? String(ev.end_time) : '',
                       })
@@ -535,15 +546,26 @@ export default function Staff() {
                         </div>
                       )
                     }
+                    const teacherColorIndex = {}
+                    englishTeachers.forEach((name, idx) => {
+                      teacherColorIndex[name] = TEACHER_CARD_COLORS[idx % TEACHER_CARD_COLORS.length]
+                    })
                     const hourLabels = Array.from(
                       { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
                       (_, i) => `${String(TEACHER_CALENDAR_START_HOUR + i).padStart(2, '0')}:00`
                     )
                     const timelineHeight = hourLabels.length * TEACHER_CALENDAR_ROW_HEIGHT
-                    return englishTeachers.map((teacher) => (
-                      <div key={teacher} className="border-b border-gray-100 last:border-b-0">
-                        <div className="px-3 py-2 text-sm font-semibold text-gray-900 bg-gray-50/80">
-                          {teacher}
+                    return (
+                      <>
+                        <div className="flex flex-wrap gap-2 mb-3 px-1">
+                          {englishTeachers.map((name) => (
+                            <span
+                              key={name}
+                              className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${teacherColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
+                            >
+                              {name}
+                            </span>
+                          ))}
                         </div>
                         <div className="flex min-w-[600px]">
                           <div
@@ -561,7 +583,7 @@ export default function Staff() {
                             ))}
                           </div>
                           {dateList.map((date) => {
-                            const blocks = (byTeacherAndDate[teacher] && byTeacherAndDate[teacher][date]) || []
+                            const blocks = byDate[date] || []
                             return (
                               <div
                                 key={date}
@@ -574,18 +596,22 @@ export default function Staff() {
                                   const duration = Math.max(1, endMin - startMin)
                                   const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
+                                  const colorClass = teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800'
                                   return (
                                     <div
                                       key={i}
-                                      className="absolute left-0.5 right-0.5 rounded border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+                                      className={`absolute left-0.5 right-0.5 rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
                                       style={{
                                         top: `${topPct}%`,
                                         height: `${heightPct}%`,
-                                        minHeight: 14,
+                                        minHeight: 20,
                                       }}
-                                      title={`${block.start_time} – ${block.end_time}`}
+                                      title={`${block.teacher}: ${block.start_time} – ${block.end_time}`}
                                     >
-                                      <span className="text-[10px] font-medium text-gray-700 truncate px-0.5">
+                                      <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
+                                        {block.teacher}
+                                      </span>
+                                      <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
                                         {block.start_time}–{block.end_time}
                                       </span>
                                     </div>
@@ -595,8 +621,8 @@ export default function Staff() {
                             )
                           })}
                         </div>
-                      </div>
-                    ))
+                      </>
+                    )
                   } catch (err) {
                     console.error('[Staff] Teacher calendar render error:', err)
                     return (
