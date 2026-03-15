@@ -401,6 +401,35 @@ export default function Staff() {
             <p className="text-sm text-gray-600 mb-3">
               Time blocks from teacher_schedules for this week (English teachers only; from Google Calendar fetch or shift assignment).
             </p>
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  const m = new Date(weekStart + 'T12:00:00Z')
+                  m.setUTCDate(m.getUTCDate() - 7)
+                  setWeekStart(m.toISOString().slice(0, 10))
+                }}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                aria-label="Previous week"
+              >
+                <ChevronLeft className="w-5 h-5 text-gray-600" />
+              </button>
+              <span className="font-medium text-gray-700 min-w-[220px] text-center">
+                {formatWeekLabel(weekStart)}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const m = new Date(weekStart + 'T12:00:00Z')
+                  m.setUTCDate(m.getUTCDate() + 7)
+                  setWeekStart(m.toISOString().slice(0, 10))
+                }}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                aria-label="Next week"
+              >
+                <ChevronRight className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
             {isAdmin && (
               <div className="flex flex-wrap items-center gap-3 mb-4">
                 <label className="text-sm font-medium text-gray-700">Fetch schedule for:</label>
