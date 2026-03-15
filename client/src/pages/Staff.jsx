@@ -21,28 +21,68 @@ function formatShiftDate(iso) {
   return isToday ? 'Today' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-/** Monday of the week containing d */
-function getMonday(d) {
-  const date = new Date(d)
-  const day = date.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  date.setDate(date.getDate() + diff)
-  return date
-}
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 
-/** Format a Date as YYYY-MM-DD in local calendar date */
-function toLocalDateString(d) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
+/** Given a Date (UTC moment), return YYYY-MM-DD for that moment in Japan (Asia/Tokyo). */
+function toJapanDateString(d) {
+  if (!d || !(d instanceof Date) || Number.isNaN(d.getTime())) return ''
+  const jst = new Date(d.getTime() + JST_OFFSET_MS)
+  const y = jst.getUTCFullYear()
+  const m = String(jst.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(jst.getUTCDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
 
-function formatWeekLabel(weekStart) {
-  const mon = new Date(weekStart + 'T12:00:00Z')
-  const sun = new Date(mon)
-  sun.setUTCDate(sun.getUTCDate() + 6)
-  return `${mon.getUTCDate()} ${mon.toLocaleDateString(undefined, { month: 'short' })} – ${sun.getUTCDate()} ${sun.toLocaleDateString(undefined, { month: 'short' })} ${sun.getUTCFullYear()}`
+/** Given YYYY-MM-DD as Japan calendar date, return Date at midnight Japan (as UTC moment). */
+function japanDateStringToUTC(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null
+  const match = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  const [, y, m, d] = match.map(Number)
+  const utcMidnightJapan = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - JST_OFFSET_MS
+  return new Date(utcMidnightJapan)
+}
+
+/** Day of week for a Japan date string (0=Sun, 1=Mon, ..., 6=Sat). Uses noon JST so UTC day matches Japan date. */
+function getDayOfWeekJapan(dateStr) {
+  const d = japanDateStringToUTC(dateStr)
+  if (!d) return 0
+  const noonJST = new Date(d.getTime() + 12 * 60 * 60 * 1000)
+  return noonJST.getUTCDay()
+}
+
+/** Add n days to a Japan date string; returns YYYY-MM-DD. */
+function addDaysJapan(dateStr, n) {
+  const d = japanDateStringToUTC(dateStr)
+  if (!d) return dateStr
+  d.setUTCDate(d.getUTCDate() + n)
+  return toJapanDateString(d)
+}
+
+/** Monday of the week that contains this Japan date string (YYYY-MM-DD). */
+function getMondayOfWeekJapan(japanDateStr) {
+  const dow = getDayOfWeekJapan(japanDateStr)
+  const diff = dow === 0 ? -6 : 1 - dow
+  return addDaysJapan(japanDateStr, diff)
+}
+
+/** Format week label for display in UI: "17 Mar – 23 Mar 2026" (Japan calendar dates). */
+function formatWeekLabelJapan(weekStartJapan) {
+  if (!weekStartJapan || typeof weekStartJapan !== 'string') return ''
+  const [y1, m1, d1] = weekStartJapan.slice(0, 10).split('-').map(Number)
+  const sunStr = addDaysJapan(weekStartJapan, 6)
+  const [y2, m2, d2] = sunStr.slice(0, 10).split('-').map(Number)
+  const monMonth = new Date(Date.UTC(y1, m1 - 1, 1)).toLocaleDateString('en-GB', { month: 'short' })
+  const sunMonth = new Date(Date.UTC(y2, m2 - 1, 1)).toLocaleDateString('en-GB', { month: 'short' })
+  return `${d1} ${monMonth} – ${d2} ${sunMonth} ${y2}`
+}
+
+/** Format a Japan date string as "Mon 17" for column headers (UI: Japan time). */
+function formatDayHeaderJapan(dateStr) {
+  const dow = getDayOfWeekJapan(dateStr)
+  const dayNum = parseInt(String(dateStr).slice(8, 10), 10) || 0
+  const dayName = DAY_NAMES[dow === 0 ? 6 : dow - 1]
+  return `${dayName} ${dayNum}`
 }
 
 const STAFF_TYPE_LABELS = { japanese_staff: 'Japanese Staff', english_teacher: 'English Teacher' }
@@ -90,8 +130,8 @@ export default function Staff() {
   const [shiftLog, setShiftLog] = useState([])
   const [weekSlots, setWeekSlots] = useState([])
   const [weekStart, setWeekStart] = useState(() => {
-    const m = getMonday(new Date())
-    return toLocalDateString(m)
+    const todayJapan = toJapanDateString(new Date())
+    return getMondayOfWeekJapan(todayJapan)
   })
   const [loading, setLoading] = useState(true)
   const [loadingShifts, setLoadingShifts] = useState(false)
@@ -188,13 +228,9 @@ export default function Staff() {
   )
   const weekDates = useCallback(() => {
     try {
-      const mon = new Date((weekStart || '').toString().trim() + 'T12:00:00Z')
-      if (Number.isNaN(mon.getTime())) return []
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(mon)
-        d.setUTCDate(d.getUTCDate() + i)
-        return d.toISOString().slice(0, 10)
-      })
+      const mon = (weekStart || '').toString().trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(mon)) return []
+      return Array.from({ length: 7 }, (_, i) => addDaysJapan(mon, i))
     } catch {
       return []
     }
@@ -282,9 +318,7 @@ export default function Staff() {
               <button
                 type="button"
                 onClick={() => {
-                  const m = new Date(weekStart + 'T12:00:00Z')
-                  m.setUTCDate(m.getUTCDate() - 7)
-                  setWeekStart(m.toISOString().slice(0, 10))
+                  setWeekStart(addDaysJapan(weekStart, -7))
                 }}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
                 aria-label="Previous week"
@@ -292,15 +326,11 @@ export default function Staff() {
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
               <span className="font-medium text-gray-700 min-w-[220px] text-center">
-                {formatWeekLabel(weekStart)}
+                {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
-                onClick={() => {
-                  const m = new Date(weekStart + 'T12:00:00Z')
-                  m.setUTCDate(m.getUTCDate() + 7)
-                  setWeekStart(m.toISOString().slice(0, 10))
-                }}
+                onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
                 aria-label="Next week"
               >
@@ -322,16 +352,11 @@ export default function Staff() {
                   <thead>
                     <tr className="bg-gray-50">
                       <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700 w-40">Shift</th>
-                      {dates.map((date) => {
-                        const d = new Date(date + 'T12:00:00Z')
-                        const dayIdx = d.getUTCDay()
-                        const name = DAY_NAMES[dayIdx === 0 ? 6 : dayIdx - 1]
-                        return (
+                      {dates.map((date) => (
                           <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-[140px]">
-                            {name} {d.getUTCDate()}
+                            {formatDayHeaderJapan(date)}
                           </th>
-                        )
-                      })}
+                        ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -344,8 +369,7 @@ export default function Staff() {
                           {label}
                         </td>
                         {dates.map((date) => {
-                          const d = new Date(date + 'T12:00:00Z')
-                          const dow = d.getUTCDay()
+                          const dow = getDayOfWeekJapan(date)
                           const isWeekend = [0, 1, 6].includes(dow)
                           const isWeekday = [2, 3, 4, 5].includes(dow)
                           const shiftType =
@@ -435,9 +459,7 @@ export default function Staff() {
               <button
                 type="button"
                 onClick={() => {
-                  const m = new Date(weekStart + 'T12:00:00Z')
-                  m.setUTCDate(m.getUTCDate() - 7)
-                  setWeekStart(m.toISOString().slice(0, 10))
+                  setWeekStart(addDaysJapan(weekStart, -7))
                 }}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
                 aria-label="Previous week"
@@ -445,15 +467,11 @@ export default function Staff() {
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
               <span className="font-medium text-gray-700 min-w-[220px] text-center">
-                {formatWeekLabel(weekStart)}
+                {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
-                onClick={() => {
-                  const m = new Date(weekStart + 'T12:00:00Z')
-                  m.setUTCDate(m.getUTCDate() + 7)
-                  setWeekStart(m.toISOString().slice(0, 10))
-                }}
+                onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
                 className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
                 aria-label="Next week"
               >
@@ -569,19 +587,14 @@ export default function Staff() {
                         </div>
                         <div className="flex min-w-[600px] border-b border-gray-200">
                           <div className="w-14 shrink-0" />
-                          {dateList.map((date) => {
-                            const d = new Date(date + 'T12:00:00Z')
-                            const dayIdx = d.getUTCDay()
-                            const dayName = DAY_NAMES[dayIdx === 0 ? 6 : dayIdx - 1]
-                            return (
-                              <div
-                                key={date}
-                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
-                              >
-                                {dayName} {d.getUTCDate()}
-                              </div>
-                            )
-                          })}
+                          {dateList.map((date) => (
+                            <div
+                              key={date}
+                              className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                            >
+                              {formatDayHeaderJapan(date)}
+                            </div>
+                          ))}
                         </div>
                         <div className="flex min-w-[600px]">
                           <div
