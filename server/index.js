@@ -385,15 +385,6 @@ function isoToTokyoDateAndTime(iso) {
   return { date: dateStr, time: timeStr };
 }
 
-/** Add one day to YYYY-MM-DD. Corrects for GAS/Calendar API returning dates one day early. */
-function addOneDay(dateStr) {
-  if (!dateStr || typeof dateStr !== 'string') return dateStr;
-  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return dateStr;
-  const d = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10) + 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-}
-
 /** Current month in Japan (Asia/Tokyo): { year, month } and ISO range for that month (start of first day JST, start of first day next month JST). */
 function getCurrentMonthJapanRange() {
   const now = new Date();
@@ -538,15 +529,21 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         console.warn('[fetch-staff-schedule] GAS returned 0 events for', teacherName, '; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
       }
       const rows = [];
-      for (const ev of events) {
-        const start = ev.start?.dateTime || ev.start;
-        const end = ev.end?.dateTime || ev.end;
-        if (!start || !end) continue;
-        const startParsed = isoToTokyoDateAndTime(typeof start === 'string' ? start : start.dateTime);
-        const endParsed = isoToTokyoDateAndTime(typeof end === 'string' ? end : end.dateTime);
+      for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        const startRaw = ev.start?.dateTime || ev.start;
+        const endRaw = ev.end?.dateTime || ev.end;
+        if (!startRaw || !endRaw) continue;
+        const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
+        const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
+        const startParsed = isoToTokyoDateAndTime(startStr);
+        const endParsed = isoToTokyoDateAndTime(endStr);
         if (!startParsed || !endParsed) continue;
+        if (i === 0) {
+          console.log('[fetch-staff-schedule]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
+        }
         rows.push({
-          date: addOneDay(startParsed.date),
+          date: startParsed.date,
           start_time: startParsed.time,
           end_time: endParsed.time,
         });
@@ -627,19 +624,20 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       console.warn('[fetch-staff-schedule/:id] GAS returned 0 events; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
     }
     const rows = [];
-    for (const ev of events) {
-      const start = ev.start?.dateTime || ev.start;
-      const end = ev.end?.dateTime || ev.end;
-      if (!start || !end) continue;
-      const startParsed = isoToTokyoDateAndTime(typeof start === 'string' ? start : start.dateTime);
-      const endParsed = isoToTokyoDateAndTime(typeof end === 'string' ? end : end.dateTime);
-      if (!startParsed || !endParsed) continue;
-      rows.push({
-        date: addOneDay(startParsed.date),
-        start_time: startParsed.time,
-        end_time: endParsed.time,
-      });
-    }
+    events.forEach((ev, i) => {
+      const startRaw = ev.start?.dateTime || ev.start;
+      const endRaw = ev.end?.dateTime || ev.end;
+      if (!startRaw || !endRaw) return;
+      const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
+      const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
+      const startParsed = isoToTokyoDateAndTime(startStr);
+      const endParsed = isoToTokyoDateAndTime(endStr);
+      if (!startParsed || !endParsed) return;
+      if (i === 0) {
+        console.log('[fetch-staff-schedule/:id]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
+      }
+      rows.push({ date: startParsed.date, start_time: startParsed.time, end_time: endParsed.time });
+    });
 
     await query(
       `DELETE FROM teacher_schedules WHERE teacher_name = $1 AND date >= $2::date AND date <= $3::date`,
