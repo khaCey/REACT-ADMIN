@@ -245,25 +245,21 @@ export default function Dashboard() {
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
-                                {showPaymentBadges(lesson) && (
-                                  <>
-                                    <span
-                                      className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
-                                    >
-                                      {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
-                                    </span>
-                                    {todayDate && (
-                                      <span
-                                        className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} bg-slate-100 text-slate-700`}
-                                      >
-                                        {(() => {
-                                          const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
-                                          const next = new Date(y, m, 1)
-                                          return `${next.getMonth() + 1}月分のお月謝`
-                                        })()}
-                                      </span>
-                                    )}
-                                  </>
+                                <span
+                                  className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                                >
+                                  {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
+                                </span>
+                                {showPaymentBadges(lesson) && todayDate && (
+                                  <span
+                                    className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} bg-slate-100 text-slate-700`}
+                                  >
+                                    {(() => {
+                                      const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
+                                      const next = new Date(y, m, 1)
+                                      return `${next.getMonth() + 1}月分のお月謝`
+                                    })()}
+                                  </span>
                                 )}
                               </div>
                             </article>
