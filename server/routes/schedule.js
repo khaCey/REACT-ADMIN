@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
+import { parseJstToUtc, getTodayJstDateStr, getJstMinutesOfDay } from '../lib/timezone.js';
 
 const router = Router();
 
 /** Test route: GET /api/schedule returns 200 so the mount can be verified */
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
 
-/** Get scheduled events and teacher shifts for a week (booking calendar). week_start = YYYY-MM-DD (Monday). */
+/** Get scheduled events and teacher shifts for a week (booking calendar). week_start = YYYY-MM-DD (Monday). Slot keys and slotTypes use Asia/Tokyo. */
 router.get('/week', async (req, res) => {
   try {
     const weekStart = req.query.week_start;
@@ -16,10 +17,14 @@ router.get('/week', async (req, res) => {
     }
     const [scheduleResult, teachersResult] = await Promise.all([
       query(
-        `SELECT date, start, status FROM monthly_schedule
-         WHERE date >= $1::date AND date < $1::date + interval '7 days'
-         AND (status IS NULL OR status <> 'cancelled')
-         ORDER BY date, start`,
+        `SELECT
+           to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS date_jst,
+           to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
+           m.is_kids_lesson
+         FROM monthly_schedule m
+         WHERE m.date >= $1::date AND m.date < $1::date + interval '7 days'
+         AND (m.status IS NULL OR m.status <> 'cancelled')
+         ORDER BY m.date, m.start`,
         [weekStart]
       ),
       query(
@@ -30,15 +35,16 @@ router.get('/week', async (req, res) => {
       ),
     ]);
     const bySlot = {};
+    const slotTypes = {};
     for (const r of scheduleResult.rows) {
-      const dateStr = r.date ? String(r.date).trim().slice(0, 10) : '';
-      const s = r.start ? new Date(r.start) : null;
-      const timeStr = s && !isNaN(s.getTime())
-        ? `${String(s.getHours()).padStart(2, '0')}:${String(s.getMinutes()).padStart(2, '0')}`
-        : '';
+      const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
+      const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
       if (!dateStr || !timeStr) continue;
       const key = `${dateStr}T${timeStr}`;
       bySlot[key] = (bySlot[key] || 0) + 1;
+      const isKids = !!r.is_kids_lesson;
+      if (slotTypes[key] === undefined) slotTypes[key] = isKids ? 'kids' : 'adult';
+      else if (isKids) slotTypes[key] = 'kids';
     }
     const teachersBySlot = {};
     const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
@@ -59,7 +65,7 @@ router.get('/week', async (req, res) => {
     for (const k of Object.keys(teachersBySlot)) {
       teachersBySlot[k] = [...new Set(teachersBySlot[k])].sort();
     }
-    res.json({ slots: bySlot, teachersBySlot });
+    res.json({ slots: bySlot, teachersBySlot, slotTypes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -176,19 +182,17 @@ router.post('/book', async (req, res) => {
     const duration = Math.min(120, Math.max(30, Number(duration_minutes) || 50));
     const dateStr = String(date).trim().slice(0, 10);
     const [hh, mm] = String(time).trim().split(/[:\s]/).map((x) => parseInt(x, 10) || 0);
-    const startIso = `${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
-    const startDate = new Date(startIso);
-    if (isNaN(startDate.getTime())) {
+    const startDate = parseJstToUtc(dateStr, hh, mm);
+    if (!startDate) {
       return res.status(400).json({ error: 'Invalid date or time' });
     }
     const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
 
-    // Advance booking limit: max 90 days
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const bookingDay = new Date(startDate);
-    bookingDay.setHours(0, 0, 0, 0);
-    const daysAhead = Math.round((bookingDay - today) / (24 * 60 * 60 * 1000));
+    // Advance booking limit: max 90 days (compare calendar dates in JST)
+    const todayJst = getTodayJstDateStr();
+    const daysAhead = Math.round(
+      (new Date(dateStr + 'T12:00:00Z') - new Date(todayJst + 'T12:00:00Z')) / (24 * 60 * 60 * 1000)
+    );
     if (daysAhead > 90) {
       return res.status(400).json({
         error: 'Cannot book more than 90 days in advance. Please choose a date within the next 90 days.',
@@ -217,8 +221,8 @@ router.post('/book', async (req, res) => {
       }
     }
 
-    // Max simultaneous lessons = teachers available in that slot (including shift extensions up to 2h before/after)
-    const slotMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+    // Max simultaneous lessons = teachers available in that slot (including shift extensions up to 2h before/after). Slot time in JST to match teacher_schedules.
+    const slotMinutes = getJstMinutesOfDay(startDate);
     const teacherRows = await query(
       `SELECT t.teacher_name, t.start_time, t.end_time,
               COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
@@ -273,6 +277,11 @@ router.post('/book', async (req, res) => {
       ]
     );
     const newRow = insertResult.rows[0];
+    // #region agent log
+    if (newRow) {
+      fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'schedule.js:POST /book',message:'INSERT monthly_schedule ok',data:{eventId:newRow.event_id,studentName:newRow.student_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    }
+    // #endregion
     if (newRow) {
       await logChange(
         {

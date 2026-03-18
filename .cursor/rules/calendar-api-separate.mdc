@@ -1,0 +1,10 @@
+---
+description: Calendar API folder is a separate GAS app; do not commit it to this repo
+alwaysApply: true
+---
+
+# Calendar API — separate app
+
+- **`Calendar API/` is not part of REACT-ADMIN.** It is a standalone Google Apps Script project kept in the workspace for reference and local editing only.
+- **Do not** `git add`, commit, or push the `Calendar API/` directory. It is listed in `.gitignore`.
+- When changing GAS behavior, edit files under `Calendar API/` as needed, but **remind the user** to copy changes into their Apps Script project and deploy from the GAS editor (this folder is not versioned with the main app).

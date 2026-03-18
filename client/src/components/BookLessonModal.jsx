@@ -9,18 +9,25 @@ import { useToast } from '../context/ToastContext'
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-const TEACHER_COLORS = {
-  Sham: 'bg-[#33B679]',
-  Khacey: 'bg-[#F4511E]',
-  Ana: 'bg-[#D50000]',
-}
-const BAR_WIDTH = 6
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 
-function getMonday(d) {
-  const date = new Date(d)
-  const day = date.getDay()
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1)
-  return new Date(date.setDate(diff))
+/** Monday of the current week in Asia/Tokyo as YYYY-MM-DD (for slot keys and display). */
+function getMondayJstStr() {
+  const jst = new Date(Date.now() + JST_OFFSET_MS)
+  const y = jst.getUTCFullYear()
+  const m = jst.getUTCMonth()
+  const d = jst.getUTCDate()
+  const day = new Date(Date.UTC(y, m, d)).getUTCDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  const mon = new Date(Date.UTC(y, m, d + mondayOffset))
+  return `${mon.getUTCFullYear()}-${String(mon.getUTCMonth() + 1).padStart(2, '0')}-${String(mon.getUTCDate()).padStart(2, '0')}`
+}
+
+/** Add n days to YYYY-MM-DD, return YYYY-MM-DD. */
+function addDaysToDateStr(dateStr, n) {
+  const [y, mo, d] = dateStr.split('-').map(Number)
+  const date = new Date(Date.UTC(y, mo - 1, d + n))
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
 }
 
 function formatDateKey(date) {
@@ -30,20 +37,39 @@ function formatDateKey(date) {
   return `${y}-${m}-${d}`
 }
 
+/** True if the given JST date+time slot is in the past (slots are in Asia/Tokyo). */
+function isSlotPastJst(dateStr, timeStr) {
+  const iso = `${dateStr}T${timeStr}:00+09:00`
+  return new Date(iso).getTime() <= Date.now()
+}
+
+/** Day of week index for a JST date string (0=Mon, 6=Sun) for DAY_LABELS. */
+function getJstDayIndex(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00+09:00')
+  const utcDay = d.getUTCDay()
+  return utcDay === 0 ? 6 : utcDay - 1
+}
+
+/** Format YYYY-MM-DD for display (e.g. "Mar 17, 2025"). */
+function formatWeekLabel(dateStr) {
+  const [y, mo, d] = dateStr.split('-').map(Number)
+  const date = new Date(y, mo - 1, d)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 export default function BookLessonModal({ studentId, student, onClose, onBooked }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
-  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()))
+  const [weekStartStr, setWeekStartStr] = useState(getMondayJstStr)
   const [slots, setSlots] = useState({})
   const [teachersBySlot, setTeachersBySlot] = useState({})
+  const [slotTypes, setSlotTypes] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pendingSlot, setPendingSlot] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [breakWarning, setBreakWarning] = useState(null)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
-
-  const weekStartStr = formatDateKey(weekStart)
 
   useEffect(() => {
     setLoading(true)
@@ -53,22 +79,17 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
       .then((data) => {
         setSlots(data.slots || {})
         setTeachersBySlot(data.teachersBySlot || {})
+        setSlotTypes(data.slotTypes || {})
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
   }, [weekStartStr, lastSynced])
 
   const goWeek = (delta) => {
-    const next = new Date(weekStart)
-    next.setDate(next.getDate() + delta * 7)
-    setWeekStart(next)
+    setWeekStartStr(addDaysToDateStr(weekStartStr, delta * 7))
   }
 
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setDate(d.getDate() + i)
-    return d
-  })
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
 
   const handleSlotClick = (dateStr, timeStr) => {
     const key = `${dateStr}T${timeStr}`
@@ -95,6 +116,9 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
       })
       .then(() => {
         success('Lesson booked')
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'BookLessonModal.jsx:handleConfirmBook',message:'onBooked called after book',data:{studentId},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         onBooked?.()
         onClose()
       })
@@ -157,7 +181,7 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                 Previous Week
               </button>
               <h4 className="text-base font-semibold text-gray-900">
-                Week of {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                Week of {formatWeekLabel(weekStartStr)}
               </h4>
               <button
                 type="button"
@@ -174,10 +198,10 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                   <div className="flex-shrink-0 w-14 px-3 py-2.5 text-sm font-semibold text-center border-r border-white/20">
                     Time
                   </div>
-                  {weekDates.map((d) => (
-                    <div key={d.getTime()} className="flex-1 min-w-0 px-3 py-2.5 text-sm font-semibold text-center">
-                      <div>{DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</div>
-                      <div className="text-xs font-normal text-white/90 mt-0.5">{d.getDate()}</div>
+                  {weekDates.map((dateStr) => (
+                    <div key={dateStr} className="flex-1 min-w-0 px-3 py-2.5 text-sm font-semibold text-center">
+                      <div>{DAY_LABELS[getJstDayIndex(dateStr)]}</div>
+                      <div className="text-xs font-normal text-white/90 mt-0.5">{dateStr.slice(8)}</div>
                     </div>
                   ))}
                 </div>
@@ -192,61 +216,15 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                       </div>
                     ))}
                   </div>
-                  {weekDates.map((d) => {
-                    const dateStr = formatDateKey(d)
-                    const dayTeachers = [...new Set(
-                      TIME_SLOTS.flatMap((t) => teachersBySlot[`${dateStr}T${t}`] || [])
-                    )].sort((a, b) => {
-                      const aLast = Math.max(-1, ...TIME_SLOTS.map((t, i) =>
-                        (teachersBySlot[`${dateStr}T${t}`] || []).includes(a) ? i : -1
-                      ))
-                      const bLast = Math.max(-1, ...TIME_SLOTS.map((t, i) =>
-                        (teachersBySlot[`${dateStr}T${t}`] || []).includes(b) ? i : -1
-                      ))
-                      return (aLast < 0 ? 999 : aLast) - (bLast < 0 ? 999 : bLast)
-                    })
-                    const barAreaWidth = dayTeachers.length * BAR_WIDTH
-                    return (
-                      <div key={d.getTime()} className="flex-1 min-w-0 relative flex flex-col">
-                        {dayTeachers.flatMap((t, i) => {
-                          const shiftSlots = TIME_SLOTS
-                            .map((t2, idx) => ((teachersBySlot[`${dateStr}T${t2}`] || []).includes(t) ? idx : -1))
-                            .filter((idx) => idx >= 0)
-                          if (shiftSlots.length === 0) return []
-                          const runs = []
-                          for (const idx of shiftSlots) {
-                            if (runs.length > 0 && runs[runs.length - 1].end === idx) {
-                              runs[runs.length - 1].end = idx + 1
-                            } else {
-                              runs.push({ start: idx, end: idx + 1 })
-                            }
-                          }
-                          return runs.map((run, ri) => {
-                            const top = run.start * 30
-                            const height = (run.end - run.start) * 30
-                            const shiftRange =
-                              `${TIME_SLOTS[run.start]} – ${TIME_SLOTS[run.end] || TIME_SLOTS[run.end - 1]}`
-                            return (
-                              <div
-                                key={`${t}-${ri}`}
-                                className={`absolute left-0 z-10 cursor-pointer transition-opacity hover:opacity-80 rounded ${TEACHER_COLORS[t] || 'bg-gray-400'}`}
-                                style={{
-                                  width: BAR_WIDTH,
-                                  left: i * BAR_WIDTH,
-                                  top: `${top}px`,
-                                  height: `${height}px`,
-                                }}
-                                title={`${t} (${shiftRange})`}
-                              />
-                            )
-                          })
-                        })}
+                  {weekDates.map((dateStr) => (
+                      <div key={dateStr} className="flex-1 min-w-0 relative flex flex-col">
                         {TIME_SLOTS.map((timeStr) => {
                           const key = `${dateStr}T${timeStr}`
                           const booked = slots[key] || 0
                           const teachers = teachersBySlot[key] || []
                           const capacity = teachers.length
-                          const isPast = new Date(dateStr + 'T' + timeStr) <= new Date()
+                          const slotType = slotTypes[key]
+                          const isPast = isSlotPastJst(dateStr, timeStr)
                           const isFull = capacity > 0 && booked >= capacity
                           const oneLeft = capacity > 0 && booked === capacity - 1
                           const statusBead =
@@ -272,7 +250,6 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                               key={timeStr}
                               className="flex min-h-[30px] border-b border-r border-gray-100"
                             >
-                              {dayTeachers.length > 0 && <div style={{ width: barAreaWidth }} className="flex-shrink-0" />}
                               <button
                                 type="button"
                                 disabled={isPast || capacity === 0 || isFull}
@@ -291,13 +268,14 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusBead}`} aria-hidden />
                                 )}
                                 {label}
+                                {slotType === 'kids' && <span className="text-[10px] text-gray-500">子</span>}
+                                {slotType === 'adult' && <span className="text-[10px] text-gray-500">Adult</span>}
                               </button>
                             </div>
                           )
                         })}
                       </div>
-                    )
-                  })}
+                  ))}
                 </div>
               {loading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/80 z-20">

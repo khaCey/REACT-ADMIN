@@ -10,3 +10,6 @@ student-admin-*.json
 
 # Temp / askpass
 .tmp_askpass.cmd
+
+# Separate GAS project (local copy only; deploy from Apps Script)
+Calendar API/

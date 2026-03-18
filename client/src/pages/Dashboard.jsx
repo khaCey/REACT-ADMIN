@@ -106,6 +106,18 @@ function groupLessonsByHour(lessons) {
   return orderedHours.map((hour) => [hour, groups.get(hour) || []])
 }
 
+/** Group lessons that share the same event_id (one slot = one card: group or individual). */
+function slotsByEventId(lessons) {
+  if (!lessons || lessons.length === 0) return []
+  const byEvent = new Map()
+  for (const lesson of lessons) {
+    const id = lesson.event_id || `single-${lesson.student_name}-${lesson.start_time}`
+    if (!byEvent.has(id)) byEvent.set(id, [])
+    byEvent.get(id).push(lesson)
+  }
+  return [...byEvent.values()]
+}
+
 function lessonModeBadgeClass(mode) {
   const normalized = String(mode || 'unknown').toLowerCase()
   if (normalized === 'cafe') return 'bg-amber-100 text-amber-800'
@@ -202,31 +214,38 @@ export default function Dashboard() {
               <p className="text-sm text-gray-500 py-4">No lessons scheduled for today.</p>
             ) : (
               <div className="space-y-0 flex-1 min-h-0 overflow-y-auto pr-1">
-                {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => (
+                {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => {
+                  const slots = slotsByEventId(lessons)
+                  return (
                   <div key={hourLabel} className="h-[60px] p-0 m-0 flex items-start border-b border-gray-100">
                     <div className="w-14 h-[60px] leading-[60px] text-sm font-semibold text-gray-700 p-0 m-0">
                       {hourLabel}
                     </div>
                     <div className="flex-1 h-[60px] p-0 m-0">
-                      {lessons.length > 0 ? (
+                      {slots.length > 0 ? (
                         <div className="grid grid-cols-4 gap-1 h-[50px]">
-                          {lessons.map((lesson, idx) => {
-                            const isGroup = (lesson.group_type || '').toString().trim().toLowerCase() === 'group'
-                            const hasGroupInHour = lessons.some((l) => (l.group_type || '').toString().trim().toLowerCase() === 'group')
+                          {slots.map((slot, idx) => {
+                            const lesson = slot.length === 1
+                              ? slot[0]
+                              : {
+                                  event_id: slot[0].event_id,
+                                  student_name: slot.map((l) => l.student_name).join(', '),
+                                  student_id: slot[0].student_id,
+                                  paid_this_month: slot.every((l) => l.paid_this_month),
+                                  is_last_lesson_of_month: slot[0].is_last_lesson_of_month,
+                                  lesson_mode: slot[0].lesson_mode,
+                                  lesson_kind: slot[0].lesson_kind,
+                                }
+                            const isGroupSlot = slot.length > 1
+                            const n = slots.length
                             let colSpan
-                            if (hasGroupInHour) {
-                              colSpan = isGroup ? 'col-span-1' : 'col-span-2'
-                            } else if (lessons.length > 1) {
-                              const n = lessons.length
-                              if (n === 2) colSpan = 'col-span-2'
-                              else if (n === 3) colSpan = idx < 2 ? 'col-span-1' : 'col-span-2'
-                              else colSpan = 'col-span-1'
-                            } else {
-                              colSpan = 'col-span-4'
-                            }
+                            if (n === 1) colSpan = 'col-span-4'
+                            else if (n === 2) colSpan = 'col-span-2'
+                            else if (n === 3) colSpan = idx < 2 ? 'col-span-1' : 'col-span-2'
+                            else colSpan = 'col-span-1'
                             return (
                             <article
-                              key={`${lesson.event_id}_${lesson.student_name}`}
+                              key={lesson.event_id + (slot.length > 1 ? '_group' : '_' + lesson.student_name)}
                               role={lesson.student_id ? 'button' : undefined}
                               tabIndex={lesson.student_id ? 0 : -1}
                               onClick={() => {
@@ -237,27 +256,27 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroup ? 'px-1' : 'px-2'} ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroupSlot ? 'px-1' : 'px-2'} ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
                               <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0">
-                                {lesson.student_name}
+                                {isGroupSlot ? `グループ: ${lesson.student_name}` : lesson.student_name}
                               </span>
                               <div className="flex items-center gap-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 {!isDemoLesson(lesson) && (
                                 <span
-                                  className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                                  className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
                                 >
                                   {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
                                 )}
                                 {!isDemoLesson(lesson) && showPaymentBadges(lesson) && todayDate && (
                                   <span
-                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} bg-slate-100 text-slate-700`}
+                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} bg-slate-100 text-slate-700`}
                                   >
                                     {(() => {
                                       const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
@@ -277,7 +296,8 @@ export default function Dashboard() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>
