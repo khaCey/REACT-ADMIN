@@ -188,6 +188,7 @@ router.get('/today-lessons', async (_req, res) => {
              ELSE 'unknown'
            END
          ) AS lesson_mode,
+         lower(trim(COALESCE(m.lesson_kind, ''))) AS lesson_kind,
          m.date::text AS date,
          CASE WHEN m.start IS NOT NULL THEN to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') ELSE NULL END AS start_time,
          EXISTS (
