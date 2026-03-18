@@ -420,8 +420,8 @@ function isBreakEvent(ev) {
   return s.includes('break');
 }
 
-/** Skip events that are about 1 hour long (likely breaks) when storing teacher schedules. */
-function isOneHourEvent(startTime, endTime) {
+/** Skip events that are 1 hour or less (likely breaks/short blocks) when storing teacher schedules. */
+function isShortEvent(startTime, endTime) {
   const toMins = (t) => {
     if (!t || typeof t !== 'string') return NaN;
     const parts = String(t).trim().split(':').map(Number);
@@ -433,7 +433,7 @@ function isOneHourEvent(startTime, endTime) {
   if (Number.isNaN(startM) || Number.isNaN(endM)) return false;
   let duration = endM - startM;
   if (duration < 0) duration += 24 * 60;
-  return duration >= 55 && duration <= 65;
+  return duration <= 65;
 }
 
 /** URL and key for staff-schedule GAS only. Use STAFF_SCHEDULE_GAS_URL so you do not call the student-schedule GAS (CALENDAR_POLL_URL). */
@@ -565,7 +565,7 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         const endParsed = isoToTokyoDateAndTime(endStr);
         if (!startParsed || !endParsed) continue;
         if (isBreakEvent(ev)) continue;
-        if (isOneHourEvent(startParsed.time, endParsed.time)) continue;
+        if (isShortEvent(startParsed.time, endParsed.time)) continue;
         if (rows.length === 0) {
           console.log('[fetch-staff-schedule]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
         }
@@ -661,7 +661,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       const endParsed = isoToTokyoDateAndTime(endStr);
       if (!startParsed || !endParsed) return;
       if (isBreakEvent(ev)) return;
-      if (isOneHourEvent(startParsed.time, endParsed.time)) return;
+      if (isShortEvent(startParsed.time, endParsed.time)) return;
       if (rows.length === 0) {
         console.log('[fetch-staff-schedule/:id]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
       }
