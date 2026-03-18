@@ -162,3 +162,15 @@ table.table thead.bg-green-600 {
   font-weight: 700;
   font-size: 0.75rem;
 }
+
+/* Dashboard today-lesson cards: container query for fluid name and badge text */
+.dashboard-lesson-card {
+  container-type: inline-size;
+}
+.dashboard-lesson-card .dashboard-lesson-card-name {
+  font-size: clamp(0.5rem, 8cqw, 0.875rem);
+  min-width: 0;
+}
+.dashboard-lesson-card .dashboard-lesson-card-badge {
+  font-size: clamp(0.4rem, 6cqw, 0.75rem);
+}

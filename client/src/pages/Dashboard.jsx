@@ -237,27 +237,27 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroup ? 'px-1' : 'px-2'} ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroup ? 'px-1' : 'px-2'} ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
-                              <span className={`truncate font-semibold ${isGroup ? 'text-[9px]' : 'text-sm'} text-gray-900`}>
+                              <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0">
                                 {lesson.student_name}
                               </span>
                               <div className="flex items-center gap-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 {!isDemoLesson(lesson) && (
                                 <span
-                                  className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                                  className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
                                 >
                                   {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
                                 )}
                                 {!isDemoLesson(lesson) && showPaymentBadges(lesson) && todayDate && (
                                   <span
-                                    className={`inline-flex rounded font-medium ${isGroup ? 'px-1 py-0 text-[8px]' : 'px-1.5 py-0 text-xs'} bg-slate-100 text-slate-700`}
+                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroup ? 'px-1 py-0' : 'px-1.5 py-0'} bg-slate-100 text-slate-700`}
                                   >
                                     {(() => {
                                       const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
