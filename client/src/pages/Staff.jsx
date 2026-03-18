@@ -112,6 +112,31 @@ function minutesFromTimelineStart(timeStr) {
   const fromStart = minutes - TEACHER_CALENDAR_START_HOUR * 60
   return Math.max(0, Math.min(TEACHER_CALENDAR_TOTAL_MINUTES, fromStart))
 }
+
+/** Horizontal cascade index for overlapping blocks (same day). */
+function cascadeIndicesForBlocks(blocks) {
+  if (!blocks?.length) return []
+  const meta = blocks.map((block, origIdx) => {
+    const startMin = minutesFromTimelineStart(block.start_time)
+    const endMin = minutesFromTimelineStart(block.end_time)
+    const lo = Math.min(startMin, endMin)
+    const hi = Math.max(startMin, endMin)
+    return { origIdx, startMin: lo, endMin: Math.max(lo + 1, hi) }
+  })
+  meta.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin)
+  const out = new Array(blocks.length)
+  for (let i = 0; i < meta.length; i++) {
+    let maxC = -1
+    for (let j = 0; j < i; j++) {
+      if (meta[i].startMin < meta[j].endMin && meta[j].startMin < meta[i].endMin) {
+        maxC = Math.max(maxC, out[meta[j].origIdx])
+      }
+    }
+    out[meta[i].origIdx] = maxC + 1
+  }
+  return out
+}
+
 const SHIFT_DEFAULT_TIMES = {
   weekday_morning: { start: '10:00', end: '16:00' },
   weekday_evening: { start: '16:00', end: '21:00' },
@@ -613,10 +638,11 @@ export default function Staff() {
                           </div>
                           {dateList.map((date) => {
                             const blocks = byDate[date] || []
+                            const cascadeIndices = cascadeIndicesForBlocks(blocks)
                             return (
                               <div
                                 key={date}
-                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative"
+                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
                                 style={{ height: timelineHeight }}
                               >
                                 {blocks.map((block, i) => {
@@ -626,14 +652,19 @@ export default function Staff() {
                                   const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const colorClass = teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800'
+                                  const cascadeIndex = cascadeIndices[i] ?? 0
                                   return (
                                     <div
                                       key={i}
-                                      className={`absolute left-0.5 right-0.5 rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                      className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
                                       style={{
                                         top: `${topPct}%`,
                                         height: `${heightPct}%`,
                                         minHeight: 20,
+                                        width: '80%',
+                                        left: `${cascadeIndex * 10}px`,
+                                        right: 'auto',
+                                        zIndex: 10 + cascadeIndex,
                                       }}
                                       title={`${block.teacher}: ${block.start_time} – ${block.end_time}`}
                                     >
