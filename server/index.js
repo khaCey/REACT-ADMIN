@@ -71,6 +71,9 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
   try {
     const { id } = req.params;
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'index.js:GET latest-by-month',message:'handler hit',data:{studentId:id},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     const studentResult = await query('SELECT id, name FROM students WHERE id = $1', [id]);
     if (studentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found' });
@@ -411,6 +414,28 @@ function normaliseGasEvents(json) {
   return [];
 }
 
+/** Skip past break events (~1h) when storing teacher schedules. Summary contains "break" (case-insensitive). */
+function isBreakEvent(ev) {
+  const s = (ev.summary || '').trim().toLowerCase();
+  return s.includes('break');
+}
+
+/** Skip events that are about 1 hour long (likely breaks) when storing teacher schedules. */
+function isOneHourEvent(startTime, endTime) {
+  const toMins = (t) => {
+    if (!t || typeof t !== 'string') return NaN;
+    const parts = String(t).trim().split(':').map(Number);
+    if (parts.length < 2) return NaN;
+    return (parts[0] || 0) * 60 + (parts[1] || 0);
+  };
+  const startM = toMins(startTime);
+  const endM = toMins(endTime);
+  if (Number.isNaN(startM) || Number.isNaN(endM)) return false;
+  let duration = endM - startM;
+  if (duration < 0) duration += 24 * 60;
+  return duration >= 55 && duration <= 65;
+}
+
 /** URL and key for staff-schedule GAS only. Use STAFF_SCHEDULE_GAS_URL so you do not call the student-schedule GAS (CALENDAR_POLL_URL). */
 function getStaffScheduleGasConfig() {
   const url = (process.env.STAFF_SCHEDULE_GAS_URL || process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
@@ -539,7 +564,9 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         const startParsed = isoToTokyoDateAndTime(startStr);
         const endParsed = isoToTokyoDateAndTime(endStr);
         if (!startParsed || !endParsed) continue;
-        if (i === 0) {
+        if (isBreakEvent(ev)) continue;
+        if (isOneHourEvent(startParsed.time, endParsed.time)) continue;
+        if (rows.length === 0) {
           console.log('[fetch-staff-schedule]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
         }
         rows.push({
@@ -633,7 +660,9 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       const startParsed = isoToTokyoDateAndTime(startStr);
       const endParsed = isoToTokyoDateAndTime(endStr);
       if (!startParsed || !endParsed) return;
-      if (i === 0) {
+      if (isBreakEvent(ev)) return;
+      if (isOneHourEvent(startParsed.time, endParsed.time)) return;
+      if (rows.length === 0) {
         console.log('[fetch-staff-schedule/:id]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
       }
       rows.push({ date: startParsed.date, start_time: startParsed.time, end_time: endParsed.time });
