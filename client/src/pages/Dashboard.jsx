@@ -282,7 +282,7 @@ export default function Dashboard() {
             )}
           </section>
 
-          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <section className="rounded-lg border border-gray-200 bg-white p-6 pb-8 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
               <h3 className="text-lg font-semibold text-gray-900">
                 Metrics per month ({chartRangeYears} {chartRangeYears === 1 ? 'year' : 'years'} ending {formatEndMonthLabel(chartEndMonth)})
@@ -327,13 +327,13 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
-              Regular students (with at least one regular lesson), demo lessons, and students who made their first payment in that month.
+            <p className="text-sm text-gray-500 mb-5">
+              Students (with at least one regular lesson), demo lessons, and students who made their first payment in that month.
             </p>
             {mergeMetrics(metrics).length === 0 ? (
               <p className="text-sm text-gray-500 py-8">No data for this period.</p>
             ) : (
-              <div className="h-40 w-full">
+              <div className="h-52 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart
                     data={mergeMetrics(metrics)}
@@ -347,7 +347,7 @@ export default function Dashboard() {
                     <Line
                       type="monotone"
                       dataKey="regularStudents"
-                      name="Regular students"
+                      name="Students"
                       stroke="#16a34a"
                       strokeWidth={2}
                       dot={{ r: 3 }}
