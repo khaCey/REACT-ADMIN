@@ -4,6 +4,8 @@ import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import { api } from '../api'
+import LoadingSpinner from '../components/LoadingSpinner'
+import FullPageLoading from '../components/FullPageLoading'
 
 function formatBackupDate(iso) {
   if (!iso) return '—'
@@ -115,6 +117,10 @@ export default function Admin() {
     }
   }
 
+  if (backupsLoading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="w-full flex flex-col h-full min-h-0">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -141,16 +147,14 @@ export default function Admin() {
             type="button"
             onClick={handleCreateBackup}
             disabled={backupLoading}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <Database className="w-4 h-4" />
+            {backupLoading ? <LoadingSpinner size="xs" /> : <Database className="w-4 h-4" />}
             {backupLoading ? 'Creating…' : 'Create backup'}
           </button>
           <div className="mt-4">
             <h4 className="text-sm font-medium text-gray-700 mb-2">Backups (last 30 days)</h4>
-            {backupsLoading ? (
-              <p className="text-sm text-gray-500">Loading…</p>
-            ) : backups.length === 0 ? (
+            {backups.length === 0 ? (
               <p className="text-sm text-gray-500">No backups in the last 30 days. Create one above or wait for the daily run.</p>
             ) : (
               <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
@@ -244,9 +248,9 @@ export default function Admin() {
                 }
               }}
               disabled={!fetchOneStaffId || fetchOneLoading}
-              className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Calendar className="w-4 h-4" />
+              {fetchOneLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
               {fetchOneLoading ? 'Fetching…' : 'Fetch schedule'}
             </button>
             {fetchOneError && <span className="text-sm text-red-600">{fetchOneError}</span>}
@@ -268,8 +272,9 @@ export default function Admin() {
                 }
               }}
               disabled={testGasLoading}
-              className="px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 text-sm font-medium cursor-pointer disabled:opacity-50"
+              className="px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
             >
+              {testGasLoading && <LoadingSpinner size="xs" />}
               {testGasLoading ? 'Testing…' : 'Test GAS'}
             </button>
             <span className="text-xs text-gray-500">Uses selected staff&apos;s calendar ID, or first staff with calendar_id.</span>
@@ -314,9 +319,9 @@ export default function Admin() {
               }
             }}
             disabled={fetchScheduleLoading}
-            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <Calendar className="w-4 h-4" />
+            {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
             {fetchScheduleLoading ? 'Fetching…' : 'Fetch Staff Schedule (all)'}
           </button>
         </section>

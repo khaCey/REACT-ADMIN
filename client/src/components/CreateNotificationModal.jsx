@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 export default function CreateNotificationModal({ onClose, onCreated }) {
   const { success } = useToast()
@@ -10,7 +11,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
   const [message, setMessage] = useState('')
   const [targetStaffId, setTargetStaffId] = useState('')
   const [staffOptions, setStaffOptions] = useState([])
-  const [loadingStaff, setLoadingStaff] = useState(false)
+  const [loadingStaff, setLoadingStaff] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -82,6 +83,7 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
         className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
+        {(loadingStaff || submitting) && <ModalLoadingOverlay className="rounded-2xl" />}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">Create Notification</h2>
           <button
@@ -112,10 +114,10 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
             <select
               value={targetStaffId}
               onChange={(e) => setTargetStaffId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              disabled={loadingStaff}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-60"
             >
               <option value="">All staff</option>
-              {loadingStaff && <option value="" disabled>Loading staff...</option>}
               {staffOptions.map((staff) => (
                 <option key={staff.id} value={staff.id}>
                   {staff.name}
@@ -145,10 +147,10 @@ export default function CreateNotificationModal({ onClose, onCreated }) {
             </button>
             <button
               type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer"
+              disabled={submitting || loadingStaff}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer"
             >
-              {submitting ? 'Posting...' : 'Post Notification'}
+              {submitting ? 'Posting…' : 'Post Notification'}
             </button>
           </div>
         </form>

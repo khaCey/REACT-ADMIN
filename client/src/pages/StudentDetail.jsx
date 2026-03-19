@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { api } from '../api'
+import FullPageLoading from '../components/FullPageLoading'
 import { formatMonth, formatDate, formatDateUTC } from '../utils/format'
 
 function StatusBadge({ status }) {
@@ -47,7 +48,9 @@ export default function StudentDetail() {
       .finally(() => setLoading(false))
   }, [id, navigate])
 
-  if (loading) return <div className="p-4">Loading...</div>
+  if (loading) {
+    return <FullPageLoading />
+  }
   if (error) return <div className="p-4 text-red-600">Error: {error}</div>
   if (!student) return <div className="p-4">Student not found</div>
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 import StudentDetailsModal from '../components/StudentDetailsModal'
+import FullPageLoading from '../components/FullPageLoading'
 
 function StatusBadge({ status }) {
   const cls =
@@ -31,6 +32,10 @@ export default function UnscheduledLessons() {
     api.getUnscheduledLessonsStudents().then(setStudents).catch((e) => setError(e.message))
   }
 
+  if (loading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="w-full flex flex-col">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -42,7 +47,6 @@ export default function UnscheduledLessons() {
           ← All Students
         </Link>
       </div>
-      {loading && <div className="py-8 text-slate-500">Loading...</div>}
       {error && (
         <div className="py-4 text-red-600">
           {/postgres|connection|ECONNREFUSED|28P01|password/i.test(error)
@@ -50,7 +54,7 @@ export default function UnscheduledLessons() {
             : `Error: ${error}`}
         </div>
       )}
-      {!loading && !error && (
+      {!error && (
         <>
           <p className="mb-2 text-slate-600 text-sm">
             Active students with no scheduled lessons for the current month.

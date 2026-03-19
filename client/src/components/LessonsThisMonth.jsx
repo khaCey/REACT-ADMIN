@@ -95,10 +95,14 @@ function useLatestByMonth(studentId, refreshTrigger) {
   return { data, loading, error, activeMonth, setActiveMonth, refetch: fetchData }
 }
 
-export default function LessonsThisMonth({ studentId, student, onBookLesson, sectionClassName }) {
+export default function LessonsThisMonth({ studentId, student, onBookLesson, sectionClassName, onLoadingChange }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
   const { data, loading, error, activeMonth, setActiveMonth, refetch } = useLatestByMonth(studentId, lastSynced)
+
+  useEffect(() => {
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [removing, setRemoving] = useState(false)
@@ -179,11 +183,7 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
   }
 
   if (loading) {
-    return wrapSection(
-      <div className="flex flex-1 items-center justify-center text-slate-500 text-sm">
-        Loading…
-      </div>
-    )
+    return wrapSection(<div className="flex flex-1 min-h-0" aria-hidden />)
   }
 
   if (error) {

@@ -6,6 +6,8 @@ import { useToast } from '../context/ToastContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
+import LoadingSpinner from '../components/LoadingSpinner'
+import FullPageLoading from '../components/FullPageLoading'
 
 function formatShiftTime(iso) {
   if (!iso) return null
@@ -266,6 +268,10 @@ export default function Staff() {
     (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
   )
 
+  if (loading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-y-auto">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -283,10 +289,7 @@ export default function Staff() {
         <div className="mb-3 py-2 px-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
       )}
 
-      {loading ? (
-        <p className="py-8 text-gray-500">Loading…</p>
-      ) : (
-        <>
+      <>
           <section className="mb-8">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Staff list</h3>
             <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
@@ -370,7 +373,10 @@ export default function Staff() {
             )}
 
             {loadingShifts ? (
-              <p className="py-4 text-gray-500 text-sm">Loading shifts…</p>
+              <div className="flex flex-col items-center justify-center gap-2 py-8">
+                <LoadingSpinner size="sm" />
+                <p className="text-sm text-gray-500">Loading shifts…</p>
+              </div>
             ) : (
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
                 <table className="min-w-full border-collapse">
@@ -543,9 +549,9 @@ export default function Staff() {
                     }
                   }}
                   disabled={!fetchScheduleStaffId || fetchScheduleLoading}
-                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Calendar className="w-4 h-4" />
+                  {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
                   {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
                 </button>
                 {fetchScheduleError && (
@@ -554,7 +560,10 @@ export default function Staff() {
               </div>
             )}
             {teacherCalendarLoading ? (
-              <p className="py-4 text-gray-500 text-sm">Loading…</p>
+              <div className="flex flex-col items-center justify-center gap-2 py-8">
+                <LoadingSpinner size="sm" />
+                <p className="text-sm text-gray-500">Loading…</p>
+              </div>
             ) : (
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
                 {(() => {
@@ -726,7 +735,6 @@ export default function Staff() {
             </details>
           </section>
         </>
-      )}
 
       {showAddStaffModal && (
         <AddStaffModal

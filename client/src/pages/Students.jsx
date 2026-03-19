@@ -5,6 +5,7 @@ import { api } from '../api'
 import { useGuideTour } from '../context/GuideTourContext'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import AddStudentModal from '../components/AddStudentModal'
+import FullPageLoading from '../components/FullPageLoading'
 
 function StatusBadge({ status }) {
   const cls =
@@ -197,22 +198,7 @@ export default function Students() {
   );
 
   if (loading) {
-    return (
-      <div
-        className="fixed inset-0 z-[1100] flex items-center justify-center bg-gray-100"
-        aria-label="Loading"
-      >
-        <div className="relative w-24 h-24 flex items-center justify-center">
-          <div className="students-loading-spinner-ring absolute inset-0 rounded-full border-4 border-gray-200 border-t-green-600" />
-          <span
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-sm font-medium text-gray-700 whitespace-nowrap"
-            style={{ pointerEvents: 'none' }}
-          >
-            Green Square
-          </span>
-        </div>
-      </div>
-    )
+    return <FullPageLoading />
   }
 
   return (

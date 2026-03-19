@@ -12,6 +12,7 @@ import {
 import { LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from '../components/StudentDetailsModal'
+import FullPageLoading from '../components/FullPageLoading'
 
 function formatMonthLabel(yyyyMm) {
   if (!yyyyMm) return ''
@@ -177,6 +178,10 @@ export default function Dashboard() {
   const isDemoLesson = (lesson) =>
     (lesson.lesson_kind || '').toString().trim().toLowerCase() === 'demo'
 
+  if (loading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -199,9 +204,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {loading ? (
-        <p className="py-8 text-gray-500">Loading…</p>
-      ) : metrics ? (
+      {metrics ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full min-h-0">
           <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm h-full min-h-0 flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-3">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 function formatDateKey(d) {
   const y = d.getFullYear()
@@ -83,7 +84,8 @@ export default function ExtendShiftModal({ onClose }) {
     <div className="fixed inset-0 z-[10000]" role="dialog" aria-modal="true" aria-labelledby="extendShiftTitle">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
-        <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh] overflow-hidden">
+        <div className="relative w-full max-w-2xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh] overflow-hidden">
+          {(loading || saving) && <ModalLoadingOverlay />}
           <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-gray-200">
             <h3 id="extendShiftTitle" className="text-lg font-semibold text-gray-900">
               Extend teacher shift
@@ -114,9 +116,7 @@ export default function ExtendShiftModal({ onClose }) {
                 {error}
               </div>
             )}
-            {loading ? (
-              <div className="py-8 text-center text-gray-500">Loading teachers…</div>
-            ) : uniqueTeachers.length === 0 ? (
+            {loading ? null : uniqueTeachers.length === 0 ? (
               <p className="text-sm text-gray-500">No teacher shifts for this date. Add shifts in teacher_schedules first.</p>
             ) : (
               <ul className="space-y-4">

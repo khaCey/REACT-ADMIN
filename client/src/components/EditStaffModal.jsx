@@ -4,6 +4,7 @@ import { X, Trash2, Calendar } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -105,6 +106,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
         className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
+        {(submitting || fetchScheduleLoading) && <ModalLoadingOverlay className="rounded-2xl" />}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">Edit Staff</h2>
           <button
@@ -153,7 +155,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
                     }
                   }}
                   disabled={fetchScheduleLoading}
-                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
                   title="Fetch next 31 days from this staff's Google Calendar and save to database"
                 >
                   <Calendar className="w-4 h-4" />

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ExtendShiftModal from './ExtendShiftModal'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 import { useToast } from '../context/ToastContext'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
@@ -116,9 +117,6 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
       })
       .then(() => {
         success('Lesson booked')
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'BookLessonModal.jsx:handleConfirmBook',message:'onBooked called after book',data:{studentId},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
         onBooked?.()
         onClose()
       })
@@ -133,11 +131,14 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
   const studentName = student?.Name || student?.name || 'Student'
   const studentKanji = student?.['漢字'] || student?.name_kanji || ''
 
+  const modalBusy = loading || submitting
+
   const modal = (
     <div className="fixed inset-0 z-[9999]" role="dialog" aria-modal="true" aria-labelledby="bookLessonTitle">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto">
-        <div className="w-full max-w-6xl max-h-[90vh] rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col overflow-hidden">
+        <div className="relative w-full max-w-6xl max-h-[90vh] rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col overflow-hidden">
+          {modalBusy && <ModalLoadingOverlay />}
           <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-gray-200">
             <div>
               <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">Book a New Lesson</h3>
@@ -277,16 +278,6 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                       </div>
                   ))}
                 </div>
-              {loading && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/80 z-20">
-                  <div className="relative">
-                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-200" />
-                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-600 border-t-transparent absolute top-0 left-0" />
-                  </div>
-                  <p className="text-base font-medium text-gray-900">Loading Availability</p>
-                  <p className="text-sm text-gray-500">Checking schedule...</p>
-                </div>
-              )}
             </div>
           </div>
 

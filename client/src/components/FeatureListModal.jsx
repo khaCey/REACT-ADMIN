@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { AlertCircle, CalendarX, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from './StudentDetailsModal'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 /**
  * Legacy-style modal: Unpaid Students or Unscheduled Students.
@@ -66,7 +67,8 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
     <div className="fixed inset-0 z-[50]" role="dialog" aria-modal="true" aria-labelledby="featureModalTitle">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto">
-        <div className="w-full max-w-4xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh]">
+        <div className="relative w-full max-w-4xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh]">
+          {loading && <ModalLoadingOverlay className="rounded-2xl" />}
           <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-green-600 text-white rounded-t-2xl">
             <h3 id="featureModalTitle" className="text-lg font-semibold">{title}</h3>
             <button
@@ -135,16 +137,6 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && (
-                    <tr>
-                      <td colSpan={2} className="px-3 py-2 text-center text-gray-500">
-                        <div className="flex justify-center items-center py-4">
-                          <div className="animate-spin rounded-full h-6 w-6 border-2 border-green-600 border-t-transparent" />
-                          <span className="ml-2">Loading...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
                   {!loading && error && (
                     <tr>
                       <td colSpan={2} className="px-3 py-2 text-center text-red-600">

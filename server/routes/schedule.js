@@ -277,11 +277,6 @@ router.post('/book', async (req, res) => {
       ]
     );
     const newRow = insertResult.rows[0];
-    // #region agent log
-    if (newRow) {
-      fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'schedule.js:POST /book',message:'INSERT monthly_schedule ok',data:{eventId:newRow.event_id,studentName:newRow.student_name},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    }
-    // #endregion
     if (newRow) {
       await logChange(
         {

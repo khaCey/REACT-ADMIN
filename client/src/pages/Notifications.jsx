@@ -12,6 +12,7 @@ import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED, GUIDES_WIP_HIDDEN } from '../guides/wipFlags'
+import FullPageLoading from '../components/FullPageLoading'
 
 const PAGE_SIZE = 25
 
@@ -270,6 +271,10 @@ export default function Notifications() {
     }
   }
 
+  if (!notificationsDisabled && loading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="flex-1 min-h-0 bg-white rounded-lg shadow-sm border border-gray-200 p-6 overflow-auto">
       <div className="flex items-center gap-2 mb-6">
@@ -314,14 +319,13 @@ export default function Notifications() {
       </div>
       )}
 
-      {!notificationsDisabled && loading && <p className="text-sm text-gray-500">Loading notifications...</p>}
-      {!notificationsDisabled && !loading && error && <p className="text-sm text-red-600">{error}</p>}
+      {!notificationsDisabled && error && <p className="text-sm text-red-600">{error}</p>}
 
-      {!notificationsDisabled && !loading && !error && items.length === 0 && (
+      {!notificationsDisabled && !error && items.length === 0 && (
         <p className="text-sm text-gray-500">No notifications yet.</p>
       )}
 
-      {!notificationsDisabled && !loading && !error && items.length > 0 && (
+      {!notificationsDisabled && !error && items.length > 0 && (
         <div className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
           {items.map((item) => (
             <div key={item.id} className="p-4 bg-white hover:bg-gray-50 transition-colors">

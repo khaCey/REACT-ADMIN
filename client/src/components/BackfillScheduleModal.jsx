@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { Download, Calendar, X, FileSpreadsheet } from 'lucide-react'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -63,9 +64,10 @@ export default function BackfillScheduleModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200"
+        className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {loading && <ModalLoadingOverlay className="rounded-xl" />}
         <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Download className="w-5 h-5 text-green-600" />
@@ -178,7 +180,7 @@ export default function BackfillScheduleModal({ onClose }) {
             type="button"
             onClick={handleBackfill}
             disabled={loading}
-            className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
           >
             <Calendar className="w-4 h-4" />
             {loading ? 'Syncing…' : 'Sync'}

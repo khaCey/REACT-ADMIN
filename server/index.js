@@ -71,9 +71,6 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
   try {
     const { id } = req.params;
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/f7d0ba1f-da49-484f-9533-5a3c4a041766',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'161681'},body:JSON.stringify({sessionId:'161681',location:'index.js:GET latest-by-month',message:'handler hit',data:{studentId:id},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     const studentResult = await query('SELECT id, name FROM students WHERE id = $1', [id]);
     if (studentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found' });

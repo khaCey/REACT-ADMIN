@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { History } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
+import FullPageLoading from '../components/FullPageLoading'
 
 const ENTITY_LABELS = {
   students: 'Student',
@@ -359,6 +360,10 @@ export default function ChangeHistory() {
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
   }, [])
 
+  if (loading) {
+    return <FullPageLoading />
+  }
+
   return (
     <div className="w-full flex flex-col h-full min-h-0">
       <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
@@ -386,9 +391,7 @@ export default function ChangeHistory() {
           {error}
         </div>
       )}
-      {loading ? (
-        <p className="py-8 text-gray-500">Loading…</p>
-      ) : changes.length === 0 ? (
+      {changes.length === 0 ? (
         <p className="py-8 text-gray-500">No changes recorded yet.</p>
       ) : (
         <div className="flex-1 min-h-0 overflow-auto">

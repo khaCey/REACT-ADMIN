@@ -8,6 +8,7 @@ import NoteModal from './NoteModal'
 import EditStudentModal from './EditStudentModal'
 import LessonsThisMonth from './LessonsThisMonth'
 import BookLessonModal from './BookLessonModal'
+import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 function StatusBadge({ status }) {
   const cls =
@@ -41,6 +42,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [payments, setPayments] = useState([])
   const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
+  const [lessonsLoading, setLessonsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [paymentModal, setPaymentModal] = useState(null)
   const [noteModal, setNoteModal] = useState(null)
@@ -74,7 +76,11 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   }, [studentId])
 
   useEffect(() => {
-    if (!guideAction || !student || loading) return
+    setLessonsLoading(true)
+  }, [studentId])
+
+  useEffect(() => {
+    if (!guideAction || !student || loading || lessonsLoading) return
     if (lastGuideActionRef.current === guideAction) return
     lastGuideActionRef.current = guideAction
     if (guideAction === 'students.edit') {
@@ -124,7 +130,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (guideAction === 'students.view') {
       onGuideActionHandled?.()
     }
-  }, [guideAction, student, loading, payments, notes, editStudentModal, onGuideActionHandled])
+  }, [guideAction, student, loading, lessonsLoading, payments, notes, editStudentModal, onGuideActionHandled])
 
   useEffect(() => {
     if (!guideFocusKey) return
@@ -149,6 +155,9 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
 
   if (studentId == null) return null
 
+  const blockingOverlay =
+    loading || (!!student && lessonsLoading && !error)
+
   return createPortal(
     <>
     <div
@@ -158,11 +167,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     >
       <div className="relative w-full max-w-[1400px] h-[90vh] rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden flex flex-col">
         {guideFocusKey && <div className="absolute inset-0 z-[20] bg-black/45 pointer-events-none" aria-hidden="true" />}
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
-            <div className="w-12 h-12 rounded-full border-4 border-gray-300 border-t-green-600 animate-spin" />
-          </div>
-        )}
+        {blockingOverlay && <ModalLoadingOverlay />}
 
         {error && (
           <div className="p-6 text-red-600">
@@ -218,6 +223,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   studentId={studentId}
                   student={student}
                   onBookLesson={() => setBookLessonModal(true)}
+                  onLoadingChange={setLessonsLoading}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
 

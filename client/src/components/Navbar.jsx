@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import LoadingSpinner from './LoadingSpinner'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
@@ -209,7 +210,10 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
 
               <div className="max-h-80 overflow-y-auto">
                 {notificationsLoading && (
-                  <p className="p-4 text-sm text-gray-500">Loading unread notifications...</p>
+                  <div className="flex flex-col items-center justify-center gap-2 p-4">
+                    <LoadingSpinner size="xs" />
+                    <p className="text-sm text-gray-500 text-center">Loading unread notifications…</p>
+                  </div>
                 )}
                 {!notificationsLoading && notificationsError && (
                   <p className="p-4 text-sm text-red-600">{notificationsError}</p>
