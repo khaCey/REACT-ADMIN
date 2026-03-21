@@ -7,6 +7,7 @@
 import { createContext, useContext, useCallback, useRef, useEffect, useState } from 'react'
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
 import { api } from '../api'
+import { useAuth } from './AuthContext'
 
 const CalendarPollingContext = createContext(null)
 
@@ -16,6 +17,7 @@ export function useCalendarPollingContext() {
 }
 
 export function CalendarPollingProvider({ children, intervalMs = 300000 }) {
+  const { staff, loading: authLoading } = useAuth()
   const [lastSynced, setLastSynced] = useState(null)
   const syncInProgressRef = useRef(false)
 
@@ -44,7 +46,7 @@ export function CalendarPollingProvider({ children, intervalMs = 300000 }) {
     isConfigured,
   } = useCalendarPolling({
     intervalMs,
-    enabled: true,
+    enabled: !!staff && !authLoading,
   })
 
   // Sync to server when data changes (full fetch or diff applied)

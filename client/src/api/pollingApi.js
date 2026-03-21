@@ -1,13 +1,69 @@
 /**
  * Calendar Polling API — client for the GAS Calendar Webhook.
  * See POLLING_API_SPEC.md for full spec.
+ *
+ * Dev: VITE_CALENDAR_POLL_* from Vite env.
+ * Production (e.g. PM2): same values come from server root .env (CALENDAR_POLL_*) via /api/config/calendar-poll after login.
  */
 
-const getBaseUrl = () => import.meta.env.VITE_CALENDAR_POLL_URL || ''
-const getApiKey = () => import.meta.env.VITE_CALENDAR_POLL_API_KEY || ''
+const TOKEN_KEY = 'staff_token'
+
+const viteBase = () => (import.meta.env.VITE_CALENDAR_POLL_URL || '').trim()
+const viteKey = () => (import.meta.env.VITE_CALENDAR_POLL_API_KEY || '').trim()
+
+let runtimeUrl = ''
+let runtimeApiKey = ''
+let runtimeLoadPromise = null
+
+export function clearPollingRuntimeConfig() {
+  runtimeUrl = ''
+  runtimeApiKey = ''
+  runtimeLoadPromise = null
+}
+
+/**
+ * Load CALENDAR_POLL_* from API when Vite env is empty (production bundle).
+ */
+export async function ensurePollingConfig() {
+  if (viteBase() && viteKey()) return true
+  if (runtimeUrl && runtimeApiKey) return true
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return false
+  if (!runtimeLoadPromise) {
+    runtimeLoadPromise = (async () => {
+      try {
+        const res = await fetch('/api/config/calendar-poll', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json().catch(() => ({}))
+        const u = (data.url || '').trim()
+        const k = (data.apiKey || '').trim()
+        if (u && k) {
+          runtimeUrl = u.replace(/\/$/, '')
+          runtimeApiKey = k
+        }
+      } finally {
+        runtimeLoadPromise = null
+      }
+    })()
+  }
+  await runtimeLoadPromise
+  return !!(runtimeUrl && runtimeApiKey)
+}
+
+function getBaseUrl() {
+  const v = viteBase().replace(/\/$/, '')
+  if (v) return v
+  return (runtimeUrl || '').replace(/\/$/, '')
+}
+
+function getApiKey() {
+  return viteKey() || runtimeApiKey || ''
+}
 
 function buildUrl(full = false, opts = {}) {
-  const base = getBaseUrl().replace(/\/$/, '')
+  const base = getBaseUrl()
   const key = getApiKey()
   if (!base || !key) return null
   const params = new URLSearchParams({ key })
@@ -22,6 +78,7 @@ function buildUrl(full = false, opts = {}) {
  * @returns {Promise<{ changed: boolean, diff?: object }>}
  */
 export async function pollCalendarChanges() {
+  await ensurePollingConfig()
   const url = buildUrl(false)
   if (!url) {
     return { changed: false, _skipped: true }
@@ -39,6 +96,7 @@ export async function pollCalendarChanges() {
  * @returns {Promise<{ cacheVersion: number, lastUpdated: string, data: Array }>}
  */
 export async function fetchFullCalendar() {
+  await ensurePollingConfig()
   const url = buildUrl(true)
   if (!url) {
     return { data: [], _skipped: true }
@@ -57,6 +115,7 @@ export async function fetchFullCalendar() {
  * @returns {Promise<{ data: Array, backfill?: object }>}
  */
 export async function fetchCalendarMonth(month) {
+  await ensurePollingConfig()
   const url = buildUrl(true, { month })
   if (!url) return { data: [], _skipped: true }
   const res = await fetch(url)
@@ -71,6 +130,7 @@ export async function fetchCalendarMonth(month) {
  * @returns {Promise<{ data: Array, backfill?: object }>}
  */
 export async function fetchCalendarYear(year) {
+  await ensurePollingConfig()
   const url = buildUrl(true, { year: String(year) })
   if (!url) return { data: [], _skipped: true }
   const res = await fetch(url)
@@ -80,7 +140,7 @@ export async function fetchCalendarYear(year) {
 }
 
 /**
- * Check if polling is configured (URL and key present).
+ * Check if polling is configured (URL and key present — Vite or runtime from server).
  */
 export function isPollingConfigured() {
   return !!(getBaseUrl() && getApiKey())

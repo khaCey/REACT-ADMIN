@@ -7,7 +7,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { pollCalendarChanges, fetchFullCalendar, isPollingConfigured } from '../api/pollingApi'
+import {
+  pollCalendarChanges,
+  fetchFullCalendar,
+  isPollingConfigured,
+  ensurePollingConfig,
+} from '../api/pollingApi'
 
 function rowKey(row) {
   return `${row.eventID || ''}|${row.studentName || ''}`
@@ -46,6 +51,7 @@ export function useCalendarPolling(options = {}) {
   const mountedRef = useRef(true)
 
   const refetch = useCallback(async () => {
+    await ensurePollingConfig()
     if (!isPollingConfigured()) {
       setLoading(false)
       setData([])
@@ -77,7 +83,7 @@ export function useCalendarPolling(options = {}) {
 
   useEffect(() => {
     mountedRef.current = true
-    if (enabled && isPollingConfigured()) {
+    if (enabled) {
       refetch()
     } else {
       setLoading(false)
@@ -90,7 +96,7 @@ export function useCalendarPolling(options = {}) {
   }, [enabled, refetch])
 
   useEffect(() => {
-    if (!enabled || !isPollingConfigured()) return
+    if (!enabled || loading || !isPollingConfigured()) return
 
     pollRef.current = setInterval(async () => {
       try {
@@ -116,7 +122,7 @@ export function useCalendarPolling(options = {}) {
         pollRef.current = null
       }
     }
-  }, [enabled, intervalMs, onChanged, onError])
+  }, [enabled, intervalMs, loading, onChanged, onError])
 
   return {
     data,

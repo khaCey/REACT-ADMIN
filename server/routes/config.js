@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -29,6 +30,13 @@ router.get('/calendar-poll-configured', (_req, res) => {
   const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim();
   const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
   res.json({ configured: !!(url && key) });
+});
+
+/** URL + key for browser polling (production: from root .env CALENDAR_POLL_*; Vite build may omit VITE_*). */
+router.get('/calendar-poll', requireAuth, (_req, res) => {
+  const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim();
+  const apiKey = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+  res.json({ url, apiKey });
 });
 
 export default router;

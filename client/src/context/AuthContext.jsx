@@ -2,6 +2,7 @@
  * Auth context - staff login for shift start
  */
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { clearPollingRuntimeConfig } from '../api/pollingApi'
 
 const AuthContext = createContext(null)
 
@@ -36,6 +37,7 @@ export function AuthProvider({ children }) {
       } else {
         localStorage.removeItem(TOKEN_KEY)
         localStorage.removeItem(STAFF_KEY)
+        clearPollingRuntimeConfig()
         setStaff(null)
       }
     } catch {
@@ -76,6 +78,7 @@ export function AuthProvider({ children }) {
     }
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(STAFF_KEY)
+    clearPollingRuntimeConfig()
     setStaff(null)
   }, [])
 
