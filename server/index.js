@@ -690,17 +690,26 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
   }
 });
 
-/** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); prior months are preserved. */
+/** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); optional removed[] + reconcile drop stale rows. */
 app.post('/api/calendar-poll/sync', async (req, res) => {
   try {
-    const { data } = req.body || {};
+    const { data, removed } = req.body || {};
     if (!Array.isArray(data)) {
       return res.status(400).json({ error: 'Body must include { data: MonthlySchedule[] }' });
     }
-    console.log('[calendar-poll/sync] received', data.length, 'rows');
-    const { upserted, months } = await upsertMonthlySchedule(data);
-    console.log('[calendar-poll/sync] upserted', upserted, 'rows for months', months.sort().join(', '));
-    res.json({ ok: true, upserted, months });
+    if (removed != null && !Array.isArray(removed)) {
+      return res.status(400).json({ error: 'removed must be an array when present' });
+    }
+    console.log('[calendar-poll/sync] received', data.length, 'rows,', (removed || []).length, 'removed');
+    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, { removed: removed || [] });
+    console.log(
+      '[calendar-poll/sync] upserted',
+      upserted,
+      'rows for months',
+      months.sort().join(', '),
+      deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : ''
+    );
+    res.json({ ok: true, upserted, months, deletedOrphans: deletedOrphans || 0 });
   } catch (err) {
     console.error('[calendar-poll/sync] error:', err.message);
     res.status(500).json({ error: err.message });

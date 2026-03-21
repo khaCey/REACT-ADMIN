@@ -5,6 +5,24 @@
 import { query } from '../db/index.js';
 
 /**
+ * Delete rows for a calendar event removed at source. DB event_id is raw Google id or raw + _date + _time.
+ * @param {string} studentName
+ * @param {string} rawEventId
+ */
+export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
+  const sn = (studentName || '').trim();
+  const rid = (rawEventId || '').trim();
+  if (!sn || !rid) return 0;
+  const result = await query(
+    `DELETE FROM monthly_schedule
+     WHERE student_name = $1
+       AND (event_id = $2 OR starts_with(event_id, $2 || '_'))`,
+    [sn, rid]
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
  * Upsert schedule rows into monthly_schedule. Returns { upserted, months }.
  * @param {Array<{eventID?: string, event_id?: string, title?: string, date?: string, start?: string, end?: string, status?: string, studentName?: string, student_name?: string, isKidsLesson?: boolean, is_kids_lesson?: boolean, teacherName?: string, teacher_name?: string, lessonKind?: string, lesson_kind?: string, lessonMode?: string, lesson_mode?: string}>} data
  */
@@ -75,7 +93,11 @@ async function buildStudentNameToIdMap() {
   return singleMatch;
 }
 
-export async function upsertMonthlySchedule(data) {
+/**
+ * @param {Array<Record<string, unknown>>} data
+ * @returns {Promise<{ rows: Array<Record<string, unknown>>, months: Set<string>, incomingKeys: Set<string> }>}
+ */
+async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
   const months = new Set();
   const rows = [];
@@ -159,6 +181,66 @@ export async function upsertMonthlySchedule(data) {
     rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId });
   }
 
+  const incomingKeys = new Set(rows.map((row) => `${row.eventId}\t${row.studentName}`));
+  return { rows, months, incomingKeys };
+}
+
+/**
+ * Drop DB rows in each month that are not present in the incoming snapshot (calendar deleted / no longer in GAS cache).
+ * @param {Set<string>} months - YYYY-MM
+ * @param {Set<string>} incomingKeys - `${eventId}\t${studentName}`
+ */
+async function reconcileMonthsToSnapshot(months, incomingKeys) {
+  let deleted = 0;
+  for (const ym of months) {
+    const existing = await query(
+      `SELECT event_id, student_name FROM monthly_schedule
+       WHERE date IS NOT NULL AND to_char(date, 'YYYY-MM') = $1`,
+      [ym]
+    );
+    for (const r of existing.rows || []) {
+      const k = `${r.event_id}\t${r.student_name}`;
+      if (!incomingKeys.has(k)) {
+        await query('DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
+          r.event_id,
+          r.student_name,
+        ]);
+        deleted++;
+      }
+    }
+  }
+  return deleted;
+}
+
+/**
+ * @param {Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>} removed
+ */
+async function applyRemovedFromPoll(removed) {
+  let n = 0;
+  if (!Array.isArray(removed)) return n;
+  for (const item of removed) {
+    const raw = (item?.eventID ?? item?.event_id ?? '').toString().trim();
+    const sn = (item?.studentName ?? item?.student_name ?? '').toString().trim();
+    if (!raw || !sn) continue;
+    n += await deleteMonthlyScheduleByRawEvent(sn, raw);
+  }
+  return n;
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} data
+ * @param {{ removed?: Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>, reconcile?: boolean }} [options] - reconcile: delete DB rows in snapshot months not in `data` (default true).
+ */
+export async function upsertMonthlySchedule(data, options = {}) {
+  const { removed = [], reconcile = true } = options;
+  await applyRemovedFromPoll(removed);
+
+  const { rows, months, incomingKeys } = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
+  let deletedOrphans = 0;
+  if (reconcile && months.size > 0) {
+    deletedOrphans = await reconcileMonthsToSnapshot(months, incomingKeys);
+  }
+
   let upserted = 0;
   for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId } of rows) {
     // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
@@ -180,5 +262,10 @@ export async function upsertMonthlySchedule(data) {
     upserted++;
   }
 
-  return { upserted, months: Array.from(months) };
+  return {
+    upserted,
+    months: Array.from(months),
+    deletedOrphans,
+    removedRows: Array.isArray(removed) ? removed.length : 0,
+  };
 }

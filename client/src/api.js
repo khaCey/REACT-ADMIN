@@ -125,8 +125,11 @@ export const api = {
   updateScheduleExtend: (body) =>
     fetchApi('/schedule/extend', { method: 'PUT', body: JSON.stringify(body) }),
 
-  syncCalendarPoll: (data) =>
-    fetchApi('/calendar-poll/sync', { method: 'POST', body: JSON.stringify({ data }) }),
+  syncCalendarPoll: ({ data = [], removed = [] } = {}) =>
+    fetchApi('/calendar-poll/sync', {
+      method: 'POST',
+      body: JSON.stringify({ data: Array.isArray(data) ? data : [], removed: Array.isArray(removed) ? removed : [] }),
+    }),
 
   /** Server-side backfill (uses .env on server; no client build needed) */
   backfillFromCalendar: (body) =>
