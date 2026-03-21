@@ -44,9 +44,11 @@ function isSlotPastJst(dateStr, timeStr) {
   return new Date(iso).getTime() <= Date.now()
 }
 
-/** Day of week index for a JST date string (0=Mon, 6=Sun) for DAY_LABELS. */
+/** Day of week index for a JST civil date string YYYY-MM-DD (0=Mon, 6=Sun) for DAY_LABELS. */
 function getJstDayIndex(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00+09:00')
+  // Noon JST stays on the same UTC calendar day as the JST date; midnight JST is "yesterday" in UTC,
+  // so getUTCDay() was wrong (e.g. Thu + 20 when the 20th was Friday in Japan).
+  const d = new Date(`${dateStr}T12:00:00+09:00`)
   const utcDay = d.getUTCDay()
   return utcDay === 0 ? 6 : utcDay - 1
 }

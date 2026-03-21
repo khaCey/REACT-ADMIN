@@ -25,7 +25,10 @@ export default function Login() {
     setSubmitting(true)
     try {
       await login(name.trim())
-      navigate(from, { replace: true })
+      navigate(from, {
+        replace: true,
+        state: { ...location.state, openPostLoginUnread: true },
+      })
     } catch (err) {
       setError(err.message || 'Login failed')
     } finally {

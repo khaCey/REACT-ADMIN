@@ -107,16 +107,51 @@ function groupLessonsByHour(lessons) {
   return orderedHours.map((hour) => [hour, groups.get(hour) || []])
 }
 
-/** Group lessons that share the same event_id (one slot = one card: group or individual). */
-function slotsByEventId(lessons) {
-  if (!lessons || lessons.length === 0) return []
+/** Stable order within an hour: same calendar slot together, then by name. */
+function sortLessonsForDisplay(lessons) {
+  return [...(lessons || [])].sort((a, b) => {
+    const ea = String(a.event_id || '')
+    const eb = String(b.event_id || '')
+    if (ea !== eb) return ea.localeCompare(eb)
+    return String(a.student_name || '').localeCompare(String(b.student_name || ''))
+  })
+}
+
+/**
+ * One hour → visual rows: each distinct event_id is a "group".
+ * - Single-student (solo) group: one full-width row (col-span-4).
+ * - Multi-student group: pairs of half-width cards (col-span-2); overflow students start a new row.
+ */
+function buildHourLayoutSegments(lessons) {
+  const sorted = sortLessonsForDisplay(lessons)
+  const eventOrder = []
   const byEvent = new Map()
-  for (const lesson of lessons) {
-    const id = lesson.event_id || `single-${lesson.student_name}-${lesson.start_time}`
-    if (!byEvent.has(id)) byEvent.set(id, [])
-    byEvent.get(id).push(lesson)
+  let soloCounter = 0
+  for (const lesson of sorted) {
+    const rawId = lesson.event_id
+    const hasEvent = rawId != null && String(rawId).trim() !== ''
+    const key = hasEvent
+      ? String(rawId)
+      : `__solo_${soloCounter++}_${lesson.student_id ?? ''}_${lesson.start_time ?? ''}_${lesson.student_name ?? ''}`
+    if (!byEvent.has(key)) {
+      byEvent.set(key, [])
+      eventOrder.push(key)
+    }
+    byEvent.get(key).push(lesson)
   }
-  return [...byEvent.values()]
+
+  const segments = []
+  for (const key of eventOrder) {
+    const group = byEvent.get(key)
+    if (group.length === 1) {
+      segments.push({ layout: 'full', lessons: group })
+    } else {
+      for (let i = 0; i < group.length; i += 2) {
+        segments.push({ layout: 'pair', lessons: group.slice(i, i + 2) })
+      }
+    }
+  }
+  return segments
 }
 
 function lessonModeBadgeClass(mode) {
@@ -218,37 +253,21 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-0 flex-1 min-h-0 overflow-y-auto pr-1">
                 {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => {
-                  const slots = slotsByEventId(lessons)
+                  const segments = buildHourLayoutSegments(lessons)
                   return (
-                  <div key={hourLabel} className="h-[60px] p-0 m-0 flex items-start border-b border-gray-100">
-                    <div className="w-14 h-[60px] leading-[60px] text-sm font-semibold text-gray-700 p-0 m-0">
+                  <div key={hourLabel} className="flex items-start border-b-2 border-dashed border-gray-500 py-1">
+                    <div className="w-14 shrink-0 pt-2 text-sm font-semibold text-gray-700">
                       {hourLabel}
                     </div>
-                    <div className="flex-1 h-[60px] p-0 m-0">
-                      {slots.length > 0 ? (
-                        <div className="grid grid-cols-4 gap-1 h-[50px]">
-                          {slots.map((slot, idx) => {
-                            const lesson = slot.length === 1
-                              ? slot[0]
-                              : {
-                                  event_id: slot[0].event_id,
-                                  student_name: slot.map((l) => l.student_name).join(', '),
-                                  student_id: slot[0].student_id,
-                                  paid_this_month: slot.every((l) => l.paid_this_month),
-                                  is_last_lesson_of_month: slot[0].is_last_lesson_of_month,
-                                  lesson_mode: slot[0].lesson_mode,
-                                  lesson_kind: slot[0].lesson_kind,
-                                }
-                            const isGroupSlot = slot.length > 1
-                            const n = slots.length
-                            let colSpan
-                            if (n === 1) colSpan = 'col-span-4'
-                            else if (n === 2) colSpan = 'col-span-2'
-                            else if (n === 3) colSpan = idx < 2 ? 'col-span-1' : 'col-span-2'
-                            else colSpan = 'col-span-1'
-                            return (
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      {segments.length > 0 ? (
+                        segments.map((seg, segIdx) => (
+                          <div key={segIdx} className="grid grid-cols-4 gap-1 w-full">
+                            {seg.lessons.map((lesson, li) => {
+                              const colSpan = seg.layout === 'full' ? 'col-span-4' : 'col-span-2'
+                              return (
                             <article
-                              key={lesson.event_id + (slot.length > 1 ? '_group' : '_' + lesson.student_name)}
+                              key={`${lesson.event_id ?? 'ev'}-${lesson.student_id ?? 's'}-${segIdx}-${li}-${lesson.student_name ?? ''}`}
                               role={lesson.student_id ? 'button' : undefined}
                               tabIndex={lesson.student_id ? 0 : -1}
                               onClick={() => {
@@ -259,27 +278,27 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden ${isGroupSlot ? 'px-1' : 'px-2'} ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden px-2 ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
-                              <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0">
-                                {isGroupSlot ? `グループ: ${lesson.student_name}` : lesson.student_name}
+                              <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0 truncate">
+                                {lesson.student_name}
                               </span>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-1 shrink-0">
                                 {lessonModeLabel(lesson.lesson_mode) && (
-                                  <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
+                                  <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
                                   </span>
                                 )}
                                 {!isDemoLesson(lesson) && (
                                 <span
-                                  className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                                  className={`dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 ${lesson.paid_this_month ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
                                 >
                                   {lesson.paid_this_month ? 'お月謝済' : 'お月謝未'}
                                 </span>
                                 )}
                                 {!isDemoLesson(lesson) && showPaymentBadges(lesson) && todayDate && (
                                   <span
-                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium ${isGroupSlot ? 'px-1 py-0' : 'px-1.5 py-0'} bg-slate-100 text-slate-700`}
+                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 bg-slate-100 text-slate-700`}
                                   >
                                     {(() => {
                                       const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
@@ -290,10 +309,12 @@ export default function Dashboard() {
                                 )}
                               </div>
                             </article>
-                          )})}
-                        </div>
+                              )
+                            })}
+                          </div>
+                        ))
                       ) : (
-                        <div className="h-[50px] rounded border border-dashed border-gray-200 bg-gray-50/60 px-2 flex items-center">
+                        <div className="h-[50px] w-full rounded border border-dashed border-gray-200 bg-gray-50/60 px-2 flex items-center">
                           <span className="text-xs text-gray-400">No lessons</span>
                         </div>
                       )}
