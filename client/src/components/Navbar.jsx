@@ -9,7 +9,7 @@ import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
@@ -244,7 +244,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                         onClick={() => handleRead(item.id)}
                         disabled={readingId === item.id}
                       >
-                        {readingId === item.id ? 'Marking...' : 'Mark read'}
+                        {readingId === item.id ? '処理中…' : '既読する'}
                       </button>
                     </div>
                   </div>
@@ -276,7 +276,10 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
+          canStartGuide={
+            areGuidesAvailable() &&
+            !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
+          }
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)
             if (slug && startGuideBySlug(slug)) {

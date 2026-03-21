@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { UserPlus } from 'lucide-react'
 import { api } from '../api'
-import { useGuideTour } from '../context/GuideTourContext'
+import { areGuidesAvailable } from '../guides/wipFlags'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import AddStudentModal from '../components/AddStudentModal'
 import FullPageLoading from '../components/FullPageLoading'
@@ -85,6 +85,10 @@ export default function Students() {
   useEffect(() => {
     const action = location.state?.guideAction
     if (!action) return
+    if (!areGuidesAvailable()) {
+      navigate(location.pathname, { replace: true, state: {} })
+      return
+    }
 
     const isStudentFlowAction =
       action.startsWith('students.') || action.startsWith('payments.') || action.startsWith('notes.')

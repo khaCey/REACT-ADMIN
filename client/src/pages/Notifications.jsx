@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { isGuideEnabled, NOTIFICATIONS_WIP_DISABLED, GUIDES_WIP_HIDDEN } from '../guides/wipFlags'
+import { areGuidesAvailable, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import FullPageLoading from '../components/FullPageLoading'
 
 const PAGE_SIZE = 25
@@ -32,7 +32,8 @@ export default function Notifications() {
   const { success } = useToast()
   const { staff } = useAuth()
   const { startGuideBySlug, activeGuideSlug } = useGuideTour()
-  const preventDelete = !!activeGuideSlug
+  const guidesOn = areGuidesAvailable()
+  const preventDelete = guidesOn && !!activeGuideSlug
   const location = useLocation()
   const navigate = useNavigate()
   const [items, setItems] = useState([])
@@ -99,6 +100,10 @@ export default function Notifications() {
     if (notificationsDisabled) return
     const guideAction = location.state?.guideAction
     if (!guideAction) return
+    if (!guidesOn) {
+      navigate(location.pathname, { replace: true, state: {} })
+      return
+    }
     // Preserve current modal context for cross-step guide continuity.
     setGuideFocusAction(null)
     if (guideAction === 'notifications.create') {
@@ -109,7 +114,7 @@ export default function Notifications() {
     }
     setGuideActionPending(guideAction)
     navigate(location.pathname, { replace: true, state: {} })
-  }, [notificationsDisabled, location.state?.guideAction, location.pathname, navigate])
+  }, [notificationsDisabled, guidesOn, location.state?.guideAction, location.pathname, navigate])
 
   useEffect(() => {
     const handleGuideEnded = async () => {
@@ -140,6 +145,13 @@ export default function Notifications() {
 
   useEffect(() => {
     if (notificationsDisabled) return
+    if (!guidesOn) {
+      if (guideActionPending) {
+        setGuideActionPending(null)
+        setGuideFocusAction(null)
+      }
+      return
+    }
     if (!guideActionPending) return
     if (guideActionPending === 'notifications.create') {
       setShowCreateModal(true)
@@ -204,7 +216,17 @@ export default function Notifications() {
         setGuideActionPending(null)
       }
     }
-  }, [notificationsDisabled, guideActionPending, items, selectedNotification, editingNotification, pendingDelete, canEditNotification, canDeleteNotification])
+  }, [
+    notificationsDisabled,
+    guidesOn,
+    guideActionPending,
+    items,
+    selectedNotification,
+    editingNotification,
+    pendingDelete,
+    canEditNotification,
+    canDeleteNotification,
+  ])
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
   const currentPage = useMemo(() => Math.floor(offset / PAGE_SIZE) + 1, [offset])
@@ -285,11 +307,6 @@ export default function Notifications() {
             Notifications WIP (disabled)
           </span>
         )}
-        {GUIDES_WIP_HIDDEN && (
-          <span className="ml-1 inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800">
-            Guides WIP (hidden)
-          </span>
-        )}
         <span className="ml-2 text-sm text-gray-500">Unread: {unreadCount}</span>
         {!notificationsDisabled && (
           <button
@@ -337,7 +354,7 @@ export default function Notifications() {
                 >
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-gray-900">{item.title}</p>
-                    {(item.is_system || item.kind === 'guide') && (
+                    {guidesOn && (item.is_system || item.kind === 'guide') && (
                       <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                         Guide
                       </span>
@@ -364,7 +381,7 @@ export default function Notifications() {
                     disabled={readingId === item.id}
                     className="text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-60"
                   >
-                    {readingId === item.id ? 'Marking...' : 'Mark read'}
+                    {readingId === item.id ? '処理中…' : '既読する'}
                   </button>
                 )}
                 {canEditNotification(item) && (
@@ -448,7 +465,9 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
-          canStartGuide={!!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')}
+          canStartGuide={
+            guidesOn && !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
+          }
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)
             if (slug && startGuideBySlug(slug)) {

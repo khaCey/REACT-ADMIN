@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState, useCallback, useEffect } 
 import { useNavigate } from 'react-router-dom'
 import GuideWalkthroughModal from '../components/GuideWalkthroughModal'
 import { getGuideBySlug } from '../guides/guideDefinitions'
-import { isGuideEnabled } from '../guides/wipFlags'
+import { areGuidesAvailable, isGuideEnabled } from '../guides/wipFlags'
 
 const GuideTourContext = createContext(null)
 
@@ -38,6 +38,11 @@ export function GuideTourProvider({ children }) {
       window.dispatchEvent(new CustomEvent('guide:ended'))
     }
   }, [])
+
+  const guidesOn = areGuidesAvailable()
+  useEffect(() => {
+    if (!guidesOn && activeGuideSlug) endGuide()
+  }, [guidesOn, activeGuideSlug, endGuide])
 
   const startGuideBySlug = useCallback((slug) => {
     if (!isGuideEnabled(slug)) return false

@@ -5,6 +5,7 @@ import { api } from '../api'
 import { History } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import FullPageLoading from '../components/FullPageLoading'
+import { areGuidesAvailable } from '../guides/wipFlags'
 
 const ENTITY_LABELS = {
   students: 'Student',
@@ -335,6 +336,10 @@ export default function ChangeHistory() {
   useEffect(() => {
     const action = location.state?.guideAction
     if (action !== 'change-history.undo-redo') return
+    if (!areGuidesAvailable()) {
+      navigate(location.pathname, { replace: true, state: {} })
+      return
+    }
     // Keep modal open between guide transitions when already active.
     if (selectedChange) {
       setGuideHighlightToggle(true)

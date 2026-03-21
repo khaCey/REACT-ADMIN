@@ -182,7 +182,7 @@ export default function PostLoginUnreadModal({ open, onClose }) {
                       onClick={() => handleMarkRead(item.id)}
                       disabled={readingId === item.id}
                     >
-                      {readingId === item.id ? '…' : 'Mark read'}
+                      {readingId === item.id ? '…' : '既読する'}
                     </button>
                   </div>
                 </div>
