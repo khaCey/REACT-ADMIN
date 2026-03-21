@@ -64,14 +64,23 @@ export const api = {
   getTeacherCalendar: (weekStart) =>
     fetchApi(`/shifts/teacher-calendar?week_start=${encodeURIComponent(weekStart)}`),
   assignShift: (body) => fetchApi('/shifts/assign', { method: 'PUT', body: JSON.stringify(body) }),
-  getUnreadNotifications: (limit = 20) =>
-    fetchApi(`/notifications/unread?limit=${encodeURIComponent(limit)}`),
+  getUnreadNotifications: (limit = 20, { excludeGuides = false } = {}) => {
+    const q = new URLSearchParams({ limit: String(limit) })
+    if (excludeGuides) q.set('excludeGuides', '1')
+    return fetchApi(`/notifications/unread?${q}`)
+  },
   markNotificationRead: (id) =>
     fetchApi(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   markNotificationUnread: (id) =>
     fetchApi(`/notifications/${encodeURIComponent(id)}/unread`, { method: 'POST' }),
-  getNotifications: ({ limit = 50, offset = 0 } = {}) =>
-    fetchApi(`/notifications?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
+  getNotifications: ({ limit = 50, offset = 0, excludeGuides = false } = {}) => {
+    const q = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    })
+    if (excludeGuides) q.set('excludeGuides', '1')
+    return fetchApi(`/notifications?${q}`)
+  },
   getNotificationStaff: () => fetchApi('/notifications/staff'),
   createNotification: (data) =>
     fetchApi('/notifications', { method: 'POST', body: JSON.stringify(data) }),

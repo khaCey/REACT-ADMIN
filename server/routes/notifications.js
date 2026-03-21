@@ -15,6 +15,11 @@ function toPositiveInt(value, fallback) {
   return parsed;
 }
 
+function parseExcludeGuides(query) {
+  const v = query?.excludeGuides;
+  return v === '1' || v === 'true' || v === true;
+}
+
 router.post('/', async (req, res) => {
   try {
     const staffId = req.staff?.id;
@@ -56,6 +61,8 @@ router.get('/unread', async (req, res) => {
     if (!staffId) return res.status(401).json({ error: 'Not authenticated' });
 
     const limit = Math.min(100, toPositiveInt(req.query.limit, 20));
+    const excludeGuides = parseExcludeGuides(req.query);
+    const guideSql = excludeGuides ? `AND n.kind <> 'guide'` : '';
     const [itemsResult, countResult] = await Promise.all([
       query(
         `SELECT n.id, n.title, n.message, n.created_at,
@@ -70,6 +77,7 @@ router.get('/unread', async (req, res) => {
           AND nr.staff_id = $1
          WHERE nr.notification_id IS NULL
            AND (n.target_staff_id IS NULL OR n.target_staff_id = $1)
+           ${guideSql}
          ORDER BY n.is_system DESC, n.created_at DESC
          LIMIT $2`,
         [staffId, limit]
@@ -81,7 +89,8 @@ router.get('/unread', async (req, res) => {
            ON nr.notification_id = n.id
           AND nr.staff_id = $1
          WHERE nr.notification_id IS NULL
-           AND (n.target_staff_id IS NULL OR n.target_staff_id = $1)`,
+           AND (n.target_staff_id IS NULL OR n.target_staff_id = $1)
+           ${guideSql}`,
         [staffId]
       ),
     ]);
@@ -170,6 +179,8 @@ router.get('/', async (req, res) => {
 
     const limit = Math.min(100, toPositiveInt(req.query.limit, 50));
     const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+    const excludeGuides = parseExcludeGuides(req.query);
+    const guideSql = excludeGuides ? `AND n.kind <> 'guide'` : '';
 
     const [itemsResult, totalResult] = await Promise.all([
       query(
@@ -184,14 +195,16 @@ router.get('/', async (req, res) => {
            ON nr.notification_id = n.id
           AND nr.staff_id = $1
          WHERE (n.target_staff_id IS NULL OR n.target_staff_id = $1)
+           ${guideSql}
          ORDER BY n.is_system DESC, n.created_at DESC
          LIMIT $2 OFFSET $3`,
         [staffId, limit, offset]
       ),
       query(
         `SELECT COUNT(*)::int AS total
-         FROM notifications
-         WHERE (target_staff_id IS NULL OR target_staff_id = $1)`,
+         FROM notifications n
+         WHERE (n.target_staff_id IS NULL OR n.target_staff_id = $1)
+           ${guideSql}`,
         [staffId]
       ),
     ]);

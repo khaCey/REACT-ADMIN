@@ -54,7 +54,12 @@ export default function Notifications() {
     unreadCount,
     refreshUnread,
     markAsRead,
-  } = useNotificationsPolling({ intervalMs: 45000, enabled: !notificationsDisabled, unreadLimit: 20 })
+  } = useNotificationsPolling({
+    intervalMs: 45000,
+    enabled: !notificationsDisabled,
+    unreadLimit: 20,
+    excludeGuideNotifications: !guidesOn,
+  })
   const [guideActionPending, setGuideActionPending] = useState(null)
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const canEditNotification = useCallback((n) => {
@@ -81,7 +86,11 @@ export default function Notifications() {
     setLoading(true)
     setError('')
     try {
-      const data = await api.getNotifications({ limit: PAGE_SIZE, offset: nextOffset })
+      const data = await api.getNotifications({
+        limit: PAGE_SIZE,
+        offset: nextOffset,
+        excludeGuides: !guidesOn,
+      })
       setItems(Array.isArray(data.notifications) ? data.notifications : [])
       setTotal(data.total || 0)
       setOffset(nextOffset)
@@ -90,7 +99,7 @@ export default function Notifications() {
     } finally {
       setLoading(false)
     }
-  }, [notificationsDisabled])
+  }, [notificationsDisabled, guidesOn])
 
   useEffect(() => {
     loadPage(0)

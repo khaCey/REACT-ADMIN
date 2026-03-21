@@ -25,6 +25,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const dropdownRef = useRef(null)
   const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
+  const guidesOn = areGuidesAvailable()
   const {
     unreadCount,
     notifications,
@@ -32,7 +33,10 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     error: notificationsError,
     refreshUnread,
     markAsRead,
-  } = useNotificationsPolling({ enabled: !!staff && !notificationsDisabled })
+  } = useNotificationsPolling({
+    enabled: !!staff && !notificationsDisabled,
+    excludeGuideNotifications: !guidesOn,
+  })
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
   const handleLogout = async () => {
@@ -277,7 +281,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           canStartGuide={
-            areGuidesAvailable() &&
+            guidesOn &&
             !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
           }
           onStartGuide={(n) => {

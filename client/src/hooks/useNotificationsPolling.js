@@ -6,6 +6,7 @@ export function useNotificationsPolling(options = {}) {
     intervalMs = 45000,
     enabled = true,
     unreadLimit = 20,
+    excludeGuideNotifications = false,
   } = options
 
   const [unreadCount, setUnreadCount] = useState(0)
@@ -17,7 +18,9 @@ export function useNotificationsPolling(options = {}) {
   const refreshUnread = useCallback(async () => {
     try {
       setError(null)
-      const data = await api.getUnreadNotifications(unreadLimit)
+      const data = await api.getUnreadNotifications(unreadLimit, {
+        excludeGuides: excludeGuideNotifications,
+      })
       if (!mountedRef.current) return
       setUnreadCount(data.unreadCount || 0)
       setNotifications(Array.isArray(data.notifications) ? data.notifications : [])
@@ -27,7 +30,7 @@ export function useNotificationsPolling(options = {}) {
     } finally {
       if (mountedRef.current) setLoading(false)
     }
-  }, [unreadLimit])
+  }, [unreadLimit, excludeGuideNotifications])
 
   const markAsRead = useCallback(async (id) => {
     await api.markNotificationRead(id)
