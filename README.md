@@ -67,6 +67,12 @@ Export your Google Sheets as CSV to `migration-data/`. See `migration-data/READM
 
 **Incomplete schedules (lessons showing "Unschedule"):** Ensure `MonthlySchedule.csv` is in `migration-data/` and run `npm run migrate`. Or run the GAS Backfill for the affected month/year to repopulate from the calendar.
 
+## Google Apps Script (GAS)
+
+- **API shape (student calendar poll):** [`POLLING_API_SPEC.md`](POLLING_API_SPEC.md) and [`docs/gas-calendar-poll-prompt.md`](docs/gas-calendar-poll-prompt.md)
+- **Staff schedule GAS (separate Web App):** [`docs/staff-schedule-gas.md`](docs/staff-schedule-gas.md)
+- **How to deploy updates and rotate keys:** [`docs/how-to-update-gas.md`](docs/how-to-update-gas.md)
+
 ## API
 
 - `GET /api/students` - List students

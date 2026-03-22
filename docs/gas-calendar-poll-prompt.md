@@ -3,6 +3,8 @@
 Use this document as the **system or task prompt** when implementing or auditing the Apps Script project that backs **student MonthlySchedule** polling (the URL in `CALENDAR_POLL_URL` / `VITE_CALENDAR_POLL_URL`).  
 The **REACT-ADMIN** SPA and Node API depend on the shapes below.
 
+**Operational steps (deploy new version, rotate API key):** [how-to-update-gas.md](how-to-update-gas.md)
+
 ---
 
 ## Role of the Web App

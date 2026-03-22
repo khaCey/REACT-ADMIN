@@ -8,7 +8,17 @@ const router = Router();
 /** Test route: GET /api/schedule returns 200 so the mount can be verified */
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
 
-/** Get scheduled events and teacher shifts for a week (booking calendar). week_start = YYYY-MM-DD (Monday). Slot keys and slotTypes use Asia/Tokyo. */
+/**
+ * Week grid for booking UI: booked counts + teacher capacity per hour slot (JST).
+ *
+ * Open slot (bookable) requirements — see also POST /book and docs/schedule-booking.md:
+ * - Not in the past (client).
+ * - At least one teacher on shift for that JST date/hour (teacher_schedules, with extensions).
+ * - Booked lesson count for that hour < teacher count. Lessons are counted by distinct
+ *   calendar event (event_id), so a group lesson (multiple students, same event_id) = 1.
+ * - POST /book also enforces: max 90 days ahead, kids/adult separation in overlapping
+ *   time range, and overlap capacity using COUNT(DISTINCT event_id).
+ */
 router.get('/week', async (req, res) => {
   try {
     const weekStart = req.query.week_start;
@@ -20,7 +30,9 @@ router.get('/week', async (req, res) => {
         `SELECT
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS date_jst,
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
-           m.is_kids_lesson
+           m.is_kids_lesson,
+           m.event_id,
+           m.student_name
          FROM monthly_schedule m
          WHERE m.date >= $1::date AND m.date < $1::date + interval '7 days'
          AND (m.status IS NULL OR m.status <> 'cancelled')
@@ -34,17 +46,36 @@ router.get('/week', async (req, res) => {
         [weekStart]
       ),
     ]);
-    const bySlot = {};
-    const slotTypes = {};
+    /** key -> bucket: distinct events + kids/adult flags for booking UI (matches POST /book mixing rules) */
+    const slotBuckets = new Map();
     for (const r of scheduleResult.rows) {
       const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
       const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
       if (!dateStr || !timeStr) continue;
       const key = `${dateStr}T${timeStr}`;
-      bySlot[key] = (bySlot[key] || 0) + 1;
-      const isKids = !!r.is_kids_lesson;
-      if (slotTypes[key] === undefined) slotTypes[key] = isKids ? 'kids' : 'adult';
-      else if (isKids) slotTypes[key] = 'kids';
+      if (!slotBuckets.has(key)) {
+        slotBuckets.set(key, { lessonKeys: new Set(), hasKids: false, hasAdult: false });
+      }
+      const bucket = slotBuckets.get(key);
+      const eidRaw = r.event_id != null ? String(r.event_id).trim() : '';
+      const dedupeKey = eidRaw
+        ? `e:${eidRaw}`
+        : `s:${String(r.student_name || '').trim()}:${dateStr}T${timeStr}`;
+      bucket.lessonKeys.add(dedupeKey);
+      if (r.is_kids_lesson) bucket.hasKids = true;
+      else bucket.hasAdult = true;
+    }
+    const bySlot = {};
+    const slotTypes = {};
+    /** Per slot: which audience already has a lesson (hour bucket, JST). Client disables incompatible student type. */
+    const slotMix = {};
+    for (const [key, bucket] of slotBuckets) {
+      bySlot[key] = bucket.lessonKeys.size;
+      const { hasKids, hasAdult } = bucket;
+      slotMix[key] = { hasKids, hasAdult };
+      if (hasKids && hasAdult) slotTypes[key] = 'mixed';
+      else if (hasKids) slotTypes[key] = 'kids';
+      else slotTypes[key] = 'adult';
     }
     const teachersBySlot = {};
     const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
@@ -65,7 +96,8 @@ router.get('/week', async (req, res) => {
     for (const k of Object.keys(teachersBySlot)) {
       teachersBySlot[k] = [...new Set(teachersBySlot[k])].sort();
     }
-    res.json({ slots: bySlot, teachersBySlot, slotTypes });
+    res.set('Cache-Control', 'no-store');
+    res.json({ slots: bySlot, teachersBySlot, slotTypes, slotMix });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

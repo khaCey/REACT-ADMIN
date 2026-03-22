@@ -1,5 +1,7 @@
 # Staff schedule fetch – GAS wiring
 
+**Deploy / update / rotate keys:** [how-to-update-gas.md](how-to-update-gas.md) (same Google flow as the student poll; use this project’s Web App URL for `STAFF_SCHEDULE_GAS_URL`).
+
 The **Fetch Staff Schedule** feature (single staff and bulk) calls a **separate** Google Apps Script (GAS) Web App that returns **teacher calendar events** (by `calendarId`). It must **not** use the same GAS as the **student schedule** (MonthlySchedule / `changed` / `diff`), or you will get 0 events or the wrong data.
 
 ## 1. Environment variables

@@ -50,6 +50,7 @@ router.get('/:id', async (req, res) => {
       Group: r.group_type,
       人数: r.group_size,
       子: r.is_child ? '子' : '',
+      is_child: !!r.is_child,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

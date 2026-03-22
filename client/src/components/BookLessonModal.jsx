@@ -60,6 +60,27 @@ function formatWeekLabel(dateStr) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+/** Aligns with GET /student and POST /book (students.is_child). */
+function studentIsChild(student) {
+  if (!student) return false
+  return (
+    student.子 === '子' ||
+    student.is_child === true ||
+    student.IsChild === true
+  )
+}
+
+/**
+ * Hour bucket already has kids-only and/or adult-only lessons; block bookings that POST /book would reject.
+ * @param {{ hasKids?: boolean, hasAdult?: boolean }|undefined} mix - from API slotMix[key]
+ */
+function isKidAdultMixBlocked(student, mix) {
+  if (!mix || (!mix.hasKids && !mix.hasAdult)) return false
+  const isChild = studentIsChild(student)
+  if (isChild) return !!mix.hasAdult
+  return !!mix.hasKids
+}
+
 export default function BookLessonModal({ studentId, student, onClose, onBooked }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
@@ -67,6 +88,7 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
   const [slots, setSlots] = useState({})
   const [teachersBySlot, setTeachersBySlot] = useState({})
   const [slotTypes, setSlotTypes] = useState({})
+  const [slotMix, setSlotMix] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pendingSlot, setPendingSlot] = useState(null)
@@ -83,6 +105,7 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
         setSlots(data.slots || {})
         setTeachersBySlot(data.teachersBySlot || {})
         setSlotTypes(data.slotTypes || {})
+        setSlotMix(data.slotMix || {})
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -96,9 +119,11 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
 
   const handleSlotClick = (dateStr, timeStr) => {
     const key = `${dateStr}T${timeStr}`
-    if (slots[key]) return
+    const booked = slots[key] || 0
     const teachers = teachersBySlot[key] || []
-    if (teachers.length === 0) return
+    const capacity = teachers.length
+    if (capacity === 0 || booked >= capacity) return
+    if (isKidAdultMixBlocked(student, slotMix[key])) return
     setPendingSlot({ date: dateStr, time: timeStr })
   }
 
@@ -174,6 +199,11 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
               </div>
             )}
 
+            <p className="text-xs text-gray-600 mb-3">
+              {studentIsChild(student)
+                ? 'Child (子): only hours without adult lessons can be booked.'
+                : 'Adult: only hours without kids (子) lessons can be booked.'}
+            </p>
             <div className="flex items-center justify-between mb-4">
               <button
                 type="button"
@@ -227,19 +257,28 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                           const teachers = teachersBySlot[key] || []
                           const capacity = teachers.length
                           const slotType = slotTypes[key]
+                          const mix = slotMix[key]
+                          const mixBlocked = isKidAdultMixBlocked(student, mix)
                           const isPast = isSlotPastJst(dateStr, timeStr)
                           const isFull = capacity > 0 && booked >= capacity
                           const oneLeft = capacity > 0 && booked === capacity - 1
                           const statusBead =
-                            !isPast && capacity > 0
+                            !isPast && capacity > 0 && !mixBlocked
                               ? isFull
                                 ? 'bg-red-500'
                                 : oneLeft
                                   ? 'bg-orange-500'
                                   : 'bg-green-500'
                               : null
-                          const label =
-                            isPast
+                          const mixLabel =
+                            mixBlocked && !isPast && capacity > 0 && !isFull
+                              ? studentIsChild(student)
+                                ? 'Adult slot'
+                                : 'Kids slot'
+                              : null
+                          const label = mixLabel
+                            ? mixLabel
+                            : isPast
                               ? 'Past'
                               : capacity === 0
                                 ? '—'
@@ -255,16 +294,18 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                             >
                               <button
                                 type="button"
-                                disabled={isPast || capacity === 0 || isFull}
+                                disabled={isPast || capacity === 0 || isFull || mixBlocked}
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
                                 className={`flex-1 py-0.5 px-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
                                   isPast
                                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                     : capacity === 0
                                       ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                                      : isFull
-                                        ? 'bg-amber-50 text-amber-800 cursor-default'
-                                        : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
+                                      : mixBlocked
+                                        ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                                        : isFull
+                                          ? 'bg-amber-50 text-amber-800 cursor-default'
+                                          : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
                                 {statusBead && (
@@ -273,6 +314,9 @@ export default function BookLessonModal({ studentId, student, onClose, onBooked 
                                 {label}
                                 {slotType === 'kids' && <span className="text-[10px] text-gray-500">子</span>}
                                 {slotType === 'adult' && <span className="text-[10px] text-gray-500">Adult</span>}
+                                {slotType === 'mixed' && (
+                                  <span className="text-[10px] text-gray-500">子+Adult</span>
+                                )}
                               </button>
                             </div>
                           )

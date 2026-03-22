@@ -103,7 +103,15 @@ export function useCalendarPolling(options = {}) {
         const result = await pollCalendarChanges()
         if (result._skipped) return
         if (result.changed && result.diff && mountedRef.current) {
-          setData((prev) => applyDiff(prev, result.diff))
+          const d = result.diff
+          const addedLen = d.added?.length ?? 0
+          const removedLen = d.removed?.length ?? 0
+          const updatedLen = d.updated?.length ?? 0
+          const useFullSnapshot =
+            addedLen === 0 && removedLen === 0 && updatedLen > 0
+          setData((prev) =>
+            useFullSnapshot ? [...(d.updated || [])] : applyDiff(prev, d)
+          )
           setLastUpdated(result.diff.lastUpdated || null)
           setCacheVersion(result.diff.cacheVersion ?? null)
           onChanged?.(result.diff)
