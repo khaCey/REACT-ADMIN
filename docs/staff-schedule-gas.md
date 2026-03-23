@@ -21,8 +21,8 @@ The backend calls the GAS with a **GET** request and these **query parameters**:
 |------------|---------------------------------------------------|
 | `key`      | Your API key (from `STAFF_SCHEDULE_API_KEY` or `CALENDAR_POLL_API_KEY`) |
 | `calendarId` | The staff’s Google Calendar ID (e.g. `xxx@group.calendar.google.com`) |
-| `timeMin`  | Start of range, ISO 8601 (e.g. `2026-03-14T00:00:00.000Z`) |
-| `timeMax`  | End of range, ISO 8601                            |
+| `timeMin`  | Start of range, ISO 8601 (first instant of **current month** in Asia/Tokyo) |
+| `timeMax`  | End of range, ISO 8601 (exclusive first instant of **month after next** in Tokyo, so the window covers **current + next** calendar month) |
 
 The GAS must:
 

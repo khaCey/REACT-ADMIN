@@ -2,8 +2,43 @@ import { Router } from 'express';
 import { query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
 import { parseJstToUtc, getTodayJstDateStr, getJstMinutesOfDay } from '../lib/timezone.js';
+import {
+  BOOKING_DISABLED_STUDENT_IDS,
+  bookingDisabledStudentIdsArray,
+} from '../lib/bookingExclusions.js';
+import {
+  buildTeachingHoursByTeacher,
+  findAssignableTeachers,
+  jstHourLabelFromUtc,
+  pickTeacherForBooking,
+} from '../lib/teacherBreakRules.js';
 
 const router = Router();
+
+const GRID_TIME_SLOTS = [
+  '10:00',
+  '11:00',
+  '12:00',
+  '13:00',
+  '14:00',
+  '15:00',
+  '16:00',
+  '17:00',
+  '18:00',
+  '19:00',
+  '20:00',
+];
+
+/** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
+const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
+
+function addDaysToYyyyMmDd(dateStr, n) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d + n));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    dt.getUTCDate()
+  ).padStart(2, '0')}`;
+}
 
 /** Test route: GET /api/schedule returns 200 so the mount can be verified */
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
@@ -17,13 +52,29 @@ router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
  * - Booked lesson count for that hour < teacher count. Lessons are counted by distinct
  *   calendar event (event_id), so a group lesson (multiple students, same event_id) = 1.
  * - POST /book also enforces: max 90 days ahead, kids/adult separation in overlapping
- *   time range, and overlap capacity using COUNT(DISTINCT event_id).
+ *   time range, overlap capacity using COUNT(DISTINCT event_id), and no duplicate
+ *   overlapping lesson for the same student.
+ * - Optional `student_id`: response includes `studentBookedSlots` (slot keys this student
+ *   already occupies in the week) for booking UI.
+ * - Rows for students in BOOKING_DISABLED_STUDENT_IDS are omitted (not counted in slots/slotMix).
+ * - `breakRuleBlocked`: slot keys where spare capacity exists but no on-shift teacher can take another
+ *   regular lesson without exceeding 5 consecutive JST teaching hours (see teacherBreakRules).
+ * - `staffBreakBySlot`: keys -> [{ teacher_name, title }] for rows with lesson_kind staff_break (UI cards).
  */
 router.get('/week', async (req, res) => {
   try {
     const weekStart = req.query.week_start;
     if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
       return res.status(400).json({ error: 'Query week_start required (YYYY-MM-DD)' });
+    }
+    const excludedStudentIds = bookingDisabledStudentIdsArray();
+    const studentIdParam = req.query.student_id;
+    const studentIdNum =
+      studentIdParam != null && studentIdParam !== '' ? Number(studentIdParam) : NaN;
+    let studentNameForGrid = null;
+    if (Number.isFinite(studentIdNum)) {
+      const sn = await query('SELECT name FROM students WHERE id = $1', [studentIdNum]);
+      studentNameForGrid = (sn.rows[0]?.name || '').trim() || null;
     }
     const [scheduleResult, teachersResult] = await Promise.all([
       query(
@@ -32,12 +83,17 @@ router.get('/week', async (req, res) => {
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
            m.is_kids_lesson,
            m.event_id,
-           m.student_name
+           m.student_name,
+           m.student_id,
+           m.lesson_kind,
+           m.teacher_name,
+           m.title
          FROM monthly_schedule m
          WHERE m.date >= $1::date AND m.date < $1::date + interval '7 days'
          AND (m.status IS NULL OR m.status <> 'cancelled')
+         AND (m.student_id IS NULL OR NOT (m.student_id = ANY($2::int[])))
          ORDER BY m.date, m.start`,
-        [weekStart]
+        [weekStart, excludedStudentIds]
       ),
       query(
         `SELECT date, teacher_name, start_time, end_time FROM teacher_schedules
@@ -48,10 +104,23 @@ router.get('/week', async (req, res) => {
     ]);
     /** key -> bucket: distinct events + kids/adult flags for booking UI (matches POST /book mixing rules) */
     const slotBuckets = new Map();
+    /** Slot keys -> list of { teacher_name, title } for lesson_kind staff_break (UI cards). */
+    const staffBreakBySlot = {};
     for (const r of scheduleResult.rows) {
       const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
       const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
       if (!dateStr || !timeStr) continue;
+      const kind = String(r.lesson_kind || '').trim();
+      if (kind === 'staff_break') {
+        const key = `${dateStr}T${timeStr}`;
+        const tn = (r.teacher_name != null ? String(r.teacher_name).trim() : '') || 'Staff';
+        if (!staffBreakBySlot[key]) staffBreakBySlot[key] = [];
+        staffBreakBySlot[key].push({
+          teacher_name: tn,
+          title: (r.title != null ? String(r.title).trim() : '') || null,
+        });
+        continue;
+      }
       const key = `${dateStr}T${timeStr}`;
       if (!slotBuckets.has(key)) {
         slotBuckets.set(key, { lessonKeys: new Set(), hasKids: false, hasAdult: false });
@@ -78,14 +147,13 @@ router.get('/week', async (req, res) => {
       else slotTypes[key] = 'adult';
     }
     const teachersBySlot = {};
-    const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
     for (const r of teachersResult.rows) {
       const dateStr = r.date ? String(r.date).trim().slice(0, 10) : '';
       if (!dateStr) continue;
       const startT = r.start_time ? String(r.start_time).slice(0, 5) : '';
       const endT = r.end_time ? String(r.end_time).slice(0, 5) : '';
       if (!startT || !endT) continue;
-      for (const timeStr of TIME_SLOTS) {
+      for (const timeStr of GRID_TIME_SLOTS) {
         if (timeStr >= startT && timeStr < endT) {
           const key = `${dateStr}T${timeStr}`;
           if (!teachersBySlot[key]) teachersBySlot[key] = [];
@@ -96,8 +164,66 @@ router.get('/week', async (req, res) => {
     for (const k of Object.keys(teachersBySlot)) {
       teachersBySlot[k] = [...new Set(teachersBySlot[k])].sort();
     }
+
+    const teachersByJstDate = new Map();
+    for (const r of teachersResult.rows) {
+      const dateStr = r.date ? String(r.date).trim().slice(0, 10) : '';
+      if (!dateStr) continue;
+      if (!teachersByJstDate.has(dateStr)) teachersByJstDate.set(dateStr, new Set());
+      teachersByJstDate.get(dateStr).add(r.teacher_name);
+    }
+    const scheduleRowsByJstDate = new Map();
+    for (const r of scheduleResult.rows) {
+      const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
+      if (!dateStr) continue;
+      if (!scheduleRowsByJstDate.has(dateStr)) scheduleRowsByJstDate.set(dateStr, []);
+      scheduleRowsByJstDate.get(dateStr).push(r);
+    }
+    const breakRuleBlocked = {};
+    for (let di = 0; di < 7; di += 1) {
+      const dateStr = addDaysToYyyyMmDd(weekStart, di);
+      const dayRows = scheduleRowsByJstDate.get(dateStr) || [];
+      const tset = teachersByJstDate.get(dateStr);
+      const distinctTeachers = tset ? [...tset].sort() : [];
+      const teachingMap = buildTeachingHoursByTeacher(dayRows, distinctTeachers);
+      for (const timeStr of GRID_TIME_SLOTS) {
+        const key = `${dateStr}T${timeStr}`;
+        const teachers = teachersBySlot[key] || [];
+        const booked = bySlot[key] || 0;
+        if (teachers.length === 0 || booked >= teachers.length) continue;
+        const assignable = findAssignableTeachers(teachers, teachingMap, timeStr);
+        if (assignable.length === 0) breakRuleBlocked[key] = true;
+      }
+    }
+
+    /** When `student_id` query is set, keys where that student already has a lesson this hour (JST bucket). */
+    const studentBookedSlots = {};
+    if (Number.isFinite(studentIdNum)) {
+      for (const r of scheduleResult.rows) {
+        const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
+        const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
+        if (!dateStr || !timeStr) continue;
+        const key = `${dateStr}T${timeStr}`;
+        const rowSid = r.student_id != null ? Number(r.student_id) : NaN;
+        const rowName = (r.student_name || '').trim();
+        const matchesId = Number.isFinite(rowSid) && rowSid === studentIdNum;
+        const matchesLegacyName =
+          !Number.isFinite(rowSid) &&
+          studentNameForGrid &&
+          rowName.toLowerCase() === studentNameForGrid.toLowerCase();
+        if (matchesId || matchesLegacyName) studentBookedSlots[key] = true;
+      }
+    }
     res.set('Cache-Control', 'no-store');
-    res.json({ slots: bySlot, teachersBySlot, slotTypes, slotMix });
+    res.json({
+      slots: bySlot,
+      teachersBySlot,
+      slotTypes,
+      slotMix,
+      studentBookedSlots,
+      breakRuleBlocked,
+      staffBreakBySlot,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -196,12 +322,20 @@ router.put('/extend', async (req, res) => {
 router.post('/book', async (req, res) => {
   try {
     const { student_id, date, time, duration_minutes } = req.body || {};
-    if (!student_id || !date || !time) {
+    const dateStrRaw = date != null ? String(date).trim() : '';
+    const timeStrRaw = time != null ? String(time).trim() : '';
+    const missingStudent =
+      student_id === undefined || student_id === null || student_id === '';
+    if (missingStudent || !dateStrRaw || !timeStrRaw) {
       return res.status(400).json({ error: 'Missing student_id, date, or time' });
+    }
+    const studentIdNum = Number(student_id);
+    if (Number.isFinite(studentIdNum) && BOOKING_DISABLED_STUDENT_IDS.has(studentIdNum)) {
+      return res.status(403).json({ error: 'Booking is not available for this student.' });
     }
     const studentResult = await query(
       'SELECT id, name, is_child FROM students WHERE id = $1',
-      [student_id]
+      [studentIdNum]
     );
     if (studentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found' });
@@ -212,8 +346,8 @@ router.post('/book', async (req, res) => {
       return res.status(400).json({ error: 'Student has no name' });
     }
     const duration = Math.min(120, Math.max(30, Number(duration_minutes) || 50));
-    const dateStr = String(date).trim().slice(0, 10);
-    const [hh, mm] = String(time).trim().split(/[:\s]/).map((x) => parseInt(x, 10) || 0);
+    const dateStr = dateStrRaw.slice(0, 10);
+    const [hh, mm] = timeStrRaw.split(/[:\s]/).map((x) => parseInt(x, 10) || 0);
     const startDate = parseJstToUtc(dateStr, hh, mm);
     if (!startDate) {
       return res.status(400).json({ error: 'Invalid date or time' });
@@ -231,12 +365,16 @@ router.post('/book', async (req, res) => {
       });
     }
 
-    // Kids vs adults separation: no mixing in the same time slot
+    const excludedStudentIds = bookingDisabledStudentIdsArray();
+
+    // Kids vs adults separation: no mixing in the same time slot (ignore booking-disabled students' rows)
     const existingResult = await query(
-      `SELECT is_kids_lesson FROM monthly_schedule
-       WHERE (status IS NULL OR status <> 'cancelled')
-         AND start < $2::timestamptz AND "end" > $1::timestamptz`,
-      [startDate.toISOString(), endDate.toISOString()]
+      `SELECT is_kids_lesson FROM monthly_schedule m
+       WHERE (m.status IS NULL OR m.status <> 'cancelled')
+         AND ${SQL_NOT_STAFF_BREAK}
+         AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+         AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))`,
+      [startDate.toISOString(), endDate.toISOString(), excludedStudentIds]
     );
     const isChild = !!student.is_child;
     for (const row of existingResult.rows) {
@@ -251,6 +389,28 @@ router.post('/book', async (req, res) => {
           error: 'Cannot book an adult lesson in a time slot that contains kids lessons. Kids and adults must be kept separate.',
         });
       }
+    }
+
+    const dupResult = await query(
+      `SELECT 1 FROM monthly_schedule m
+       WHERE (m.status IS NULL OR m.status <> 'cancelled')
+         AND ${SQL_NOT_STAFF_BREAK}
+         AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+         AND (
+           m.student_id = $3
+           OR (
+             m.student_id IS NULL
+             AND LOWER(TRIM(COALESCE(m.student_name, ''))) = LOWER(TRIM($4))
+           )
+         )
+       LIMIT 1`,
+      [startDate.toISOString(), endDate.toISOString(), studentIdNum, studentName]
+    );
+    if (dupResult.rows.length > 0) {
+      return res.status(400).json({
+        error:
+          'This student already has a lesson overlapping this time. Cancel or reschedule the existing lesson first.',
+      });
     }
 
     // Max simultaneous lessons = teachers available in that slot (including shift extensions up to 2h before/after). Slot time in JST to match teacher_schedules.
@@ -279,10 +439,12 @@ router.post('/book', async (req, res) => {
     let teacherCount = teacherSet.size;
     if (teacherCount === 0) teacherCount = 1;
     const lessonCountResult = await query(
-      `SELECT COUNT(DISTINCT event_id) AS cnt FROM monthly_schedule
-       WHERE (status IS NULL OR status <> 'cancelled')
-         AND start < $2::timestamptz AND "end" > $1::timestamptz`,
-      [startDate.toISOString(), endDate.toISOString()]
+      `SELECT COUNT(DISTINCT m.event_id) AS cnt FROM monthly_schedule m
+       WHERE (m.status IS NULL OR m.status <> 'cancelled')
+         AND ${SQL_NOT_STAFF_BREAK}
+         AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+         AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))`,
+      [startDate.toISOString(), endDate.toISOString(), excludedStudentIds]
     );
     const currentLessonCount = parseInt(lessonCountResult.rows[0]?.cnt, 10) || 0;
     if (currentLessonCount >= teacherCount) {
@@ -291,11 +453,46 @@ router.post('/book', async (req, res) => {
       });
     }
 
-    const eventId = `booked-${Date.now()}-${student_id}`;
+    let assignedTeacherName = null;
+    if (teacherSet.size > 0) {
+      const [distinctTeachersResult, dayBreakRows] = await Promise.all([
+        query(
+          `SELECT DISTINCT teacher_name FROM teacher_schedules WHERE date = $1::date ORDER BY teacher_name`,
+          [dateStr]
+        ),
+        query(
+          `SELECT
+             to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
+             m.teacher_name,
+             m.lesson_kind
+           FROM monthly_schedule m
+           WHERE m.date = $1::date
+           AND (m.status IS NULL OR m.status <> 'cancelled')
+           AND (m.student_id IS NULL OR NOT (m.student_id = ANY($2::int[])))`,
+          [dateStr, excludedStudentIds]
+        ),
+      ]);
+      const distinctTeachersOnDay = distinctTeachersResult.rows
+        .map((r) => r.teacher_name)
+        .filter((n) => n != null && String(n).trim() !== '');
+      const teachingMap = buildTeachingHoursByTeacher(dayBreakRows.rows, distinctTeachersOnDay);
+      const hourLabel = jstHourLabelFromUtc(startDate);
+      const teachersOnSlot = [...teacherSet];
+      const assignable = findAssignableTeachers(teachersOnSlot, teachingMap, hourLabel);
+      if (assignable.length === 0) {
+        return res.status(400).json({
+          error:
+            'No teacher can take this slot without exceeding 5 teaching hours in a row; add a break hour or choose another time.',
+        });
+      }
+      assignedTeacherName = pickTeacherForBooking(assignable, teachingMap);
+    }
+
+    const eventId = `booked-${Date.now()}-${studentIdNum}`;
     const title = `${studentName}${student.is_child ? ' 子' : ''} (Lesson)`;
     const insertResult = await query(
       `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, NULL, 'regular', 'unknown', $8)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, 'regular', 'unknown', $9)
        RETURNING *`,
       [
         eventId,
@@ -305,7 +502,8 @@ router.post('/book', async (req, res) => {
         endDate.toISOString(),
         studentName,
         !!student.is_child,
-        student_id,
+        assignedTeacherName,
+        studentIdNum,
       ]
     );
     const newRow = insertResult.rows[0];

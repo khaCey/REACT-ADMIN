@@ -100,8 +100,13 @@ export const api = {
     return fetchApi(`/dashboard/metrics${params.toString() ? '?' + params.toString() : ''}`);
   },
 
-  getWeekSchedule: (weekStart) =>
-    fetchApi(`/schedule/week?week_start=${encodeURIComponent(weekStart)}`, { cache: 'no-store' }),
+  getWeekSchedule: (weekStart, opts = {}) => {
+    const params = new URLSearchParams({ week_start: weekStart });
+    if (opts.studentId != null && opts.studentId !== '') {
+      params.set('student_id', String(opts.studentId));
+    }
+    return fetchApi(`/schedule/week?${params.toString()}`, { cache: 'no-store' });
+  },
   getBookingWarning: (date, time, studentId) => {
     const params = new URLSearchParams({ date, time });
     if (studentId != null && studentId !== '') params.set('student_id', studentId);

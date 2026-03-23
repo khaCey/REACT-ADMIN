@@ -161,19 +161,23 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
   }
 
   const wrapSection = (inner) => {
-    if (sectionClassName && onBookLesson) {
+    if (sectionClassName) {
       return (
         <section className={sectionClassName}>
           <header className="flex items-center justify-between px-3 py-2 border-b border-gray-200 flex-shrink-0">
             <h3 className="font-semibold text-sm">Lessons This Month</h3>
-            <button
-              type="button"
-              onClick={onBookLesson}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
-            >
-              <Calendar className="w-4 h-4" />
-              Book lesson
-            </button>
+            {onBookLesson ? (
+              <button
+                type="button"
+                onClick={onBookLesson}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+              >
+                <Calendar className="w-4 h-4" />
+                Book lesson
+              </button>
+            ) : (
+              <span className="w-[1px] shrink-0" aria-hidden />
+            )}
           </header>
           {inner}
         </section>
@@ -303,20 +307,22 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
     </div>
   )
 
-  if (sectionClassName && onBookLesson) {
+  if (sectionClassName) {
     return (
       <section className={sectionClassName}>
         <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 flex-shrink-0">
           <h3 className="font-semibold text-sm">Lessons This Month</h3>
           {monthKeys.length > 0 && monthToggles}
-          <button
-            type="button"
-            onClick={onBookLesson}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer shrink-0"
-          >
-            <Calendar className="w-4 h-4" />
-            Book lesson
-          </button>
+          {onBookLesson ? (
+            <button
+              type="button"
+              onClick={onBookLesson}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer shrink-0"
+            >
+              <Calendar className="w-4 h-4" />
+              Book lesson
+            </button>
+          ) : null}
         </header>
         {content}
       </section>

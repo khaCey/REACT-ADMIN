@@ -2,6 +2,7 @@ import { useState, useEffect, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
+import { isStudentExcludedFromBooking } from '../config/booking'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import PaymentModal from './PaymentModal'
 import NoteModal from './NoteModal'
@@ -48,24 +49,36 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [noteModal, setNoteModal] = useState(null)
   const [editStudentModal, setEditStudentModal] = useState(false)
   const [bookLessonModal, setBookLessonModal] = useState(false)
+  /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
+  const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   const [noteSearch, setNoteSearch] = useState('')
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
 
+  /** Uses modal `studentId` + loaded `student` record (`ID`) — not schedule rows. */
+  const bookingExcluded = isStudentExcludedFromBooking(studentId, student)
+
+  useEffect(() => {
+    if (bookingExcluded) setBookLessonModal(false)
+  }, [bookingExcluded])
+
   const fetchData = () => {
     if (studentId == null) return
     setLoading(true)
     setError(null)
+    setBookingLatestByMonth(null)
     Promise.all([
       api.getStudent(studentId),
       api.getPayments(),
       api.getNotes(studentId),
+      api.getStudentLatestByMonth(studentId).catch(() => ({ latestByMonth: null })),
     ])
-      .then(([s, p, n]) => {
+      .then(([s, p, n, latestRes]) => {
         setStudent(s)
         setPayments((p || []).filter((x) => String(x['Student ID']) === String(studentId)))
         setNotes(n || [])
+        setBookingLatestByMonth(latestRes?.latestByMonth ?? null)
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -222,7 +235,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                 <LessonsThisMonth
                   studentId={studentId}
                   student={student}
-                  onBookLesson={() => setBookLessonModal(true)}
+                  onBookLesson={bookingExcluded ? undefined : () => setBookLessonModal(true)}
                   onLoadingChange={setLessonsLoading}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
@@ -378,17 +391,19 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
             <div className="flex items-center justify-between px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
               <div />
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGuideFocusKey(null)
-                    setBookLessonModal(true)
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
-                >
-                  <Calendar className="w-4 h-4" />
-                  Book lesson
-                </button>
+                {!bookingExcluded && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGuideFocusKey(null)
+                      setBookLessonModal(true)
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
+                  >
+                    <Calendar className="w-4 h-4" />
+                    Book lesson
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
@@ -456,10 +471,11 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         }}
       />
     )}
-    {bookLessonModal && (
+    {bookLessonModal && !bookingExcluded && (
       <BookLessonModal
         studentId={studentId}
         student={student}
+        preloadedLatestByMonth={bookingLatestByMonth}
         onClose={() => setBookLessonModal(false)}
         onBooked={fetchData}
       />

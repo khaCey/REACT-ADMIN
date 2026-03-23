@@ -168,6 +168,8 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
 
       const isPaid = paidMonths.has(yyyyMm);
       const paidLessons = paidLessonsByMonth[yyyyMm] || 0;
+      // Rows from DB only (before unscheduled placeholders): all are real schedule rows for the month.
+      const bookedLessonsCount = lessons.length;
       const scheduledCount = lessons.filter((l) => l.status !== 'unscheduled').length;
       const missingCount = Math.max(0, paidLessons - scheduledCount);
       for (let i = 0; i < missingCount; i++) {
@@ -189,6 +191,10 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         Payment: isPaid ? '済' : '未',
         lessons,
         missingCount,
+        /** Payment row `amount` (lesson credits) for this month — paired with bookedLessonsCount for UI. */
+        paidLessonsCount: paidLessons,
+        /** Lessons on the schedule this month (includes cancelled/rescheduled rows). */
+        bookedLessonsCount,
         year: parseInt(y, 10),
         monthIndex: parseInt(mo, 10) - 1,
         label: monthLabel,
@@ -316,8 +322,12 @@ function isoToTokyoDateAndTime(iso) {
   return { date: dateStr, time: timeStr };
 }
 
-/** Current month in Japan (Asia/Tokyo): { year, month } and ISO range for that month (start of first day JST, start of first day next month JST). */
-function getCurrentMonthJapanRange() {
+/**
+ * Current + next calendar month in Japan (Asia/Tokyo) for teacher schedule GAS fetch.
+ * - timeMin/timeMax: first instant of current month JST through exclusive start of month-after-next (Calendar API style).
+ * - rangeStart/rangeEnd: inclusive YYYY-MM-DD bounds for DELETE/replace in teacher_schedules.
+ */
+function getCurrentAndNextMonthJapanRange() {
   const now = new Date();
   const jstMs = now.getTime() + JST_OFFSET_MS;
   const jstDay = Math.floor(jstMs / MS_PER_DAY);
@@ -325,12 +335,18 @@ function getCurrentMonthJapanRange() {
   const year = d.getUTCFullYear();
   const month = d.getUTCMonth() + 1;
   const timeMinUTC = Date.UTC(year, month - 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
-  const timeMaxUTC = Date.UTC(year, month, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
+  const timeMaxUTC = Date.UTC(year, month + 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
   const timeMinISO = new Date(timeMinUTC).toISOString();
   const timeMaxISO = new Date(timeMaxUTC).toISOString();
   const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const rangeEnd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  let nYear = year;
+  let nMonth = month + 1;
+  if (nMonth > 12) {
+    nMonth = 1;
+    nYear += 1;
+  }
+  const lastDayNext = new Date(Date.UTC(nYear, nMonth, 0)).getUTCDate();
+  const rangeEnd = `${nYear}-${String(nMonth).padStart(2, '0')}-${String(lastDayNext).padStart(2, '0')}`;
   return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
 }
 
@@ -454,7 +470,7 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
     );
     const staffList = staffResult.rows;
 
-    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentMonthJapanRange();
+    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentAndNextMonthJapanRange();
 
     let totalStored = 0;
     const errors = [];
@@ -557,7 +573,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
     }
 
     const teacherName = staff.name;
-    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentMonthJapanRange();
+    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentAndNextMonthJapanRange();
 
     const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
     const fetchRes = await fetch(gasUrl);

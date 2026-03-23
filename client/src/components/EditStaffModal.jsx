@@ -156,7 +156,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
                   }}
                   disabled={fetchScheduleLoading}
                   className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-                  title="Fetch next 31 days from this staff's Google Calendar and save to database"
+                  title="Fetch this month and next month (Japan time) from this staff's Google Calendar and save to database"
                 >
                   <Calendar className="w-4 h-4" />
                   {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
