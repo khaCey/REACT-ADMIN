@@ -15,9 +15,13 @@ CREATE TABLE IF NOT EXISTS students (
   group_type VARCHAR(50),
   group_size INTEGER,
   is_child BOOLEAN DEFAULT FALSE,
+  google_contact_resource_name VARCHAR(512),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Existing DBs (before this column existed)
+ALTER TABLE students ADD COLUMN IF NOT EXISTS google_contact_resource_name VARCHAR(512);
 
 -- Payments
 CREATE TABLE IF NOT EXISTS payments (

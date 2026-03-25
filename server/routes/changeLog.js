@@ -157,9 +157,12 @@ async function applyUpdate(entity_type, data) {
   if (!data) return;
   if (entity_type === 'students') {
     const o = data;
+    const hasGoogleContact = Object.prototype.hasOwnProperty.call(o, 'google_contact_resource_name');
     await query(
       `UPDATE students SET name = $2, name_kanji = $3, email = $4, phone = $5, phone_secondary = $6,
-        same_day_cancel = $7, status = $8, payment = $9, group_type = $10, group_size = $11, is_child = $12, updated_at = NOW()
+        same_day_cancel = $7, status = $8, payment = $9, group_type = $10, group_size = $11, is_child = $12,
+        google_contact_resource_name = CASE WHEN $14::boolean THEN $13 ELSE google_contact_resource_name END,
+        updated_at = NOW()
        WHERE id = $1`,
       [
         o.id,
@@ -174,6 +177,8 @@ async function applyUpdate(entity_type, data) {
         o.group_type ?? '',
         o.group_size ?? null,
         o.is_child ?? false,
+        o.google_contact_resource_name ?? null,
+        hasGoogleContact,
       ]
     );
   } else if (entity_type === 'payments') {
@@ -236,13 +241,13 @@ async function applyCreate(entity_type, data) {
   if (entity_type === 'students') {
     const o = data;
     await query(
-      `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child, google_contact_resource_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name, name_kanji = EXCLUDED.name_kanji, email = EXCLUDED.email,
          phone = EXCLUDED.phone, phone_secondary = EXCLUDED.phone_secondary, same_day_cancel = EXCLUDED.same_day_cancel,
          status = EXCLUDED.status, payment = EXCLUDED.payment, group_type = EXCLUDED.group_type, group_size = EXCLUDED.group_size,
-         is_child = EXCLUDED.is_child, updated_at = NOW()`,
+         is_child = EXCLUDED.is_child, google_contact_resource_name = EXCLUDED.google_contact_resource_name, updated_at = NOW()`,
       [
         o.id,
         o.name ?? '',
@@ -256,6 +261,7 @@ async function applyCreate(entity_type, data) {
         o.group_type ?? '',
         o.group_size ?? null,
         o.is_child ?? false,
+        o.google_contact_resource_name ?? null,
       ]
     );
   } else if (entity_type === 'payments') {

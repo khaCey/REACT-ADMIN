@@ -69,6 +69,7 @@ Export your Google Sheets as CSV to `migration-data/`. See `migration-data/READM
 
 ## Google Apps Script (GAS)
 
+- **Google Contacts (optional):** sync new/updated students to Workspace Contacts — [`docs/google-contacts.md`](docs/google-contacts.md)
 - **API shape (student calendar poll):** [`POLLING_API_SPEC.md`](POLLING_API_SPEC.md) and [`docs/gas-calendar-poll-prompt.md`](docs/gas-calendar-poll-prompt.md)
 - **Staff schedule GAS (separate Web App):** [`docs/staff-schedule-gas.md`](docs/staff-schedule-gas.md)
 - **How to deploy updates and rotate keys:** [`docs/how-to-update-gas.md`](docs/how-to-update-gas.md)

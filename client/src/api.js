@@ -26,6 +26,7 @@ export const api = {
   getStudentLatestByMonth: (id) => fetchApi(`/students/${id}/latest-by-month`),
   addStudent: (data) => fetchApi('/students', { method: 'POST', body: JSON.stringify(data) }),
   updateStudent: (id, data) => fetchApi(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  syncStudentGoogleContact: (id) => fetchApi(`/students/${id}/google-contact-sync`, { method: 'POST' }),
   deleteStudent: (id) => fetchApi(`/students/${id}`, { method: 'DELETE' }),
 
   getPayments: () => fetchApi('/payments'),

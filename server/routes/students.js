@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
+import { isStudentGasSyncEnabled, syncStudentToGas } from '../lib/studentContactSync.js';
 
 const router = Router();
 
@@ -51,6 +52,7 @@ router.get('/:id', async (req, res) => {
       人数: r.group_size,
       子: r.is_child ? '子' : '',
       is_child: !!r.is_child,
+      google_contact_linked: Boolean(r.google_contact_resource_name),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -79,11 +81,23 @@ router.post('/', async (req, res) => {
       ]
     );
     const newRow = result.rows[0];
+    let googleContactSync = 'disabled';
+    if (isStudentGasSyncEnabled()) {
+      const sync = await syncStudentToGas('student_upsert', newRow);
+      googleContactSync = sync.ok ? 'ok' : 'failed';
+      if (!sync.ok) {
+        console.error(`[StudentSync] GAS sync failed for student ${newRow.id}:`, sync.error || 'unknown error');
+      }
+    }
     await logChange(
       { entityType: 'students', entityKey: String(newRow.id), action: 'create', oldData: null, newData: newRow },
       req
     );
-    res.status(201).json({ id: newRow.id });
+    res.status(201).json({
+      id: newRow.id,
+      googleContactCreated: googleContactSync === 'ok',
+      googleContactSync,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -132,13 +146,56 @@ router.put('/:id', async (req, res) => {
         isChildParam,
       ]
     );
-    const newResult = await query('SELECT * FROM students WHERE id = $1', [id]);
-    const newRow = newResult.rows[0] || oldRow;
+    const newRow = (await query('SELECT * FROM students WHERE id = $1', [id])).rows[0] || oldRow;
+    let googleContactSync = 'disabled';
+    if (isStudentGasSyncEnabled()) {
+      const sync = await syncStudentToGas('student_upsert', newRow);
+      googleContactSync = sync.ok ? 'ok' : 'failed';
+      if (!sync.ok) {
+        console.error(`[StudentSync] GAS sync failed for student ${id} update:`, sync.error || 'unknown error');
+      }
+    }
     await logChange(
       { entityType: 'students', entityKey: String(id), action: 'update', oldData: oldRow, newData: newRow },
       req
     );
-    res.json({ ok: true });
+    res.json({ ok: true, googleContactSync });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Manual one-student Google Contact upsert via GAS. */
+router.post('/:id/google-contact-sync', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await query('SELECT * FROM students WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    if (!isStudentGasSyncEnabled()) {
+      return res.status(400).json({
+        ok: false,
+        googleContactSync: 'disabled',
+        error: 'Student contact sync is not configured (STUDENT_SYNC_GAS_URL / STUDENT_SYNC_API_KEY).',
+      });
+    }
+    const studentRow = result.rows[0];
+    const sync = await syncStudentToGas('student_upsert', studentRow);
+    if (!sync.ok) {
+      console.error(`[StudentSync] Manual sync failed for student ${id}:`, sync.error || 'unknown error');
+      return res.status(502).json({
+        ok: false,
+        googleContactSync: 'failed',
+        error: sync.error || 'Google Contact sync failed',
+      });
+    }
+    return res.json({
+      ok: true,
+      googleContactSync: 'ok',
+      actionTaken: sync.actionTaken || null,
+      contactId: sync.contactId || null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

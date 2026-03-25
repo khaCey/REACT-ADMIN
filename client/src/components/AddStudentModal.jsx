@@ -47,8 +47,15 @@ export default function AddStudentModal({ onClose, onAdded }) {
         人数: form.Group === 'Group' ? (form.人数 || '2') : '1',
         子: form.子 ? '子' : '',
       }
-      const { id } = await api.addStudent(payload)
-      success('Student created')
+      const res = await api.addStudent(payload)
+      const id = res?.id
+      if (res?.googleContactSync === 'ok') {
+        success('Student created (Google Contact synced)')
+      } else if (res?.googleContactSync === 'failed') {
+        success('Student created (Google Contact sync failed)')
+      } else {
+        success('Student created')
+      }
       onAdded?.(id)
       onClose()
     } catch (e) {

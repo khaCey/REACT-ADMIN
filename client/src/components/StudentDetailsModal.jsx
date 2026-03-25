@@ -1,9 +1,10 @@
-import { useState, useEffect, Component, useRef } from 'react'
+import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
 import { isStudentExcludedFromBooking } from '../config/booking'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
+import { useToast } from '../context/ToastContext'
 import PaymentModal from './PaymentModal'
 import NoteModal from './NoteModal'
 import EditStudentModal from './EditStudentModal'
@@ -39,6 +40,7 @@ class ModalErrorBoundary extends Component {
 }
 
 export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated, guideAction = null, onGuideActionHandled }) {
+  const { success } = useToast()
   const [student, setStudent] = useState(null)
   const [payments, setPayments] = useState([])
   const [notes, setNotes] = useState([])
@@ -52,6 +54,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   const [noteSearch, setNoteSearch] = useState('')
+  const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -63,7 +66,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (bookingExcluded) setBookLessonModal(false)
   }, [bookingExcluded])
 
-  const fetchData = () => {
+  const fetchData = useCallback(() => {
     if (studentId == null) return
     setLoading(true)
     setError(null)
@@ -82,11 +85,11 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }
+  }, [studentId])
 
   useEffect(() => {
     fetchData()
-  }, [studentId])
+  }, [fetchData])
 
   useEffect(() => {
     setLessonsLoading(true)
@@ -153,6 +156,22 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) onClose()
+  }
+
+  const handleSyncGoogleContact = async () => {
+    if (studentId == null || syncingGoogleContact) return
+    setSyncingGoogleContact(true)
+    setError(null)
+    try {
+      const res = await api.syncStudentGoogleContact(studentId)
+      const action = res?.actionTaken === 'created' ? 'created' : res?.actionTaken === 'updated' ? 'updated' : 'synced'
+      success(`Google Contact ${action}`)
+      fetchData()
+    } catch (e) {
+      setError(e.message || 'Google Contact sync failed')
+    } finally {
+      setSyncingGoogleContact(false)
+    }
   }
 
   useEffect(() => {
@@ -391,6 +410,17 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
             <div className="flex items-center justify-between px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
               <div />
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncGoogleContact}
+                  disabled={syncingGoogleContact}
+                  className={`inline-flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-3 py-1.5 text-sm font-semibold ${
+                    syncingGoogleContact ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 cursor-pointer'
+                  }`}
+                  title="Create or resync this student's Google Contact"
+                >
+                  {syncingGoogleContact ? 'Syncing...' : 'Create/Resync Google Contact'}
+                </button>
                 {!bookingExcluded && (
                   <button
                     type="button"
