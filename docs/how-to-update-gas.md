@@ -37,6 +37,31 @@ Use the **same deployment steps** as above, but on the **separate** Apps Script 
 
 ---
 
+## 2b. Student contact sync POST (Node -> GAS)
+
+If you use student contact sync through GAS:
+
+1. In GAS project **Script properties**, set `STUDENT_SYNC_API_KEY`.
+2. In server `.env`, set:
+   - `STUDENT_SYNC_GAS_URL=<your student GAS /exec URL>`
+   - `STUDENT_SYNC_API_KEY=<same secret as Script property>`
+3. Deploy a **new GAS version** after code changes.
+4. Restart Node/PM2 after `.env` changes.
+
+**Verify:** create a student in the app and confirm API response includes `googleContactSync: "ok"`.
+
+### Contacts permission error (`createContact` / `auth/contacts`)
+
+If GAS logs or the API returns an error like *permission to call people.createContact* and *required scope …/auth/contacts*:
+
+1. **Confirm the online project matches the manifest** — In [script.google.com](https://script.google.com), open **Project Settings** and check **OAuth scopes** includes `https://www.googleapis.com/auth/contacts`. The `appsscript.json` in this repo is not deployed automatically; paste scopes or sync the manifest into the live project.
+2. **Enable the People advanced service** — Editor → **Services** (+) → **People API** (manifest entry `peopleapi` / `People`).
+3. **Force a new OAuth grant** — In the editor, choose function **`runAuthorizePeopleContactsOnce`** → **Run**. Accept the consent screen (Contacts access). If no prompt appears, open [Google Account → Third-party access](https://myaccount.google.com/permissions), remove access for this Apps Script project, then **Run** again.
+4. **Redeploy the Web app** — **Deploy** → **Manage deployments** → pencil on the Web app → **New version** → **Deploy**. The student sync POST runs as the deploying user; their token must include `contacts`.
+5. **Google Workspace** — `contacts` is a restricted scope. An admin may need to allow your Apps Script OAuth client under **Admin console → Security → Access and data control → API controls** (third-party / internal app access), or the user cannot grant the scope.
+
+---
+
 ## 3. Rotating the poll API key (`key` query param)
 
 1. Choose a new random secret (long, unguessable).
