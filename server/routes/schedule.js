@@ -12,6 +12,7 @@ import {
   jstHourLabelFromUtc,
   pickTeacherForBooking,
 } from '../lib/teacherBreakRules.js';
+import { createBookedLessonEventInGas, isBookingGasEnabled } from '../lib/bookingCalendarSync.js';
 
 const router = Router();
 
@@ -318,7 +319,7 @@ router.put('/extend', async (req, res) => {
   }
 });
 
-/** Book a new lesson: insert into monthly_schedule. */
+/** Book a new lesson: create a Calendar event via GAS (source of truth). */
 router.post('/book', async (req, res) => {
   try {
     const { student_id, date, time, duration_minutes } = req.body || {};
@@ -334,7 +335,7 @@ router.post('/book', async (req, res) => {
       return res.status(403).json({ error: 'Booking is not available for this student.' });
     }
     const studentResult = await query(
-      'SELECT id, name, is_child FROM students WHERE id = $1',
+      'SELECT id, name, is_child, status, payment FROM students WHERE id = $1',
       [studentIdNum]
     );
     if (studentResult.rows.length === 0) {
@@ -488,40 +489,36 @@ router.post('/book', async (req, res) => {
       assignedTeacherName = pickTeacherForBooking(assignable, teachingMap);
     }
 
-    const eventId = `booked-${Date.now()}-${studentIdNum}`;
     const title = `${studentName}${student.is_child ? ' 子' : ''} (Lesson)`;
-    const insertResult = await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, 'regular', 'unknown', $9)
-       RETURNING *`,
-      [
-        eventId,
-        title,
-        dateStr,
-        startDate.toISOString(),
-        endDate.toISOString(),
-        studentName,
-        !!student.is_child,
-        assignedTeacherName,
-        studentIdNum,
-      ]
-    );
-    const newRow = insertResult.rows[0];
-    if (newRow) {
-      await logChange(
-        {
-          entityType: 'monthly_schedule',
-          entityKey: `${eventId}_${studentName}`,
-          action: 'create',
-          oldData: null,
-          newData: newRow,
-        },
-        req
-      );
+    if (!isBookingGasEnabled()) {
+      return res.status(400).json({
+        error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
+      });
     }
+
+    const gasRes = await createBookedLessonEventInGas({
+      student: {
+        id: student.id,
+        name: studentName,
+        status: student.status,
+        payment: student.payment,
+        is_child: !!student.is_child,
+      },
+      startIso: startDate.toISOString(),
+      endIso: endDate.toISOString(),
+      assignedTeacherName,
+      title,
+      location: '',
+    });
+    if (!gasRes.ok) {
+      return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
+    }
+
     res.status(201).json({
       ok: true,
-      event_id: eventId,
+      event_id: gasRes.eventId,
+      calendar_id: gasRes.calendarId,
+      teacher_name: assignedTeacherName,
       date: dateStr,
       start: startDate.toISOString(),
       end: endDate.toISOString(),

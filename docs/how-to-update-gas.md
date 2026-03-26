@@ -62,6 +62,21 @@ If GAS logs or the API returns an error like *permission to call people.createCo
 
 ---
 
+## 2c. Lesson booking POST (Node -> GAS → Calendar)
+
+If you use in-app lesson booking (`POST /api/schedule/book`), the server must create a real Calendar event via GAS (otherwise the next calendar poll reconcile can delete the `booked-*` placeholder rows).
+
+1. In the GAS project **Script properties**, set `BOOKING_API_KEY`.
+2. In server `.env`, set:
+   - `BOOKING_GAS_URL=<your GAS /exec URL>` (usually the same as `CALENDAR_POLL_URL`)
+   - `BOOKING_API_KEY=<same secret as Script property>`
+3. Deploy a **new GAS version** after code changes.
+4. Restart Node/PM2 after `.env` changes.
+
+**Verify:** book a lesson in the UI, then refresh the page and confirm the booking still exists (and appears after the next poll sync).
+
+---
+
 ## 3. Rotating the poll API key (`key` query param)
 
 1. Choose a new random secret (long, unguessable).

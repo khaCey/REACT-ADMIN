@@ -298,7 +298,7 @@ export default function BookLessonModal({
         })
       })
       .then(() => {
-        success('Lesson booked')
+        success('Lesson booked (added to calendar)')
         onBooked?.()
         return Promise.all([
           api
