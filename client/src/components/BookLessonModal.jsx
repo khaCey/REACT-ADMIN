@@ -95,6 +95,12 @@ function toLessonMonthSummary(ym, entry) {
   return { yyyyMm: ym, label: entry.label || ym, booked, paid }
 }
 
+function getCurrentMonthSummary(latestByMonth) {
+  if (!latestByMonth || typeof latestByMonth !== 'object') return null
+  const ym = getCurrentYyyyMmJst()
+  return toLessonMonthSummary(ym, latestByMonth[ym])
+}
+
 /** True when JST "today" is in the last END_OF_MONTH_LOOKAHEAD_DAYS of the month. */
 function isEndOfMonthJst() {
   const jst = new Date(Date.now() + JST_OFFSET_MS)
@@ -167,6 +173,7 @@ export default function BookLessonModal({
   studentId,
   student,
   preloadedLatestByMonth,
+  overridePaidLessons = null,
   onClose,
   onBooked,
 }) {
@@ -290,11 +297,21 @@ export default function BookLessonModal({
       .getBookingWarning(slot.date, slot.time, student_id)
       .then((w) => {
         if (w.warn && w.message) setBreakWarning(w.message)
+        const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
+        const overrideTotal = Number(overridePaidLessons)
+        const packTotal =
+          Number.isFinite(overrideTotal) && overrideTotal > 0
+            ? overrideTotal
+            : monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0
+              ? monthSummary.paid
+              : undefined
         return api.bookLesson({
           student_id,
           date: String(slot.date),
           time: String(slot.time),
           duration_minutes: 50,
+          pack_total: packTotal,
+          location: 'Cafe',
         })
       })
       .then(() => {

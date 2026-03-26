@@ -10,6 +10,7 @@ import NoteModal from './NoteModal'
 import EditStudentModal from './EditStudentModal'
 import LessonsThisMonth from './LessonsThisMonth'
 import BookLessonModal from './BookLessonModal'
+import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 function StatusBadge({ status }) {
@@ -51,6 +52,8 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [noteModal, setNoteModal] = useState(null)
   const [editStudentModal, setEditStudentModal] = useState(false)
   const [bookLessonModal, setBookLessonModal] = useState(false)
+  const [preBookLessonModal, setPreBookLessonModal] = useState(false)
+  const [overridePaidLessons, setOverridePaidLessons] = useState(null)
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   const [noteSearch, setNoteSearch] = useState('')
@@ -172,6 +175,30 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     } finally {
       setSyncingGoogleContact(false)
     }
+  }
+
+  const getCurrentJstYyyyMm = () => {
+    const jst = new Date(Date.now() + 9 * 60 * 60 * 1000)
+    const y = jst.getUTCFullYear()
+    const m = jst.getUTCMonth() + 1
+    return `${y}-${String(m).padStart(2, '0')}`
+  }
+
+  const hasKnownPaidLessonsThisMonth = () => {
+    if (!bookingLatestByMonth || typeof bookingLatestByMonth !== 'object') return false
+    const ym = getCurrentJstYyyyMm()
+    const paid = bookingLatestByMonth?.[ym]?.paidLessonsCount
+    return typeof paid === 'number' && paid > 0
+  }
+
+  const openBookingFlow = () => {
+    setGuideFocusKey(null)
+    if (hasKnownPaidLessonsThisMonth()) {
+      setOverridePaidLessons(null)
+      setBookLessonModal(true)
+      return
+    }
+    setPreBookLessonModal(true)
   }
 
   useEffect(() => {
@@ -424,10 +451,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                 {!bookingExcluded && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setGuideFocusKey(null)
-                      setBookLessonModal(true)
-                    }}
+                    onClick={openBookingFlow}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
                   >
                     <Calendar className="w-4 h-4" />
@@ -506,8 +530,25 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         studentId={studentId}
         student={student}
         preloadedLatestByMonth={bookingLatestByMonth}
-        onClose={() => setBookLessonModal(false)}
+        overridePaidLessons={overridePaidLessons}
+        onClose={() => {
+          setBookLessonModal(false)
+          setOverridePaidLessons(null)
+        }}
         onBooked={fetchData}
+      />
+    )}
+    {preBookLessonModal && !bookingExcluded && (
+      <PreBookLessonModal
+        onClose={() => {
+          setPreBookLessonModal(false)
+          setOverridePaidLessons(null)
+        }}
+        onConfirm={(x) => {
+          setOverridePaidLessons(x)
+          setPreBookLessonModal(false)
+          setBookLessonModal(true)
+        }}
       />
     )}
     </>,

@@ -322,7 +322,7 @@ router.put('/extend', async (req, res) => {
 /** Book a new lesson: create a Calendar event via GAS (source of truth). */
 router.post('/book', async (req, res) => {
   try {
-    const { student_id, date, time, duration_minutes } = req.body || {};
+    const { student_id, date, time, duration_minutes, pack_total, location } = req.body || {};
     const dateStrRaw = date != null ? String(date).trim() : '';
     const timeStrRaw = time != null ? String(time).trim() : '';
     const missingStudent =
@@ -489,7 +489,37 @@ router.post('/book', async (req, res) => {
       assignedTeacherName = pickTeacherForBooking(assignable, teachingMap);
     }
 
-    const title = `${studentName}${student.is_child ? ' 子' : ''} (Lesson)`;
+    const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
+    const monthKey = dateStr.slice(0, 7);
+    const bookedCountResult = await query(
+      `SELECT COUNT(DISTINCT m.event_id) AS cnt
+       FROM monthly_schedule m
+       WHERE (m.status IS NULL OR m.status <> 'cancelled')
+         AND m.student_id = $1
+         AND to_char(m.date, 'YYYY-MM') = $2`,
+      [studentIdNum, monthKey]
+    );
+    const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+    const nextLessonNumber = bookedThisMonth + 1;
+
+    const providedPackTotal = parseInt(pack_total, 10);
+    let totalLessons = Number.isFinite(providedPackTotal) && providedPackTotal > 0 ? providedPackTotal : 0;
+    if (!totalLessons) {
+      const paidCountResult = await query(
+        `SELECT COALESCE(SUM(CASE WHEN p.amount IS NULL THEN 0 ELSE p.amount END), 0) AS total_paid
+         FROM payments p
+         WHERE p.student_id = $1
+           AND p.month = $2`,
+        [studentIdNum, monthKey]
+      );
+      totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
+    }
+    if (!totalLessons) {
+      return res.status(400).json({
+        error: 'Missing lesson pack total. Enter total lessons before booking.',
+      });
+    }
+    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}lesson`;
     if (!isBookingGasEnabled()) {
       return res.status(400).json({
         error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
@@ -508,7 +538,7 @@ router.post('/book', async (req, res) => {
       endIso: endDate.toISOString(),
       assignedTeacherName,
       title,
-      location: '',
+      location: locationLabel,
     });
     if (!gasRes.ok) {
       return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
