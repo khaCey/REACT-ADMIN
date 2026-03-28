@@ -12,7 +12,11 @@ import {
   jstHourLabelFromUtc,
   pickTeacherForBooking,
 } from '../lib/teacherBreakRules.js';
-import { createBookedLessonEventInGas, isBookingGasEnabled } from '../lib/bookingCalendarSync.js';
+import {
+  createBookedLessonEventInGas,
+  deleteBookedLessonEventInGas,
+  isBookingGasEnabled
+} from '../lib/bookingCalendarSync.js';
 
 const router = Router();
 
@@ -32,6 +36,14 @@ const GRID_TIME_SLOTS = [
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
+
+function deriveLessonKindFromStudent(student) {
+  const payment = String(student?.payment || '').toLowerCase();
+  if (payment.includes('owner')) return 'owner';
+  const status = String(student?.status || '').toLowerCase();
+  if (status.includes('demo') || status.includes('trial')) return 'demo';
+  return 'regular';
+}
 
 function addDaysToYyyyMmDd(dateStr, n) {
   const [y, mo, d] = dateStr.split('-').map(Number);
@@ -519,7 +531,7 @@ router.post('/book', async (req, res) => {
         error: 'Missing lesson pack total. Enter total lessons before booking.',
       });
     }
-    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}lesson`;
+    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
     if (!isBookingGasEnabled()) {
       return res.status(400).json({
         error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
@@ -543,6 +555,39 @@ router.post('/book', async (req, res) => {
     if (!gasRes.ok) {
       return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
     }
+
+    // Immediate local upsert prevents stale break-rule checks before next poll/backfill catches up.
+    const lessonKind = deriveLessonKindFromStudent(student);
+    await query(
+      `INSERT INTO monthly_schedule
+        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+       VALUES
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, 'unknown', $10)
+       ON CONFLICT (event_id, student_name)
+       DO UPDATE SET
+         title = EXCLUDED.title,
+         date = EXCLUDED.date,
+         start = EXCLUDED.start,
+         "end" = EXCLUDED."end",
+         status = EXCLUDED.status,
+         is_kids_lesson = EXCLUDED.is_kids_lesson,
+         teacher_name = EXCLUDED.teacher_name,
+         lesson_kind = EXCLUDED.lesson_kind,
+         lesson_mode = EXCLUDED.lesson_mode,
+         student_id = EXCLUDED.student_id`,
+      [
+        gasRes.eventId,
+        title,
+        dateStr,
+        startDate.toISOString(),
+        endDate.toISOString(),
+        studentName,
+        !!student.is_child,
+        assignedTeacherName,
+        lessonKind,
+        studentIdNum,
+      ]
+    );
 
     res.status(201).json({
       ok: true,
@@ -694,6 +739,15 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    }
+    if (isBookingGasEnabled()) {
+      const del = await deleteBookedLessonEventInGas(eventId);
+      if (!del.ok) {
+        return res.status(502).json({
+          error: del.error || 'Failed to remove lesson from Google Calendar',
+          event_id: eventId,
+        });
+      }
     }
     await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eventId]);
     for (const oldRow of oldRows) {
