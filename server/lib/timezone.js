@@ -68,6 +68,50 @@ function getJstMinutesOfDay(utcDate) {
   return Math.floor(msInDay / (60 * 1000));
 }
 
+/** JST wall clock "HH:MM" / "HH:MM:SS" -> minutes 0..1439 */
+function wallTimeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  const parts = String(timeStr).trim().split(':').map(Number);
+  const h = parts[0] || 0;
+  const m = parts[1] || 0;
+  return Math.max(0, Math.min(h * 60 + m, 23 * 60 + 59));
+}
+
+/** Minutes 0..1439 -> "HH:MM" */
+function minutesToWallHHMM(totalMin) {
+  const capped = Math.max(0, Math.min(totalMin, 23 * 60 + 59));
+  const hh = Math.floor(capped / 60);
+  const mm = capped % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/**
+ * Round JST wall time to nearest hour (e.g. 12:05 and 11:50 -> 12:00).
+ * Values that would round past midnight are capped at 23:59 the same day.
+ */
+function roundJstWallTimeToNearestHour(timeStr) {
+  const raw = wallTimeToMinutes(timeStr);
+  let m = Math.round(raw / 60) * 60;
+  if (m >= 24 * 60) m = 23 * 60 + 59;
+  return minutesToWallHHMM(m);
+}
+
+/**
+ * Round teacher_schedules start/end to the nearest hour each. If end <= start after rounding,
+ * extend end by one hour (capped at 23:59) so the interval stays valid.
+ */
+function roundTeacherShiftStartEnd(startTime, endTime) {
+  let start = roundJstWallTimeToNearestHour(startTime);
+  let end = roundJstWallTimeToNearestHour(endTime);
+  let sm = wallTimeToMinutes(start);
+  let em = wallTimeToMinutes(end);
+  if (em <= sm) {
+    em = Math.min(sm + 60, 23 * 60 + 59);
+    end = minutesToWallHHMM(em);
+  }
+  return { start_time: start, end_time: end };
+}
+
 export {
   JST_OFFSET_MS,
   MS_PER_DAY,
@@ -75,4 +119,6 @@ export {
   utcToJstDateAndTime,
   getTodayJstDateStr,
   getJstMinutesOfDay,
+  roundJstWallTimeToNearestHour,
+  roundTeacherShiftStartEnd,
 };

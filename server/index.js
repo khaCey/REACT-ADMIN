@@ -35,6 +35,7 @@ import staffRouter from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
+import { roundTeacherShiftStartEnd } from './lib/timezone.js';
 import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
 import cron from 'node-cron';
 
@@ -513,10 +514,11 @@ app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (re
         if (rows.length === 0) {
           console.log('[fetch-staff-schedule]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
         }
+        const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
         rows.push({
           date: startParsed.date,
-          start_time: startParsed.time,
-          end_time: endParsed.time,
+          start_time,
+          end_time,
         });
       }
 
@@ -609,7 +611,8 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       if (rows.length === 0) {
         console.log('[fetch-staff-schedule/:id]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
       }
-      rows.push({ date: startParsed.date, start_time: startParsed.time, end_time: endParsed.time });
+      const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
+      rows.push({ date: startParsed.date, start_time, end_time });
     });
 
     await query(

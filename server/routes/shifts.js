@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { requireAuth, requireAdminOrOperator } from '../middleware/auth.js';
+import { roundJstWallTimeToNearestHour, roundTeacherShiftStartEnd } from '../lib/timezone.js';
 
 const router = Router();
 
@@ -210,8 +211,11 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
       return res.status(400).json({ error: `Shift type ${shiftType} does not apply to this day` });
     }
 
-    const startTime = (typeof customStart === 'string' && customStart.trim()) ? customStart.trim().slice(0, 5) : defaults.start;
-    const endTime = (typeof customEnd === 'string' && customEnd.trim()) ? customEnd.trim().slice(0, 5) : defaults.end;
+    let startTime = (typeof customStart === 'string' && customStart.trim()) ? customStart.trim().slice(0, 5) : defaults.start;
+    let endTime = (typeof customEnd === 'string' && customEnd.trim()) ? customEnd.trim().slice(0, 5) : defaults.end;
+    const roundedMain = roundTeacherShiftStartEnd(startTime, endTime);
+    startTime = roundedMain.start_time;
+    endTime = roundedMain.end_time;
 
     const existing = await query(
       `SELECT date, teacher_name, start_time, end_time FROM teacher_schedules
@@ -253,7 +257,7 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
 
     const isWeekday = [2, 3, 4, 5].includes(dow);
     if (isWeekday && shiftType === 'weekday_morning' && (typeof customEnd === 'string' && customEnd.trim())) {
-      const handover = customEnd.trim().slice(0, 5);
+      const handoverRaw = customEnd.trim().slice(0, 5);
       const eveningDefault = SHIFT_DEFAULTS.weekday_evening;
       const eveningEnd = eveningDefault.end;
       for (const row of existing.rows) {
@@ -261,25 +265,28 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
         const et = row.end_time ? String(row.end_time).slice(0, 5) : '';
         if (getShiftType(dow, st, et) === 'weekday_evening') {
           const rowEnd = et || eveningEnd;
+          const { start_time: hoStart, end_time: hoEnd } = roundTeacherShiftStartEnd(handoverRaw, rowEnd);
           await query(
             'DELETE FROM teacher_schedules WHERE date = $1::date AND teacher_name = $2 AND start_time = $3::time',
             [dateStr, row.teacher_name, row.start_time]
           );
           await query(
             `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time) VALUES ($1::date, $2, $3::time, $4::time)`,
-            [dateStr, row.teacher_name, handover, rowEnd]
+            [dateStr, row.teacher_name, hoStart, hoEnd]
           );
         }
       }
+      const eveningOverride = roundTeacherShiftStartEnd(handoverRaw, eveningEnd);
       await query(
         `INSERT INTO shift_slot_overrides (date, shift_type, start_time, end_time)
          VALUES ($1::date, 'weekday_evening', $2::time, $3::time)
          ON CONFLICT (date, shift_type) DO UPDATE SET start_time = $2::time`,
-        [dateStr, handover, eveningEnd]
+        [dateStr, eveningOverride.start_time, eveningOverride.end_time]
       );
     }
     if (isWeekday && shiftType === 'weekday_evening' && (typeof customStart === 'string' && customStart.trim())) {
-      const handover = customStart.trim().slice(0, 5);
+      const handoverRaw = customStart.trim().slice(0, 5);
+      const handover = roundJstWallTimeToNearestHour(handoverRaw);
       const morningDefault = SHIFT_DEFAULTS.weekday_morning;
       const morningStart = morningDefault.start;
       for (const row of existing.rows) {
@@ -292,11 +299,12 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
           );
         }
       }
+      const morningOverride = roundTeacherShiftStartEnd(morningStart, handover);
       await query(
         `INSERT INTO shift_slot_overrides (date, shift_type, start_time, end_time)
          VALUES ($1::date, 'weekday_morning', $2::time, $3::time)
          ON CONFLICT (date, shift_type) DO UPDATE SET end_time = $3::time`,
-        [dateStr, morningStart, handover]
+        [dateStr, morningOverride.start_time, morningOverride.end_time]
       );
     }
 
