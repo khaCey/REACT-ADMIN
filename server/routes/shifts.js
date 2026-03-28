@@ -132,6 +132,7 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
         startTime = SHIFT_DEFAULTS.weekend.start;
         endTime = SHIFT_DEFAULTS.weekend.end;
       }
+      const displayTimes = roundTeacherShiftStartEnd(startTime, endTime);
       return {
         date: s.date,
         shift_type: s.shift_type,
@@ -139,8 +140,8 @@ router.get('/week', requireAuth, requireAdminOrOperator, async (req, res) => {
         default_start: s.start,
         default_end: s.end,
         staff_name: assigned?.staff_name ?? null,
-        start_time: startTime,
-        end_time: endTime,
+        start_time: displayTimes.start_time,
+        end_time: displayTimes.end_time,
       };
     });
 
@@ -164,12 +165,16 @@ router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req,
        ORDER BY teacher_name, date, start_time`,
       [weekStart]
     );
-    const events = result.rows.map((r) => ({
-      date: toDateStr(r.date),
-      teacher_name: r.teacher_name,
-      start_time: r.start_time ? String(r.start_time).slice(0, 5) : '',
-      end_time: r.end_time ? String(r.end_time).slice(0, 5) : '',
-    }));
+    const events = result.rows.map((r) => {
+      const date = toDateStr(r.date);
+      const start0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+      const end0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      if (!start0 || !end0) {
+        return { date, teacher_name: r.teacher_name, start_time: start0, end_time: end0 };
+      }
+      const { start_time, end_time } = roundTeacherShiftStartEnd(start0, end0);
+      return { date, teacher_name: r.teacher_name, start_time, end_time };
+    });
     res.json({ events });
   } catch (err) {
     res.status(500).json({ error: err.message });

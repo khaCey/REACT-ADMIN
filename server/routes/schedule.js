@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
-import { parseJstToUtc, getTodayJstDateStr, getJstMinutesOfDay } from '../lib/timezone.js';
+import {
+  parseJstToUtc,
+  getTodayJstDateStr,
+  getJstMinutesOfDay,
+  roundTeacherShiftStartEnd,
+} from '../lib/timezone.js';
 import {
   BOOKING_DISABLED_STUDENT_IDS,
   bookingDisabledStudentIdsArray,
@@ -163,9 +168,10 @@ router.get('/week', async (req, res) => {
     for (const r of teachersResult.rows) {
       const dateStr = r.date ? String(r.date).trim().slice(0, 10) : '';
       if (!dateStr) continue;
-      const startT = r.start_time ? String(r.start_time).slice(0, 5) : '';
-      const endT = r.end_time ? String(r.end_time).slice(0, 5) : '';
-      if (!startT || !endT) continue;
+      const start0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+      const end0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      if (!start0 || !end0) continue;
+      const { start_time: startT, end_time: endT } = roundTeacherShiftStartEnd(start0, end0);
       for (const timeStr of GRID_TIME_SLOTS) {
         if (timeStr >= startT && timeStr < endT) {
           const key = `${dateStr}T${timeStr}`;
@@ -273,7 +279,19 @@ router.get('/teachers', async (req, res) => {
        ORDER BY t.teacher_name, t.start_time`,
       [dateStr]
     );
-    res.json({ teachers: shifts.rows });
+    const teachers = shifts.rows.map((r) => {
+      const st0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+      const et0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      const base = {
+        teacher_name: r.teacher_name,
+        extend_before_minutes: r.extend_before_minutes,
+        extend_after_minutes: r.extend_after_minutes,
+      };
+      if (!st0 || !et0) return { ...base, start_time: st0, end_time: et0 };
+      const rounded = roundTeacherShiftStartEnd(st0, et0);
+      return { ...base, start_time: rounded.start_time, end_time: rounded.end_time };
+    });
+    res.json({ teachers });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -439,10 +457,14 @@ router.post('/book', async (req, res) => {
     );
     const teacherSet = new Set();
     for (const r of teacherRows.rows) {
-      const s = r.start_time ? new Date(`1970-01-01T${r.start_time}`) : null;
-      const e = r.end_time ? new Date(`1970-01-01T${r.end_time}`) : null;
-      const startMin = s ? s.getHours() * 60 + s.getMinutes() : 0;
-      const endMin = e ? e.getHours() * 60 + e.getMinutes() : 24 * 60;
+      const st0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+      const et0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      if (!st0 || !et0) continue;
+      const { start_time: stR, end_time: etR } = roundTeacherShiftStartEnd(st0, et0);
+      const s = new Date(`1970-01-01T${stR}`);
+      const e = new Date(`1970-01-01T${etR}`);
+      const startMin = s.getHours() * 60 + s.getMinutes();
+      const endMin = e.getHours() * 60 + e.getMinutes();
       const before = Math.min(120, parseInt(r.extend_before_minutes, 10) || 0);
       const after = Math.min(120, parseInt(r.extend_after_minutes, 10) || 0);
       const effectiveStart = startMin - before;
