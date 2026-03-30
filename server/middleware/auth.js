@@ -1,11 +1,14 @@
 /**
  * Auth middleware - require valid JWT for protected routes
+ * After JWT verification, req.staff is loaded from the DB so is_admin / is_operator
+ * match the database (fixes stale role flags in the token after role changes).
  */
 import jwt from 'jsonwebtoken';
+import { query } from '../db/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'student-admin-secret-change-in-production';
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const auth = req.headers.authorization;
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) {
@@ -13,7 +16,27 @@ export function requireAuth(req, res, next) {
   }
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.staff = payload;
+    const staffId = Number(payload.id);
+    if (!Number.isFinite(staffId) || staffId <= 0) {
+      return res.status(401).json({ error: 'Session expired or invalid' });
+    }
+    const result = await query(
+      'SELECT id, name, is_admin, is_operator, active FROM staff WHERE id = $1',
+      [staffId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Staff not found' });
+    }
+    const row = result.rows[0];
+    if (row.active === false) {
+      return res.status(403).json({ error: 'Account inactive' });
+    }
+    req.staff = {
+      id: row.id,
+      name: row.name,
+      is_admin: !!row.is_admin,
+      is_operator: !!row.is_operator,
+    };
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
