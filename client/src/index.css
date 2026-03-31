@@ -174,3 +174,32 @@ table.table thead.bg-green-600 {
 .dashboard-lesson-card .dashboard-lesson-card-badge {
   font-size: clamp(0.4rem, 6cqw, 0.75rem);
 }
+
+/* Booking calendar slot readability */
+.booking-slot-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
+  line-height: 1.1;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+}
+.booking-slot-primary {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.booking-slot-meta {
+  font-size: 0.62rem;
+  font-weight: 500;
+  opacity: 0.9;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

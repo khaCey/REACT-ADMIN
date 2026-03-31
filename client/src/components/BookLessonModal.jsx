@@ -705,6 +705,14 @@ export default function BookLessonModal({
                             mixBlocked ||
                             alreadyYours ||
                             breakBlocked
+                          const slotTypeLabel =
+                            slotType === 'kids' ? '子'
+                              : slotType === 'adult' ? 'Adult'
+                                : slotType === 'mixed' ? '子+Adult'
+                                  : null
+                          const primaryLabel = isSelected ? 'Selected' : label
+                          const showStrike = bookingUnavailable && !isSelected
+                          const showStatusBead = !isSelected && !!statusBead
                           return (
                             <div
                               key={timeStr}
@@ -736,7 +744,7 @@ export default function BookLessonModal({
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
-                                className={`flex-1 min-h-[24px] py-0.5 px-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                                className={`booking-slot-btn flex-1 min-h-[24px] px-2 transition-colors ${
                                   isSelected
                                     ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
                                     : isPast
@@ -754,16 +762,14 @@ export default function BookLessonModal({
                                               : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
-                                {statusBead && (
+                                {showStatusBead && (
                                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusBead}`} aria-hidden />
                                 )}
-                                <span className={bookingUnavailable ? 'line-through' : undefined}>
-                                  {label}
-                                  {slotType === 'kids' && <span className="text-[10px] text-gray-500">子</span>}
-                                  {slotType === 'adult' && <span className="text-[10px] text-gray-500">Adult</span>}
-                                  {slotType === 'mixed' && (
-                                    <span className="text-[10px] text-gray-500">子+Adult</span>
-                                  )}
+                                <span className={`booking-slot-primary ${showStrike ? 'line-through' : ''}`}>
+                                  {primaryLabel}
+                                </span>
+                                <span className="booking-slot-meta">
+                                  {slotTypeLabel ?? '—'}
                                 </span>
                               </button>
                             </div>
