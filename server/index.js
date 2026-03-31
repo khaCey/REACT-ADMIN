@@ -351,6 +351,144 @@ function getCurrentAndNextMonthJapanRange() {
   return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
 }
 
+/**
+ * Month + next-month in JST for teacher schedule GAS fetch.
+ * @param {string} yyyyMm - YYYY-MM
+ */
+function getMonthAndNextMonthJapanRange(yyyyMm) {
+  if (!/^\d{4}-\d{2}$/.test(String(yyyyMm || '').trim())) {
+    return null;
+  }
+  const [yStr, mStr] = String(yyyyMm).split('-');
+  const year = parseInt(yStr, 10);
+  const month = parseInt(mStr, 10); // 1-12
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+
+  // Calendar API style: timeMax is exclusive. For month M (1-based), the exclusive bound for M + next (2 months)
+  // is start of (M + 2). Since Date.UTC month is 0-based, that's (month + 1).
+  const timeMinUTC = Date.UTC(year, month - 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
+  const timeMaxUTC = Date.UTC(year, month + 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
+  const timeMinISO = new Date(timeMinUTC).toISOString();
+  const timeMaxISO = new Date(timeMaxUTC).toISOString();
+
+  const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  let nYear = year;
+  let nMonth = month + 1; // next month (1-based)
+  if (nMonth > 12) {
+    nMonth = 1;
+    nYear += 1;
+  }
+  const lastDayNext = new Date(Date.UTC(nYear, nMonth, 0)).getUTCDate();
+  const rangeEnd = `${nYear}-${String(nMonth).padStart(2, '0')}-${String(lastDayNext).padStart(2, '0')}`;
+  return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
+}
+
+// Avoid calling GAS for all teachers repeatedly (e.g. multiple bookings in short bursts).
+const TEACHER_SCHEDULE_AUTO_FETCH_TTL_MS = 60 * 60 * 1000; // 1 hour
+const lastTeacherScheduleAutoFetchAtByMonth = new Map();
+
+async function refreshTeacherSchedulesFromGASForMonth(yyyyMm) {
+  const range = getMonthAndNextMonthJapanRange(yyyyMm);
+  if (!range) throw new Error(`Invalid yyyyMm for teacher schedule refresh: ${yyyyMm}`);
+
+  const now = Date.now();
+  const lastAt = lastTeacherScheduleAutoFetchAtByMonth.get(yyyyMm);
+  if (lastAt != null && now - lastAt < TEACHER_SCHEDULE_AUTO_FETCH_TTL_MS) {
+    return { ok: true, skipped: true, reason: 'throttled', yyyyMm };
+  }
+
+  const { url, key } = getStaffScheduleGasConfig();
+  if (!url || !key) {
+    throw new Error('Missing STAFF_SCHEDULE_GAS_URL / STAFF_SCHEDULE_API_KEY for teacher schedule refresh');
+  }
+
+  const staffResult = await query(
+    `SELECT id, name, calendar_id FROM staff
+     WHERE staff_type = 'english_teacher'
+       AND calendar_id IS NOT NULL AND TRIM(calendar_id) != ''
+     ORDER BY name ASC`
+  );
+  const staffList = staffResult.rows;
+
+  let totalStored = 0;
+  const errors = [];
+
+  for (const staff of staffList) {
+    const calendarId = String(staff.calendar_id || '').trim();
+    const teacherName = staff.name;
+    if (!calendarId) continue;
+
+    const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(
+      range.timeMinISO
+    )}&timeMax=${encodeURIComponent(range.timeMaxISO)}`;
+
+    let json;
+    try {
+      const fetchRes = await fetch(gasUrl);
+      json = await fetchRes.json().catch(() => ({}));
+      if (!fetchRes.ok) {
+        errors.push({ staff: teacherName, error: `GAS responded with ${fetchRes.status}` });
+        continue;
+      }
+    } catch (err) {
+      errors.push({ staff: teacherName, error: err.message });
+      continue;
+    }
+
+    if (json?.error) {
+      errors.push({ staff: teacherName, error: json.error });
+      continue;
+    }
+
+    const events = normaliseGasEvents(json);
+    const rows = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      const startRaw = ev.start?.dateTime || ev.start;
+      const endRaw = ev.end?.dateTime || ev.end;
+      if (!startRaw || !endRaw) continue;
+
+      const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
+      const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
+      const startParsed = isoToTokyoDateAndTime(startStr);
+      const endParsed = isoToTokyoDateAndTime(endStr);
+      if (!startParsed || !endParsed) continue;
+      if (isBreakEvent(ev)) continue;
+      if (isShortEvent(startParsed.time, endParsed.time)) continue;
+
+      const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
+      rows.push({ date: startParsed.date, start_time, end_time });
+    }
+
+    await query(
+      `DELETE FROM teacher_schedules
+       WHERE teacher_name = $1
+         AND date >= $2::date
+         AND date <= $3::date`,
+      [teacherName, range.rangeStart, range.rangeEnd]
+    );
+
+    for (const row of rows) {
+      await query(
+        `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time)
+         VALUES ($1::date, $2, $3::time, $4::time)
+         ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
+        [row.date, teacherName, row.start_time, row.end_time]
+      );
+      totalStored++;
+    }
+  }
+
+  lastTeacherScheduleAutoFetchAtByMonth.set(yyyyMm, Date.now());
+  return {
+    ok: true,
+    yyyyMm,
+    staffProcessed: staffList.length,
+    eventsStored: totalStored,
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
 /** Normalize GAS response to an array of events (raw array or { events } or { items }). */
 function normaliseGasEvents(json) {
   if (Array.isArray(json)) return json;
@@ -652,6 +790,26 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
     }
     console.log('[calendar-poll/sync] received', data.length, 'rows,', (removed || []).length, 'removed');
     const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, { removed: removed || [] });
+
+    // Keep teacher_schedules aligned with lesson updates so booking UI capacity constraints are correct.
+    // We refresh only when lesson months touch the current JST month or the next JST month.
+    let teacherSchedulesRefresh = null;
+    try {
+      const jstNow = new Date(Date.now() + JST_OFFSET_MS);
+      const curYyyyMm = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
+      const nextDate = new Date(jstNow.getTime());
+      nextDate.setUTCMonth(nextDate.getUTCMonth() + 1);
+      const nextYyyyMm = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}`;
+
+      const intersectsCurOrNext = Array.isArray(months) && months.some((m) => m === curYyyyMm || m === nextYyyyMm);
+      if (intersectsCurOrNext) {
+        teacherSchedulesRefresh = await refreshTeacherSchedulesFromGASForMonth(curYyyyMm);
+      }
+    } catch (err) {
+      console.warn('[calendar-poll/sync] teacher schedule refresh failed:', err.message);
+      teacherSchedulesRefresh = { ok: false, error: err.message };
+    }
+
     console.log(
       '[calendar-poll/sync] upserted',
       upserted,
@@ -659,7 +817,7 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
       months.sort().join(', '),
       deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : ''
     );
-    res.json({ ok: true, upserted, months, deletedOrphans: deletedOrphans || 0 });
+    res.json({ ok: true, upserted, months, deletedOrphans: deletedOrphans || 0, teacherSchedulesRefresh });
   } catch (err) {
     console.error('[calendar-poll/sync] error:', err.message);
     res.status(500).json({ error: err.message });
@@ -693,8 +851,27 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
     const data = Array.isArray(json.data) ? json.data : [];
     console.log('[calendar-poll/backfill] fetched', data.length, 'rows from GAS');
     const { upserted, months } = await upsertMonthlySchedule(data);
+
+    // Keep teacher_schedules in sync so booking UI has correct capacity/constraints.
+    // (Booking grid calls GET /schedule/week which reads teacher_schedules from DB.)
+    let teacherSchedulesRefresh = null;
+    if (month && /^\d{4}-\d{2}$/.test(String(month))) {
+      try {
+        teacherSchedulesRefresh = await refreshTeacherSchedulesFromGASForMonth(String(month));
+      } catch (err) {
+        console.warn('[calendar-poll/backfill] teacher schedule refresh failed:', err.message);
+        teacherSchedulesRefresh = { ok: false, error: err.message };
+      }
+    }
     console.log('[calendar-poll/backfill] upserted', upserted, 'rows for months', months.sort().join(', '));
-    res.json({ ok: true, upserted, months, fetched: data.length, backfill: json.backfill });
+    res.json({
+      ok: true,
+      upserted,
+      months,
+      fetched: data.length,
+      backfill: json.backfill,
+      teacherSchedulesRefresh,
+    });
   } catch (err) {
     console.error('[calendar-poll/backfill] error:', err.message);
     res.status(500).json({ error: err.message });
@@ -711,7 +888,20 @@ app.post('/api/calendar-poll/sync-from-sheet', async (req, res) => {
     console.log('[calendar-poll/sync-from-sheet] fetched', data.length, 'rows from Sheets');
     const { upserted, months } = await upsertMonthlySchedule(data);
     console.log('[calendar-poll/sync-from-sheet] upserted', upserted, 'rows for months', months.sort().join(', '));
-    res.json({ ok: true, upserted, months, fetched: data.length });
+
+    // Best-effort: refresh teacher schedules for the current month (and next month) in JST.
+    // This keeps booking UI constraints aligned after a bulk lessons sync.
+    let teacherSchedulesRefresh = null;
+    try {
+      const nowJst = new Date(Date.now() + JST_OFFSET_MS);
+      const yyyyMm = `${nowJst.getUTCFullYear()}-${String(nowJst.getUTCMonth() + 1).padStart(2, '0')}`;
+      teacherSchedulesRefresh = await refreshTeacherSchedulesFromGASForMonth(yyyyMm);
+    } catch (err) {
+      console.warn('[calendar-poll/sync-from-sheet] teacher schedule refresh failed:', err.message);
+      teacherSchedulesRefresh = { ok: false, error: err.message };
+    }
+
+    res.json({ ok: true, upserted, months, fetched: data.length, teacherSchedulesRefresh });
   } catch (err) {
     console.error('[calendar-poll/sync-from-sheet] error:', err.message);
     res.status(500).json({ error: err.message });

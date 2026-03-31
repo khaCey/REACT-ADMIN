@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ExtendShiftModal from './ExtendShiftModal'
-import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import { useToast } from '../context/ToastContext'
 
@@ -33,6 +32,61 @@ function addDaysToDateStr(dateStr, n) {
   const [y, mo, d] = dateStr.split('-').map(Number)
   const date = new Date(Date.UTC(y, mo - 1, d + n))
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
+}
+
+function getYyyyMmFromDateStr(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null
+  return dateStr.slice(0, 7)
+}
+
+function getNextYyyyMm(yyyyMm) {
+  if (!yyyyMm || typeof yyyyMm !== 'string') return null
+  const m = yyyyMm.match(/^(\d{4})-(\d{2})$/)
+  if (!m) return null
+  let y = parseInt(m[1], 10)
+  let mo = parseInt(m[2], 10)
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
+  mo += 1
+  if (mo > 12) {
+    mo = 1
+    y += 1
+  }
+  return `${y}-${String(mo).padStart(2, '0')}`
+}
+
+function getFirstMondayOfMonth(yyyyMm) {
+  const m = String(yyyyMm || '').match(/^(\d{4})-(\d{2})$/)
+  if (!m) return null
+  const y = parseInt(m[1], 10)
+  const mo = parseInt(m[2], 10)
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
+  const firstDay = `${y}-${String(mo).padStart(2, '0')}-01`
+  // Monday of the week that contains the 1st.
+  const day = new Date(`${firstDay}T12:00:00+09:00`).getUTCDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  return addDaysToDateStr(firstDay, mondayOffset)
+}
+
+function getWeekStartsCoveringTwoMonthsJst() {
+  const nowJst = new Date(Date.now() + JST_OFFSET_MS)
+  const curYm = `${nowJst.getUTCFullYear()}-${String(nowJst.getUTCMonth() + 1).padStart(2, '0')}`
+  const nextYm = getNextYyyyMm(curYm)
+  const start = getFirstMondayOfMonth(curYm)
+  if (!start) return []
+
+  // End boundary: start of the month after next (exclusive), in JST civil date string.
+  const afterNextYm = nextYm ? getNextYyyyMm(nextYm) : null
+  const endExclusive = afterNextYm ? `${afterNextYm}-01` : null
+  if (!endExclusive) return [start]
+
+  const weekStarts = []
+  let ws = start
+  while (ws < endExclusive) {
+    weekStarts.push(ws)
+    ws = addDaysToDateStr(ws, 7)
+  }
+  return weekStarts
 }
 
 function formatDateKey(date) {
@@ -192,10 +246,11 @@ export default function BookLessonModal({
   const [staffBreakBySlot, setStaffBreakBySlot] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [pendingSlot, setPendingSlot] = useState(null)
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState([])
   const [submitting, setSubmitting] = useState(false)
-  const [breakWarning, setBreakWarning] = useState(null)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
+  /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
+  const [weekCache, setWeekCache] = useState({})
   /** Visible month card(s): booked/paid from latest-by-month (see selectVisibleLessonMonthSummaries). */
   const [lessonMonthSummaries, setLessonMonthSummaries] = useState(() =>
     preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
@@ -205,9 +260,6 @@ export default function BookLessonModal({
   const [lessonBalanceLoaded, setLessonBalanceLoaded] = useState(
     () => preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
   )
-  /** Snapshot at slot pick so Confirm + async chain never lose date/time/id if state races. */
-  const bookingIntentRef = useRef(null)
-
   const refreshLessonBalance = useCallback(() => {
     const sid = resolveBookStudentId(studentId, student)
     if (sid == null) {
@@ -237,10 +289,24 @@ export default function BookLessonModal({
   }, [refreshLessonBalance, lastSynced])
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
     const sid = resolveBookStudentId(studentId, student)
     const weekOpts = sid != null ? { studentId: sid } : undefined
+    const cacheKey = `${weekStartStr}::${sid ?? ''}`
+    const cached = weekCache[cacheKey]
+    if (cached) {
+      setSlots(cached.slots || {})
+      setTeachersBySlot(cached.teachersBySlot || {})
+      setSlotTypes(cached.slotTypes || {})
+      setSlotMix(cached.slotMix || {})
+      setStudentBookedSlots(cached.studentBookedSlots || {})
+      setBreakRuleBlocked(cached.breakRuleBlocked || {})
+      setStaffBreakBySlot(cached.staffBreakBySlot || {})
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
     api
       .getWeekSchedule(weekStartStr, weekOpts)
       .then((data) => {
@@ -251,10 +317,62 @@ export default function BookLessonModal({
         setStudentBookedSlots(data.studentBookedSlots || {})
         setBreakRuleBlocked(data.breakRuleBlocked || {})
         setStaffBreakBySlot(data.staffBreakBySlot || {})
+        setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [weekStartStr, lastSynced, studentId, student])
+  }, [weekStartStr, lastSynced, studentId, student, weekCache])
+
+  useEffect(() => {
+    // When lessons are synced, clear cached weeks so we refetch fresh counts/capacity.
+    setWeekCache({})
+  }, [lastSynced])
+
+  useEffect(() => {
+    // Preload current + next month (JST) so moving across weeks feels seamless.
+    const sid = resolveBookStudentId(studentId, student)
+    const weekOpts = sid != null ? { studentId: sid } : undefined
+    const weekStarts = getWeekStartsCoveringTwoMonthsJst()
+    if (weekStarts.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      for (const ws of weekStarts) {
+        const cacheKey = `${ws}::${sid ?? ''}`
+        if (cancelled) return
+        if (weekCache[cacheKey]) continue
+        try {
+          const data = await api.getWeekSchedule(ws, weekOpts)
+          if (cancelled) return
+          setWeekCache((prev) => (prev[cacheKey] ? prev : { ...prev, [cacheKey]: data }))
+        } catch {
+          // ignore preload errors; current week fetch handles visible errors
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [studentId, student, weekCache])
+
+  useEffect(() => {
+    // Remove selections that no longer exist in this week view.
+    setSelectedSlotKeys((prev) =>
+      prev.filter((key) => {
+        const [dateStr, timeStr] = key.split('T')
+        if (!dateStr || !timeStr) return false
+        if (studentBookedSlots[key]) return false
+        const booked = slots[key] || 0
+        const capacity = (teachersBySlot[key] || []).length
+        if (capacity === 0 || booked >= capacity) return false
+        if (isKidAdultMixBlocked(student, slotMix[key])) return false
+        if (breakRuleBlocked[key]) return false
+        if (isSlotPastJst(dateStr, timeStr)) return false
+        return true
+      })
+    )
+  }, [slots, teachersBySlot, slotMix, breakRuleBlocked, studentBookedSlots, student])
 
   const goWeek = (delta) => {
     setWeekStartStr(addDaysToDateStr(weekStartStr, delta * 7))
@@ -268,6 +386,10 @@ export default function BookLessonModal({
       return
     }
     const key = `${dateStr}T${timeStr}`
+    if (selectedSlotKeys.includes(key)) {
+      setSelectedSlotKeys((prev) => prev.filter((k) => k !== key))
+      return
+    }
     if (studentBookedSlots[key]) return
     const booked = slots[key] || 0
     const teachers = teachersBySlot[key] || []
@@ -275,76 +397,89 @@ export default function BookLessonModal({
     if (capacity === 0 || booked >= capacity) return
     if (isKidAdultMixBlocked(student, slotMix[key])) return
     if (breakRuleBlocked[key]) return
-    const sid = resolveBookStudentId(studentId, student)
-    bookingIntentRef.current = { date: dateStr, time: timeStr, studentId: sid }
-    setPendingSlot({ date: dateStr, time: timeStr })
+    setSelectedSlotKeys((prev) => [...prev, key])
   }
 
-  const handleConfirmBook = () => {
-    const intent = bookingIntentRef.current
-    const slot = intent || pendingSlot
-    const sidRaw = intent?.studentId ?? resolveBookStudentId(studentId, student)
-    if (!slot?.date || !slot?.time || sidRaw == null || sidRaw === '') {
-      setError('Missing student or time slot. Cancel and choose a slot again.')
+  const handleSubmitSelected = async () => {
+    const sidRaw = resolveBookStudentId(studentId, student)
+    if (sidRaw == null || sidRaw === '') {
+      setError('Missing student. Close and reopen booking, or refresh the page.')
+      return
+    }
+    if (selectedSlotKeys.length === 0) {
+      setError('Please select one or more slots first.')
       return
     }
     const numericId = Number(sidRaw)
     const student_id = Number.isFinite(numericId) ? numericId : sidRaw
-    setBreakWarning(null)
     setError(null)
     setSubmitting(true)
-    api
-      .getBookingWarning(slot.date, slot.time, student_id)
-      .then((w) => {
-        if (w.warn && w.message) setBreakWarning(w.message)
-        const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
-        const overrideTotal = Number(overridePaidLessons)
-        const packTotal =
-          Number.isFinite(overrideTotal) && overrideTotal > 0
-            ? overrideTotal
-            : monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0
-              ? monthSummary.paid
-              : undefined
-        return api.bookLesson({
-          student_id,
-          date: String(slot.date),
-          time: String(slot.time),
-          duration_minutes: 50,
-          pack_total: packTotal,
-          location: 'Cafe',
-        })
-      })
-      .then(() => {
-        success('Lesson booked (added to calendar)')
+    try {
+      const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
+      const overrideTotal = Number(overridePaidLessons)
+      const packTotal =
+        Number.isFinite(overrideTotal) && overrideTotal > 0
+          ? overrideTotal
+          : monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0
+            ? monthSummary.paid
+            : undefined
+      const selected = [...selectedSlotKeys].sort()
+      const failed = []
+      const touchedMonths = new Set()
+      let successCount = 0
+
+      for (const key of selected) {
+        const [date, time] = key.split('T')
+        if (!date || !time) continue
+        try {
+          await api.getBookingWarning(date, time, student_id)
+          await api.bookLesson({
+            student_id,
+            date: String(date),
+            time: String(time),
+            duration_minutes: 50,
+            pack_total: packTotal,
+            location: 'Cafe',
+          })
+          successCount += 1
+          touchedMonths.add(String(date).slice(0, 7))
+        } catch (e) {
+          failed.push(`${date} ${time}: ${e?.message || 'Failed to book'}`)
+        }
+      }
+
+      if (successCount > 0) {
+        success(`${successCount} lesson${successCount > 1 ? 's' : ''} booked (added to calendar)`)
         onBooked?.()
-        return Promise.all([
-          api
-            .getWeekSchedule(weekStartStr, { studentId: student_id })
-            .catch(() => null),
-          api.getStudentLatestByMonth(student_id).catch(() => null),
-        ])
-      })
-      .then(([weekData, latestRes]) => {
-        if (weekData) {
-          setSlots(weekData.slots || {})
-          setTeachersBySlot(weekData.teachersBySlot || {})
-          setSlotTypes(weekData.slotTypes || {})
-          setSlotMix(weekData.slotMix || {})
-          setStudentBookedSlots(weekData.studentBookedSlots || {})
-          setBreakRuleBlocked(weekData.breakRuleBlocked || {})
-          setStaffBreakBySlot(weekData.staffBreakBySlot || {})
-        }
-        if (latestRes?.latestByMonth) {
-          setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
-        }
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => {
-        setSubmitting(false)
-        setPendingSlot(null)
-        bookingIntentRef.current = null
-        setBreakWarning(null)
-      })
+        await Promise.all([...touchedMonths].map((month) => api.backfillFromCalendar({ month }).catch(() => null)))
+      }
+      if (failed.length > 0) {
+        setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
+      } else {
+        setSelectedSlotKeys([])
+      }
+
+      const [weekData, latestRes] = await Promise.all([
+        api.getWeekSchedule(weekStartStr, { studentId: student_id }).catch(() => null),
+        api.getStudentLatestByMonth(student_id).catch(() => null),
+      ])
+      if (weekData) {
+        setSlots(weekData.slots || {})
+        setTeachersBySlot(weekData.teachersBySlot || {})
+        setSlotTypes(weekData.slotTypes || {})
+        setSlotMix(weekData.slotMix || {})
+        setStudentBookedSlots(weekData.studentBookedSlots || {})
+        setBreakRuleBlocked(weekData.breakRuleBlocked || {})
+        setStaffBreakBySlot(weekData.staffBreakBySlot || {})
+      }
+      if (latestRes?.latestByMonth) {
+        setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
+      }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const studentName = student?.Name || student?.name || 'Student'
@@ -497,6 +632,7 @@ export default function BookLessonModal({
                           const mixBlocked = isKidAdultMixBlocked(student, mix)
                           const breakBlocked = !!breakRuleBlocked[key]
                           const alreadyYours = !!studentBookedSlots[key]
+                          const isSelected = selectedSlotKeys.includes(key)
                           const isPast = isSlotPastJst(dateStr, timeStr)
                           const isFull = capacity > 0 && booked >= capacity
                           const oneLeft = capacity > 0 && booked === capacity - 1
@@ -521,6 +657,8 @@ export default function BookLessonModal({
                               : null
                           const label = alreadyYours
                             ? 'Yours'
+                            : isSelected
+                              ? 'Selected'
                             : mixLabel
                               ? mixLabel
                               : breakLabel
@@ -562,16 +700,20 @@ export default function BookLessonModal({
                               <button
                                 type="button"
                                 disabled={
-                                  isPast ||
-                                  capacity === 0 ||
-                                  isFull ||
-                                  mixBlocked ||
-                                  alreadyYours ||
-                                  breakBlocked
+                                  !isSelected && (
+                                    isPast ||
+                                    capacity === 0 ||
+                                    isFull ||
+                                    mixBlocked ||
+                                    alreadyYours ||
+                                    breakBlocked
+                                  )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
                                 className={`flex-1 min-h-[24px] py-0.5 px-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                                  isPast
+                                  isSelected
+                                    ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
+                                    : isPast
                                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                     : alreadyYours
                                       ? 'bg-violet-50 text-violet-800 cursor-not-allowed'
@@ -610,6 +752,14 @@ export default function BookLessonModal({
           <footer className="shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
             <button
               type="button"
+              onClick={handleSubmitSelected}
+              disabled={submitting || selectedSlotKeys.length === 0}
+              className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {submitting ? 'Submitting...' : `Submit selected (${selectedSlotKeys.length})`}
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
             >
@@ -624,30 +774,6 @@ export default function BookLessonModal({
   return createPortal(
     <>
       {modal}
-      {pendingSlot && (
-        <ConfirmActionModal
-          title="Confirm booking"
-          message={`Book on ${pendingSlot.date} at ${pendingSlot.time}?`}
-          showCloseButton={false}
-          onClose={() => {
-            if (!submitting) {
-              setPendingSlot(null)
-              bookingIntentRef.current = null
-            }
-          }}
-          onConfirm={handleConfirmBook}
-          confirming={submitting}
-          confirmLabel="Confirm"
-          busyConfirmLabel="Booking..."
-          cancelLabel="Cancel"
-        >
-          {breakWarning ? (
-            <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-              {breakWarning}
-            </p>
-          ) : null}
-        </ConfirmActionModal>
-      )}
       {extendShiftOpen && (
         <ExtendShiftModal onClose={() => setExtendShiftOpen(false)} />
       )}
