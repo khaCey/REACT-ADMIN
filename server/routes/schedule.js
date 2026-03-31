@@ -513,14 +513,28 @@ router.post('/book', async (req, res) => {
       const teachingMap = buildTeachingHoursByTeacher(dayBreakRows.rows, distinctTeachersOnDay);
       const hourLabel = jstHourLabelFromUtc(startDate);
       const teachersOnSlot = [...teacherSet];
-      const assignable = findAssignableTeachers(teachersOnSlot, teachingMap, hourLabel);
+      const teachersOnBreakAtHour = new Set(
+        (dayBreakRows.rows || [])
+          .filter((r) => String(r.lesson_kind || '').trim() === 'staff_break')
+          .filter((r) => String(r.time_jst || '').trim().slice(0, 5) === hourLabel)
+          .map((r) => String(r.teacher_name || '').trim())
+          .filter((name) => name && teachersOnSlot.includes(name))
+      );
+      const effectiveTeachersOnSlot = teachersOnSlot.filter((name) => !teachersOnBreakAtHour.has(name));
+      const assignable = findAssignableTeachers(effectiveTeachersOnSlot, teachingMap, hourLabel);
       if (assignable.length === 0) {
         return res.status(400).json({
           error:
             'No teacher can take this slot without exceeding 5 teaching hours in a row; add a break hour or choose another time.',
         });
       }
-      assignedTeacherName = pickTeacherForBooking(assignable, teachingMap);
+
+      // Do not force teacher assignment by default.
+      // Only assign explicitly when another teacher is on a break.
+      const hasAnotherTeacherOnBreak = teachersOnBreakAtHour.size > 0;
+      if (hasAnotherTeacherOnBreak) {
+        assignedTeacherName = pickTeacherForBooking(assignable, teachingMap);
+      }
     }
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
