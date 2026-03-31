@@ -123,3 +123,60 @@ export async function createBookedLessonEventInGas(args) {
   return second.ok ? second : first;
 }
 
+function rawEventIdFromMonthlyEventId(eventId) {
+  return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
+}
+
+/**
+ * Delete a Calendar event via GAS.
+ * @param {string} monthlyEventId
+ * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
+ */
+export async function deleteBookedLessonEventInGas(monthlyEventId) {
+  const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
+  const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
+  if (!baseUrl || !apiKey) {
+    return normalizeResult(null, 'BOOKING_GAS_URL (or CALENDAR_POLL_URL) / BOOKING_API_KEY is not configured');
+  }
+
+  const url = new URL(baseUrl);
+  url.searchParams.set('key', apiKey);
+  const payload = {
+    action: 'lesson_book_delete',
+    eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
+    source: 'student-admin-server',
+    timestamp: new Date().toISOString(),
+  };
+  const timeoutMs = Math.min(
+    120000,
+    Math.max(5000, parseInt(process.env.BOOKING_SYNC_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS)
+  );
+
+  const requestOnce = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return normalizeResult(data, `GAS booking delete failed (${res.status})`);
+      return normalizeResult(data);
+    } catch (err) {
+      const detail = formatFetchError(err);
+      console.error('[BookingSync] delete fetch error:', detail, err?.cause || '');
+      return normalizeResult(null, detail);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const first = await requestOnce();
+  if (first.ok) return first;
+  const second = await requestOnce();
+  return second.ok ? second : first;
+}
+
