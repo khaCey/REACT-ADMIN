@@ -245,6 +245,7 @@ export default function BookLessonModal({
   /** Keys -> staff break entries from `lesson_kind = staff_break` (non-booking display). */
   const [staffBreakBySlot, setStaffBreakBySlot] = useState({})
   const [loading, setLoading] = useState(true)
+  const [hasLoadedWeekOnce, setHasLoadedWeekOnce] = useState(false)
   const [error, setError] = useState(null)
   const [selectedSlotKeys, setSelectedSlotKeys] = useState([])
   const [submitting, setSubmitting] = useState(false)
@@ -301,6 +302,7 @@ export default function BookLessonModal({
       setStudentBookedSlots(cached.studentBookedSlots || {})
       setBreakRuleBlocked(cached.breakRuleBlocked || {})
       setStaffBreakBySlot(cached.staffBreakBySlot || {})
+      setHasLoadedWeekOnce(true)
       setLoading(false)
       return
     }
@@ -318,8 +320,12 @@ export default function BookLessonModal({
         setBreakRuleBlocked(data.breakRuleBlocked || {})
         setStaffBreakBySlot(data.staffBreakBySlot || {})
         setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
+        setHasLoadedWeekOnce(true)
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        setError(e.message)
+        setHasLoadedWeekOnce(true)
+      })
       .finally(() => setLoading(false))
   }, [weekStartStr, lastSynced, studentId, student, weekCache])
 
@@ -485,8 +491,8 @@ export default function BookLessonModal({
   const studentName = student?.Name || student?.name || 'Student'
   const studentKanji = student?.['漢字'] || student?.name_kanji || ''
 
-  /** Full-panel overlay only while loading the week grid; booking submit shows spinner on confirm button only. */
-  const modalBusy = loading
+  /** Show full overlay only on first modal load; week navigation stays non-blocking. */
+  const modalBusy = loading && !hasLoadedWeekOnce
 
   /** Compact header corner: booked / paid (not full-width). */
   const lessonBalanceCorner =
