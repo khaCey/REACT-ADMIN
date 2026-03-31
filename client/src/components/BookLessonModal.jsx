@@ -363,6 +363,26 @@ export default function BookLessonModal({
   }, [studentId, student, weekCache])
 
   useEffect(() => {
+    // On modal open, refresh lesson schedule snapshot from GAS for current + next month (JST).
+    // Non-blocking: UI remains interactive; week grid refetches after refresh finishes.
+    let cancelled = false
+    const ym0 = getCurrentYyyyMmJst()
+    const ym1 = addOneMonthYyyyMm(ym0)
+    const months = [ym0, ym1].filter(Boolean)
+    if (months.length === 0) return
+
+    Promise.all(months.map((m) => api.backfillFromCalendar({ month: m }).catch(() => null))).finally(() => {
+      if (cancelled) return
+      // Invalidate week cache so active week reloads with fresh DB data.
+      setWeekCache({})
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     // Remove selections that no longer exist in this week view.
     setSelectedSlotKeys((prev) =>
       prev.filter((key) => {

@@ -122,6 +122,7 @@ router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
     await query('UPDATE change_log SET staff_id = NULL WHERE staff_id = $1', [id]);
     await query('DELETE FROM teacher_schedules WHERE teacher_name = $1', [teacherName]);
     await query('DELETE FROM teacher_shift_extensions WHERE teacher_name = $1', [teacherName]);
+    await query('DELETE FROM teacher_break_presets WHERE teacher_name = $1', [teacherName]);
     await query('DELETE FROM staff WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) {

@@ -114,6 +114,23 @@ CREATE TABLE IF NOT EXISTS teacher_shift_extensions (
   PRIMARY KEY (date, teacher_name)
 );
 
+-- Recurring teacher break presets (editable from Staff calendar)
+CREATE TABLE IF NOT EXISTS teacher_break_presets (
+  id SERIAL PRIMARY KEY,
+  teacher_name VARCHAR(255) NOT NULL,
+  weekday INTEGER NOT NULL CHECK (weekday >= 0 AND weekday <= 6), -- 0=Sun .. 6=Sat
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT teacher_break_presets_time_order CHECK (end_time > start_time)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_teacher_break_presets_unique_window
+  ON teacher_break_presets (teacher_name, weekday, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_teacher_break_presets_lookup
+  ON teacher_break_presets (weekday, teacher_name, active);
+
 -- Stats
 CREATE TABLE IF NOT EXISTS stats (
   month VARCHAR(7) PRIMARY KEY,

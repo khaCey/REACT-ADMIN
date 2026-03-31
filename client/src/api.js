@@ -65,6 +65,19 @@ export const api = {
   getTeacherCalendar: (weekStart) =>
     fetchApi(`/shifts/teacher-calendar?week_start=${encodeURIComponent(weekStart)}`),
   assignShift: (body) => fetchApi('/shifts/assign', { method: 'PUT', body: JSON.stringify(body) }),
+  getTeacherBreakPresets: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.teacher_name) q.set('teacher_name', String(params.teacher_name))
+    if (params.weekday != null && params.weekday !== '') q.set('weekday', String(params.weekday))
+    const qs = q.toString()
+    return fetchApi(`/shifts/break-presets${qs ? `?${qs}` : ''}`)
+  },
+  createTeacherBreakPreset: (body) =>
+    fetchApi('/shifts/break-presets', { method: 'POST', body: JSON.stringify(body) }),
+  updateTeacherBreakPreset: (id, body) =>
+    fetchApi(`/shifts/break-presets/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteTeacherBreakPreset: (id) =>
+    fetchApi(`/shifts/break-presets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getUnreadNotifications: (limit = 20, { excludeGuides = false } = {}) => {
     const q = new URLSearchParams({ limit: String(limit) })
     if (excludeGuides) q.set('excludeGuides', '1')

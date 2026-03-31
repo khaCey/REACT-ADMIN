@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, Clock, Calendar } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, Calendar, Plus, Trash2 } from 'lucide-react'
 import { api } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -144,6 +144,15 @@ const SHIFT_DEFAULT_TIMES = {
   weekday_evening: { start: '16:00', end: '21:00' },
   weekend: { start: '10:00', end: '17:00' },
 }
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: 'Sun' },
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+]
 
 export default function Staff() {
   const { staff: authStaff } = useAuth()
@@ -169,6 +178,15 @@ export default function Staff() {
   const [adjustSlot, setAdjustSlot] = useState(null)
   const [teacherCalendarEvents, setTeacherCalendarEvents] = useState([])
   const [teacherCalendarLoading, setTeacherCalendarLoading] = useState(false)
+  const [breakPresets, setBreakPresets] = useState([])
+  const [breakPresetLoading, setBreakPresetLoading] = useState(false)
+  const [breakPresetError, setBreakPresetError] = useState('')
+  const [newBreakPreset, setNewBreakPreset] = useState({
+    teacher_name: '',
+    weekday: String(getDayOfWeekJapan(toJapanDateString(new Date()))),
+    start_time: '15:00',
+    end_time: '16:00',
+  })
 
   const loadStaff = useCallback(() => {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
@@ -219,9 +237,26 @@ export default function Staff() {
       .finally(() => setTeacherCalendarLoading(false))
   }, [weekStart])
 
+  const loadBreakPresets = useCallback(() => {
+    setBreakPresetLoading(true)
+    setBreakPresetError('')
+    api
+      .getTeacherBreakPresets()
+      .then((res) => setBreakPresets(Array.isArray(res.presets) ? res.presets : []))
+      .catch((e) => {
+        setBreakPresets([])
+        setBreakPresetError(e?.message || 'Failed to load break presets')
+      })
+      .finally(() => setBreakPresetLoading(false))
+  }, [])
+
   useEffect(() => {
     loadTeacherCalendar()
   }, [loadTeacherCalendar])
+
+  useEffect(() => {
+    loadBreakPresets()
+  }, [loadBreakPresets])
 
   const handleAssignShift = (slot, staffIdOrName, customStart, customEnd) => {
     const body = {
@@ -247,6 +282,45 @@ export default function Staff() {
       .catch((e) => setError(e.message))
       .finally(() => setLoadingShifts(false))
     setAdjustSlot(null)
+  }
+
+  const handleCreateBreakPreset = async () => {
+    try {
+      if (!newBreakPreset.teacher_name) return
+      await api.createTeacherBreakPreset({
+        teacher_name: newBreakPreset.teacher_name,
+        weekday: parseInt(newBreakPreset.weekday, 10),
+        start_time: newBreakPreset.start_time,
+        end_time: newBreakPreset.end_time,
+        active: true,
+      })
+      success('Break preset added')
+      await Promise.all([loadBreakPresets(), loadTeacherCalendar()])
+    } catch (e) {
+      setBreakPresetError(e?.message || 'Failed to add break preset')
+    }
+  }
+
+  const handleToggleBreakPreset = async (preset) => {
+    try {
+      await api.updateTeacherBreakPreset(preset.id, {
+        ...preset,
+        active: !preset.active,
+      })
+      await Promise.all([loadBreakPresets(), loadTeacherCalendar()])
+    } catch (e) {
+      setBreakPresetError(e?.message || 'Failed to update break preset')
+    }
+  }
+
+  const handleDeleteBreakPreset = async (id) => {
+    try {
+      await api.deleteTeacherBreakPreset(id)
+      success('Break preset removed')
+      await Promise.all([loadBreakPresets(), loadTeacherCalendar()])
+    } catch (e) {
+      setBreakPresetError(e?.message || 'Failed to remove break preset')
+    }
   }
 
   const slotByKey = useCallback(
@@ -559,6 +633,91 @@ export default function Staff() {
                 )}
               </div>
             )}
+            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 mb-4">
+              <p className="text-xs text-gray-600 mb-2">
+                Recurring break presets are applied to booking capacity and shown in this calendar.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <select
+                  value={newBreakPreset.teacher_name}
+                  onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, teacher_name: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white min-w-[160px]"
+                >
+                  <option value="">Teacher</option>
+                  {staffList
+                    .filter((s) => s?.staff_type === 'english_teacher')
+                    .map((s) => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                </select>
+                <select
+                  value={newBreakPreset.weekday}
+                  onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, weekday: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
+                >
+                  {WEEKDAY_OPTIONS.map((d) => (
+                    <option key={d.value} value={String(d.value)}>{d.label}</option>
+                  ))}
+                </select>
+                <input
+                  type="time"
+                  value={newBreakPreset.start_time}
+                  onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, start_time: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
+                />
+                <input
+                  type="time"
+                  value={newBreakPreset.end_time}
+                  onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, end_time: e.target.value }))}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateBreakPreset}
+                  disabled={breakPresetLoading || !newBreakPreset.teacher_name}
+                  className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add break
+                </button>
+              </div>
+              {breakPresetError && <p className="mt-2 text-xs text-red-600">{breakPresetError}</p>}
+              <div className="mt-2 max-h-28 overflow-auto rounded border border-gray-200 bg-white">
+                {breakPresetLoading ? (
+                  <p className="px-2 py-1.5 text-xs text-gray-500">Loading break presets…</p>
+                ) : breakPresets.length === 0 ? (
+                  <p className="px-2 py-1.5 text-xs text-gray-500">No break presets yet.</p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {breakPresets.map((p) => (
+                      <li key={p.id} className="px-2 py-1.5 flex items-center justify-between gap-2 text-xs">
+                        <span className={p.active === false ? 'text-gray-400 line-through' : 'text-gray-700'}>
+                          {p.teacher_name} · {WEEKDAY_OPTIONS.find((d) => d.value === Number(p.weekday))?.label || p.weekday}{' '}
+                          {String(p.start_time).slice(0, 5)}-{String(p.end_time).slice(0, 5)}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBreakPreset(p)}
+                            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50"
+                          >
+                            {p.active === false ? 'Enable' : 'Disable'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBreakPreset(p.id)}
+                            className="rounded border border-red-200 px-1.5 py-0.5 text-[11px] text-red-700 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
             {teacherCalendarLoading ? (
               <div className="flex flex-col items-center justify-center gap-2 py-8">
                 <LoadingSpinner size="sm" />
@@ -588,6 +747,7 @@ export default function Staff() {
                         teacher: t,
                         start_time: ev.start_time != null ? String(ev.start_time) : '',
                         end_time: ev.end_time != null ? String(ev.end_time) : '',
+                        kind: ev.kind != null ? String(ev.kind) : 'shift',
                       })
                     }
                     const dateList = Array.isArray(dates) ? dates : []
@@ -660,7 +820,9 @@ export default function Staff() {
                                   const duration = Math.max(1, endMin - startMin)
                                   const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
-                                  const colorClass = teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800'
+                                  const colorClass = block.kind === 'preset_break'
+                                    ? 'bg-slate-100 border-slate-300 text-slate-700'
+                                    : (teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800')
                                   const cascadeIndex = cascadeIndices[i] ?? 0
                                   return (
                                     <div
@@ -675,10 +837,10 @@ export default function Staff() {
                                         right: 'auto',
                                         zIndex: 10 + cascadeIndex,
                                       }}
-                                      title={`${block.teacher}: ${block.start_time} – ${block.end_time}`}
+                                      title={`${block.kind === 'preset_break' ? 'Break' : block.teacher}: ${block.start_time} – ${block.end_time}`}
                                     >
                                       <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
-                                        {block.teacher}
+                                        {block.kind === 'preset_break' ? `${block.teacher} break` : block.teacher}
                                       </span>
                                       <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
                                         {block.start_time}–{block.end_time}

@@ -277,6 +277,7 @@ const ADMIN_CLEARABLE_TABLES = new Set([
   'stats',
   'teacher_shift_extensions',
   'teacher_schedules',
+  'teacher_break_presets',
 ]);
 
 /** Admin: empty a table (TRUNCATE). Admin only. */

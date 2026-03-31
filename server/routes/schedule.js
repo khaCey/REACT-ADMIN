@@ -58,6 +58,20 @@ function addDaysToYyyyMmDd(dateStr, n) {
   ).padStart(2, '0')}`;
 }
 
+function parseClock5(val) {
+  const s = String(val || '').trim().slice(0, 5);
+  return /^\d{2}:\d{2}$/.test(s) ? s : '';
+}
+
+function dateWeekday(dateStr) {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  return Number.isNaN(d.getTime()) ? NaN : d.getUTCDay();
+}
+
+function hourInHalfOpenRange(hourLabel, startTime, endTime) {
+  return hourLabel >= startTime && hourLabel < endTime;
+}
+
 /** Test route: GET /api/schedule returns 200 so the mount can be verified */
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
 
@@ -94,7 +108,7 @@ router.get('/week', async (req, res) => {
       const sn = await query('SELECT name FROM students WHERE id = $1', [studentIdNum]);
       studentNameForGrid = (sn.rows[0]?.name || '').trim() || null;
     }
-    const [scheduleResult, teachersResult] = await Promise.all([
+    const [scheduleResult, teachersResult, breakPresetsResult] = await Promise.all([
       query(
         `SELECT
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS date_jst,
@@ -118,6 +132,11 @@ router.get('/week', async (req, res) => {
          WHERE date >= $1::date AND date < $1::date + interval '7 days'
          ORDER BY date, teacher_name, start_time`,
         [weekStart]
+      ),
+      query(
+        `SELECT teacher_name, weekday, start_time, end_time
+         FROM teacher_break_presets
+         WHERE active = TRUE`
       ),
     ]);
     /** key -> bucket: distinct events + kids/adult flags for booking UI (matches POST /book mixing rules) */
@@ -182,6 +201,46 @@ router.get('/week', async (req, res) => {
     }
     for (const k of Object.keys(teachersBySlot)) {
       teachersBySlot[k] = [...new Set(teachersBySlot[k])].sort();
+    }
+
+    /** Preset breaks expanded to slot keys (date+hour), used for capacity reduction + UI break cards. */
+    const presetBreakBySlot = {};
+    for (const r of breakPresetsResult.rows || []) {
+      const teacherName = String(r.teacher_name || '').trim();
+      const start = parseClock5(r.start_time);
+      const end = parseClock5(r.end_time);
+      const weekday = parseInt(r.weekday, 10);
+      if (!teacherName || !start || !end || !Number.isFinite(weekday)) continue;
+      for (let di = 0; di < 7; di += 1) {
+        const dateStr = addDaysToYyyyMmDd(weekStart, di);
+        if (dateWeekday(dateStr) !== weekday) continue;
+        for (const timeStr of GRID_TIME_SLOTS) {
+          if (!hourInHalfOpenRange(timeStr, start, end)) continue;
+          const key = `${dateStr}T${timeStr}`;
+          if (!presetBreakBySlot[key]) presetBreakBySlot[key] = [];
+          presetBreakBySlot[key].push({
+            teacher_name: teacherName,
+            title: `Preset break ${start}-${end}`,
+          });
+        }
+      }
+    }
+    for (const [key, breaks] of Object.entries(presetBreakBySlot)) {
+      const breakTeacherSet = new Set(breaks.map((b) => b.teacher_name));
+      if (teachersBySlot[key]) {
+        teachersBySlot[key] = teachersBySlot[key].filter((t) => !breakTeacherSet.has(t));
+      }
+      if (!staffBreakBySlot[key]) staffBreakBySlot[key] = [];
+      staffBreakBySlot[key].push(...breaks);
+    }
+    for (const k of Object.keys(staffBreakBySlot)) {
+      const seen = new Set();
+      staffBreakBySlot[k] = (staffBreakBySlot[k] || []).filter((b) => {
+        const id = `${b.teacher_name}::${b.title || ''}`;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
     }
 
     const teachersByJstDate = new Map();
@@ -446,15 +505,32 @@ router.post('/book', async (req, res) => {
 
     // Max simultaneous lessons = teachers available in that slot (including shift extensions up to 2h before/after). Slot time in JST to match teacher_schedules.
     const slotMinutes = getJstMinutesOfDay(startDate);
-    const teacherRows = await query(
-      `SELECT t.teacher_name, t.start_time, t.end_time,
-              COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
-              COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
-       FROM teacher_schedules t
-       LEFT JOIN teacher_shift_extensions e ON e.date = t.date AND e.teacher_name = t.teacher_name
-       WHERE t.date = $1::date`,
-      [dateStr]
-    );
+    const [teacherRows, breakPresetsResult] = await Promise.all([
+      query(
+        `SELECT t.teacher_name, t.start_time, t.end_time,
+                COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
+                COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
+         FROM teacher_schedules t
+         LEFT JOIN teacher_shift_extensions e ON e.date = t.date AND e.teacher_name = t.teacher_name
+         WHERE t.date = $1::date`,
+        [dateStr]
+      ),
+      query(
+        `SELECT teacher_name, start_time, end_time
+         FROM teacher_break_presets
+         WHERE active = TRUE AND weekday = $1`,
+        [dateWeekday(dateStr)]
+      ),
+    ]);
+    const presetBreakTeacherSet = new Set();
+    const slotHourLabel = `${String(hh).padStart(2, '0')}:00`;
+    for (const r of breakPresetsResult.rows || []) {
+      const teacherName = String(r.teacher_name || '').trim();
+      const start = parseClock5(r.start_time);
+      const end = parseClock5(r.end_time);
+      if (!teacherName || !start || !end) continue;
+      if (hourInHalfOpenRange(slotHourLabel, start, end)) presetBreakTeacherSet.add(teacherName);
+    }
     const teacherSet = new Set();
     for (const r of teacherRows.rows) {
       const st0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
@@ -469,7 +545,10 @@ router.post('/book', async (req, res) => {
       const after = Math.min(120, parseInt(r.extend_after_minutes, 10) || 0);
       const effectiveStart = startMin - before;
       const effectiveEnd = endMin + after;
-      if (slotMinutes >= effectiveStart && slotMinutes < effectiveEnd) teacherSet.add(r.teacher_name);
+      if (slotMinutes >= effectiveStart && slotMinutes < effectiveEnd) {
+        const tn = String(r.teacher_name || '').trim();
+        if (tn && !presetBreakTeacherSet.has(tn)) teacherSet.add(tn);
+      }
     }
     let teacherCount = teacherSet.size;
     if (teacherCount === 0) teacherCount = 1;
@@ -520,6 +599,9 @@ router.post('/book', async (req, res) => {
           .map((r) => String(r.teacher_name || '').trim())
           .filter((name) => name && teachersOnSlot.includes(name))
       );
+      for (const t of presetBreakTeacherSet) {
+        if (teachersOnSlot.includes(t)) teachersOnBreakAtHour.add(t);
+      }
       const effectiveTeachersOnSlot = teachersOnSlot.filter((name) => !teachersOnBreakAtHour.has(name));
       const assignable = findAssignableTeachers(effectiveTeachersOnSlot, teachingMap, hourLabel);
       if (assignable.length === 0) {

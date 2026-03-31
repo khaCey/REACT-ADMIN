@@ -23,6 +23,16 @@ function toDateStr(val) {
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
 }
 
+function parseClock5(val) {
+  const s = String(val || '').trim().slice(0, 5);
+  return /^\d{2}:\d{2}$/.test(s) ? s : '';
+}
+
+function parseWeekday(val) {
+  const n = parseInt(val, 10);
+  return Number.isFinite(n) && n >= 0 && n <= 6 ? n : NaN;
+}
+
 /** 0=Sun, 1=Mon, ..., 6=Sat. Weekday = Tue–Fri (2–5), Weekend = Sat/Sun/Mon (0,1,6). Relaxed ranges so custom times (e.g. 10–17, 17–21) still classify. */
 function getShiftType(dow, startStr, endStr) {
   const start = (startStr || '').slice(0, 5);
@@ -35,6 +45,36 @@ function getShiftType(dow, startStr, endStr) {
     if (start >= '12:00' && start <= '20:00' && end >= '18:00' && end <= '23:00') return 'weekday_evening';
   }
   return null;
+}
+
+/** Expand recurring presets into date rows for week_start..+6 days. */
+function expandBreakPresetsForWeek(weekStart, presets) {
+  const out = [];
+  const startDate = new Date(`${weekStart}T12:00:00Z`);
+  if (Number.isNaN(startDate.getTime())) return out;
+  for (let i = 0; i < 7; i += 1) {
+    const d = new Date(startDate);
+    d.setUTCDate(d.getUTCDate() + i);
+    const dow = d.getUTCDay();
+    const date = d.toISOString().slice(0, 10);
+    for (const p of presets || []) {
+      const pDow = parseInt(p.weekday, 10);
+      if (!Number.isFinite(pDow) || pDow !== dow) continue;
+      const start = parseClock5(p.start_time);
+      const end = parseClock5(p.end_time);
+      if (!start || !end) continue;
+      out.push({
+        id: p.id,
+        date,
+        teacher_name: p.teacher_name,
+        start_time: start,
+        end_time: end,
+        weekday: pDow,
+        kind: 'preset_break',
+      });
+    }
+  }
+  return out;
 }
 
 /** GET /api/shifts/week?week_start=YYYY-MM-DD - shifts for the week (Monday = week_start) */
@@ -158,24 +198,169 @@ router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req,
     if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
       return res.status(400).json({ error: 'Query week_start required (YYYY-MM-DD)' });
     }
-    const result = await query(
-      `SELECT date, teacher_name, start_time, end_time
-       FROM teacher_schedules
-       WHERE date >= $1::date AND date < $1::date + interval '7 days'
-       ORDER BY teacher_name, date, start_time`,
-      [weekStart]
-    );
-    const events = result.rows.map((r) => {
+    const [result, presetsResult] = await Promise.all([
+      query(
+        `SELECT date, teacher_name, start_time, end_time
+         FROM teacher_schedules
+         WHERE date >= $1::date AND date < $1::date + interval '7 days'
+         ORDER BY teacher_name, date, start_time`,
+        [weekStart]
+      ),
+      query(
+        `SELECT id, teacher_name, weekday, start_time, end_time
+         FROM teacher_break_presets
+         WHERE active = TRUE`
+      ),
+    ]);
+    const shiftEvents = result.rows.map((r) => {
       const date = toDateStr(r.date);
       const start0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
       const end0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
       if (!start0 || !end0) {
-        return { date, teacher_name: r.teacher_name, start_time: start0, end_time: end0 };
+        return { date, teacher_name: r.teacher_name, start_time: start0, end_time: end0, kind: 'shift' };
       }
       const { start_time, end_time } = roundTeacherShiftStartEnd(start0, end0);
-      return { date, teacher_name: r.teacher_name, start_time, end_time };
+      return { date, teacher_name: r.teacher_name, start_time, end_time, kind: 'shift' };
     });
+    const breakEvents = expandBreakPresetsForWeek(weekStart, presetsResult.rows);
+    const events = [...shiftEvents, ...breakEvents];
     res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/shifts/break-presets?teacher_name=&weekday= */
+router.get('/break-presets', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const teacherName = String(req.query.teacher_name || '').trim();
+    const weekdayRaw = req.query.weekday;
+    const args = [];
+    const where = [];
+    if (teacherName) {
+      args.push(teacherName);
+      where.push(`teacher_name = $${args.length}`);
+    }
+    if (weekdayRaw != null && weekdayRaw !== '') {
+      const weekday = parseWeekday(weekdayRaw);
+      if (!Number.isFinite(weekday)) {
+        return res.status(400).json({ error: 'weekday must be 0-6' });
+      }
+      args.push(weekday);
+      where.push(`weekday = $${args.length}`);
+    }
+    const sql = `
+      SELECT id, teacher_name, weekday, start_time, end_time, active
+      FROM teacher_break_presets
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY teacher_name, weekday, start_time
+    `;
+    const result = await query(sql, args);
+    const presets = result.rows.map((r) => ({
+      id: r.id,
+      teacher_name: r.teacher_name,
+      weekday: parseInt(r.weekday, 10),
+      start_time: parseClock5(r.start_time),
+      end_time: parseClock5(r.end_time),
+      active: r.active !== false,
+    }));
+    res.json({ presets });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/shifts/break-presets */
+router.post('/break-presets', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const teacherName = String(req.body?.teacher_name || '').trim();
+    const weekday = parseWeekday(req.body?.weekday);
+    const start = parseClock5(req.body?.start_time);
+    const end = parseClock5(req.body?.end_time);
+    const active = req.body?.active !== false;
+    if (!teacherName) return res.status(400).json({ error: 'teacher_name is required' });
+    if (!Number.isFinite(weekday)) return res.status(400).json({ error: 'weekday must be 0-6' });
+    if (!start || !end) return res.status(400).json({ error: 'start_time and end_time must be HH:MM' });
+    if (!(end > start)) return res.status(400).json({ error: 'end_time must be after start_time' });
+
+    const result = await query(
+      `INSERT INTO teacher_break_presets (teacher_name, weekday, start_time, end_time, active)
+       VALUES ($1, $2, $3::time, $4::time, $5)
+       RETURNING id, teacher_name, weekday, start_time, end_time, active`,
+      [teacherName, weekday, start, end, active]
+    );
+    const row = result.rows[0];
+    res.status(201).json({
+      preset: {
+        id: row.id,
+        teacher_name: row.teacher_name,
+        weekday: parseInt(row.weekday, 10),
+        start_time: parseClock5(row.start_time),
+        end_time: parseClock5(row.end_time),
+        active: row.active !== false,
+      },
+    });
+  } catch (err) {
+    if (String(err.message || '').includes('idx_teacher_break_presets_unique_window')) {
+      return res.status(409).json({ error: 'Break preset already exists for that teacher/day/time.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** PUT /api/shifts/break-presets/:id */
+router.put('/break-presets/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid preset id' });
+
+    const current = await query('SELECT id FROM teacher_break_presets WHERE id = $1', [id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Break preset not found' });
+
+    const teacherName = String(req.body?.teacher_name || '').trim();
+    const weekday = parseWeekday(req.body?.weekday);
+    const start = parseClock5(req.body?.start_time);
+    const end = parseClock5(req.body?.end_time);
+    const active = req.body?.active !== false;
+    if (!teacherName) return res.status(400).json({ error: 'teacher_name is required' });
+    if (!Number.isFinite(weekday)) return res.status(400).json({ error: 'weekday must be 0-6' });
+    if (!start || !end) return res.status(400).json({ error: 'start_time and end_time must be HH:MM' });
+    if (!(end > start)) return res.status(400).json({ error: 'end_time must be after start_time' });
+
+    const result = await query(
+      `UPDATE teacher_break_presets
+       SET teacher_name = $1, weekday = $2, start_time = $3::time, end_time = $4::time, active = $5, updated_at = NOW()
+       WHERE id = $6
+       RETURNING id, teacher_name, weekday, start_time, end_time, active`,
+      [teacherName, weekday, start, end, active, id]
+    );
+    const row = result.rows[0];
+    res.json({
+      preset: {
+        id: row.id,
+        teacher_name: row.teacher_name,
+        weekday: parseInt(row.weekday, 10),
+        start_time: parseClock5(row.start_time),
+        end_time: parseClock5(row.end_time),
+        active: row.active !== false,
+      },
+    });
+  } catch (err) {
+    if (String(err.message || '').includes('idx_teacher_break_presets_unique_window')) {
+      return res.status(409).json({ error: 'Break preset already exists for that teacher/day/time.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** DELETE /api/shifts/break-presets/:id */
+router.delete('/break-presets/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid preset id' });
+    const result = await query('DELETE FROM teacher_break_presets WHERE id = $1', [id]);
+    if ((result.rowCount || 0) === 0) return res.status(404).json({ error: 'Break preset not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
