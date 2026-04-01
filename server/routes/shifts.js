@@ -33,6 +33,10 @@ function parseWeekday(val) {
   return Number.isFinite(n) && n >= 0 && n <= 6 ? n : NaN;
 }
 
+function normalizeTeacherNameKey(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
 /** 0=Sun, 1=Mon, ..., 6=Sat. Weekday = Tue–Fri (2–5), Weekend = Sat/Sun/Mon (0,1,6). Relaxed ranges so custom times (e.g. 10–17, 17–21) still classify. */
 function getShiftType(dow, startStr, endStr) {
   const start = (startStr || '').slice(0, 5);
@@ -47,8 +51,17 @@ function getShiftType(dow, startStr, endStr) {
   return null;
 }
 
-/** Expand recurring presets into date rows for week_start..+6 days. */
-function expandBreakPresetsForWeek(weekStart, presets) {
+/** Expand recurring presets into date rows for week_start..+6 days (only if teacher has a shift that day). */
+function expandBreakPresetsForWeek(weekStart, presets, shiftRows) {
+  const namesByDate = {};
+  for (const r of shiftRows || []) {
+    const date = toDateStr(r.date);
+    if (!date) continue;
+    const tn = normalizeTeacherNameKey(r.teacher_name);
+    if (!tn) continue;
+    if (!namesByDate[date]) namesByDate[date] = new Set();
+    namesByDate[date].add(tn);
+  }
   const out = [];
   const startDate = new Date(`${weekStart}T12:00:00Z`);
   if (Number.isNaN(startDate.getTime())) return out;
@@ -57,9 +70,11 @@ function expandBreakPresetsForWeek(weekStart, presets) {
     d.setUTCDate(d.getUTCDate() + i);
     const dow = d.getUTCDay();
     const date = d.toISOString().slice(0, 10);
+    const onDay = namesByDate[date];
     for (const p of presets || []) {
       const pDow = parseInt(p.weekday, 10);
       if (!Number.isFinite(pDow) || pDow !== dow) continue;
+      if (!onDay || !onDay.has(normalizeTeacherNameKey(p.teacher_name))) continue;
       const start = parseClock5(p.start_time);
       const end = parseClock5(p.end_time);
       if (!start || !end) continue;
@@ -222,7 +237,7 @@ router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req,
       const { start_time, end_time } = roundTeacherShiftStartEnd(start0, end0);
       return { date, teacher_name: r.teacher_name, start_time, end_time, kind: 'shift' };
     });
-    const breakEvents = expandBreakPresetsForWeek(weekStart, presetsResult.rows);
+    const breakEvents = expandBreakPresetsForWeek(weekStart, presetsResult.rows, result.rows);
     const events = [...shiftEvents, ...breakEvents];
     res.json({ events });
   } catch (err) {

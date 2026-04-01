@@ -102,7 +102,11 @@ function displayBreakTitleFromCalendar(teacherName, rawTitle) {
  * Match `teacher_break_presets` for a calendar `staff_break` hour (teacher, weekday, time in range).
  * Lets the UI attach preset_id so breaks stay editable even when synced from Calendar.
  */
-function matchPresetForSlot(teacherName, dateStr, timeStr, presetRows) {
+function matchPresetForSlot(teacherName, dateStr, timeStr, presetRows, teacherNamesByJstDate) {
+  if (teacherNamesByJstDate) {
+    const names = teacherNamesByJstDate[dateStr];
+    if (!names || !names.has(normalizeTeacherNameKey(teacherName))) return null;
+  }
   const wd = dateWeekday(dateStr);
   if (!Number.isFinite(wd)) return null;
   const tn = normalizeTeacherNameKey(teacherName);
@@ -206,6 +210,16 @@ router.get('/week', async (req, res) => {
          WHERE active = TRUE`
       ),
     ]);
+    /** date (JST YYYY-MM-DD) -> Set of normalized teacher names with any shift that day. Preset breaks only apply on those days. */
+    const teacherNamesByJstDate = {};
+    for (const r of teachersResult.rows) {
+      const dateStr = r.date ? String(r.date).trim().slice(0, 10) : '';
+      if (!dateStr) continue;
+      const tn = normalizeTeacherNameKey(r.teacher_name);
+      if (!tn) continue;
+      if (!teacherNamesByJstDate[dateStr]) teacherNamesByJstDate[dateStr] = new Set();
+      teacherNamesByJstDate[dateStr].add(tn);
+    }
     /** key -> bucket: distinct events + kids/adult flags for booking UI (matches POST /book mixing rules) */
     const slotBuckets = new Map();
     /** Slot keys -> list of break cards (calendar staff_break and/or expanded presets). */
@@ -221,7 +235,13 @@ router.get('/week', async (req, res) => {
         if (!staffBreakBySlot[key]) staffBreakBySlot[key] = [];
         const rawTitle = r.title != null ? String(r.title).trim() : '';
         const title = displayBreakTitleFromCalendar(tn, rawTitle);
-        const presetMatch = matchPresetForSlot(tn, dateStr, timeStr, breakPresetsResult.rows || []);
+        const presetMatch = matchPresetForSlot(
+          tn,
+          dateStr,
+          timeStr,
+          breakPresetsResult.rows || [],
+          teacherNamesByJstDate
+        );
         const entry = {
           teacher_name: tn,
           title,
@@ -295,6 +315,8 @@ router.get('/week', async (req, res) => {
       for (let di = 0; di < 7; di += 1) {
         const dateStr = addDaysToYyyyMmDd(weekStart, di);
         if (dateWeekday(dateStr) !== weekday) continue;
+        const namesOnDay = teacherNamesByJstDate[dateStr];
+        if (!namesOnDay || !namesOnDay.has(normalizeTeacherNameKey(teacherName))) continue;
         for (const timeStr of GRID_TIME_SLOTS) {
           if (!hourInHalfOpenRange(timeStr, start, end)) continue;
           const key = `${dateStr}T${timeStr}`;
@@ -645,6 +667,9 @@ router.post('/book', async (req, res) => {
         [dateWeekday(dateStr)]
       ),
     ]);
+    const teachersOnBookingDate = new Set(
+      (teacherRows.rows || []).map((r) => normalizeTeacherNameKey(r.teacher_name)).filter(Boolean)
+    );
     const presetBreakTeacherSet = new Set();
     const slotHourLabel = `${String(hh).padStart(2, '0')}:00`;
     for (const r of breakPresetsResult.rows || []) {
@@ -652,6 +677,7 @@ router.post('/book', async (req, res) => {
       const start = parseClock5(r.start_time);
       const end = parseClock5(r.end_time);
       if (!teacherName || !start || !end) continue;
+      if (!teachersOnBookingDate.has(normalizeTeacherNameKey(teacherName))) continue;
       if (hourInHalfOpenRange(slotHourLabel, start, end)) presetBreakTeacherSet.add(teacherName);
     }
     const teacherSet = new Set();
