@@ -28,6 +28,19 @@ function parseClock5(val) {
   return /^\d{2}:\d{2}$/.test(s) ? s : '';
 }
 
+/** Presets are 1 hour when `end_time` is omitted. */
+function endTimeOneHourAfterStart(startHHMM) {
+  const start = parseClock5(startHHMM);
+  if (!start) return '';
+  const [h, m] = start.split(':').map(Number);
+  let total = h * 60 + m + 60;
+  if (total > 24 * 60) total = 24 * 60;
+  if (total === 24 * 60) return '23:59';
+  const eh = Math.floor(total / 60);
+  const em = total % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
+
 function parseWeekday(val) {
   const n = parseInt(val, 10);
   return Number.isFinite(n) && n >= 0 && n <= 6 ? n : NaN;
@@ -291,11 +304,12 @@ router.post('/break-presets', requireAuth, requireAdminOrOperator, async (req, r
     const teacherName = String(req.body?.teacher_name || '').trim();
     const weekday = parseWeekday(req.body?.weekday);
     const start = parseClock5(req.body?.start_time);
-    const end = parseClock5(req.body?.end_time);
+    let end = parseClock5(req.body?.end_time);
+    if (!end) end = endTimeOneHourAfterStart(start);
     const active = req.body?.active !== false;
     if (!teacherName) return res.status(400).json({ error: 'teacher_name is required' });
     if (!Number.isFinite(weekday)) return res.status(400).json({ error: 'weekday must be 0-6' });
-    if (!start || !end) return res.status(400).json({ error: 'start_time and end_time must be HH:MM' });
+    if (!start || !end) return res.status(400).json({ error: 'start_time must be HH:MM' });
     if (!(end > start)) return res.status(400).json({ error: 'end_time must be after start_time' });
 
     const result = await query(
@@ -335,11 +349,12 @@ router.put('/break-presets/:id', requireAuth, requireAdminOrOperator, async (req
     const teacherName = String(req.body?.teacher_name || '').trim();
     const weekday = parseWeekday(req.body?.weekday);
     const start = parseClock5(req.body?.start_time);
-    const end = parseClock5(req.body?.end_time);
+    let end = parseClock5(req.body?.end_time);
+    if (!end) end = endTimeOneHourAfterStart(start);
     const active = req.body?.active !== false;
     if (!teacherName) return res.status(400).json({ error: 'teacher_name is required' });
     if (!Number.isFinite(weekday)) return res.status(400).json({ error: 'weekday must be 0-6' });
-    if (!start || !end) return res.status(400).json({ error: 'start_time and end_time must be HH:MM' });
+    if (!start || !end) return res.status(400).json({ error: 'start_time must be HH:MM' });
     if (!(end > start)) return res.status(400).json({ error: 'end_time must be after start_time' });
 
     const result = await query(

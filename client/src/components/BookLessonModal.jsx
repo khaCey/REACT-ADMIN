@@ -7,20 +7,10 @@ import ExtendShiftModal from './ExtendShiftModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
+import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-/** 0=Sun … 6=Sat — matches server `teacher_break_presets.weekday` and `dateWeekday`. */
-const BREAK_WEEKDAY_OPTIONS = [
-  { value: 0, label: 'Sun' },
-  { value: 1, label: 'Mon' },
-  { value: 2, label: 'Tue' },
-  { value: 3, label: 'Wed' },
-  { value: 4, label: 'Thu' },
-  { value: 5, label: 'Fri' },
-  { value: 6, label: 'Sat' },
-]
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 
@@ -563,15 +553,11 @@ export default function BookLessonModal({
 
   const handleSaveMoveBreak = async () => {
     if (!moveBreakModal) return
-    const { preset_id, teacher_name, weekday, start_time, end_time } = moveBreakModal
+    const { preset_id, teacher_name, weekday, start_time } = moveBreakModal
     const st = String(start_time || '').slice(0, 5)
-    const et = String(end_time || '').slice(0, 5)
-    if (!/^\d{2}:\d{2}$/.test(st) || !/^\d{2}:\d{2}$/.test(et)) {
-      setError('Start and end times must be HH:MM.')
-      return
-    }
-    if (et <= st) {
-      setError('End time must be after start time.')
+    const et = endTimeOneHourAfterStart(st)
+    if (!/^\d{2}:\d{2}$/.test(st) || !et) {
+      setError('Start time must be HH:MM.')
       return
     }
     setMoveBreakSaving(true)
@@ -961,61 +947,24 @@ export default function BookLessonModal({
           />
           <div className="relative w-full max-w-sm rounded-xl bg-white shadow-xl ring-1 ring-black/5 p-5">
             <h4 id="moveBreakTitle" className="text-base font-semibold text-gray-900">
-              Move break preset
+              Move Break
             </h4>
-            <p className="text-xs text-gray-600 mt-1 mb-3">
-              {moveBreakModal.teacher_name} — recurring weekly break (same as Staff → break presets).
-            </p>
+            <p className="text-sm text-gray-800 mt-1 mb-4 font-medium">{moveBreakModal.teacher_name}</p>
             <div className="space-y-3">
               <label className="block">
-                <span className="text-xs font-medium text-gray-700">Weekday</span>
-                <select
-                  className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white"
-                  value={String(moveBreakModal.weekday)}
+                <span className="text-xs font-medium text-gray-700">Start (1 hour)</span>
+                <input
+                  type="time"
+                  className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                  value={moveBreakModal.start_time}
                   disabled={moveBreakSaving}
                   onChange={(e) =>
                     setMoveBreakModal((prev) =>
-                      prev ? { ...prev, weekday: parseInt(e.target.value, 10) } : prev
+                      prev ? { ...prev, start_time: e.target.value.slice(0, 5) } : prev
                     )
                   }
-                >
-                  {BREAK_WEEKDAY_OPTIONS.map((d) => (
-                    <option key={d.value} value={String(d.value)}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
-              <div className="flex gap-2">
-                <label className="flex-1 block">
-                  <span className="text-xs font-medium text-gray-700">Start</span>
-                  <input
-                    type="time"
-                    className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
-                    value={moveBreakModal.start_time}
-                    disabled={moveBreakSaving}
-                    onChange={(e) =>
-                      setMoveBreakModal((prev) =>
-                        prev ? { ...prev, start_time: e.target.value.slice(0, 5) } : prev
-                      )
-                    }
-                  />
-                </label>
-                <label className="flex-1 block">
-                  <span className="text-xs font-medium text-gray-700">End</span>
-                  <input
-                    type="time"
-                    className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
-                    value={moveBreakModal.end_time}
-                    disabled={moveBreakSaving}
-                    onChange={(e) =>
-                      setMoveBreakModal((prev) =>
-                        prev ? { ...prev, end_time: e.target.value.slice(0, 5) } : prev
-                      )
-                    }
-                  />
-                </label>
-              </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button

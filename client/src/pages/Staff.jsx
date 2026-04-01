@@ -185,7 +185,6 @@ export default function Staff() {
     teacher_name: '',
     weekday: String(getDayOfWeekJapan(toJapanDateString(new Date()))),
     start_time: '15:00',
-    end_time: '16:00',
   })
 
   const loadStaff = useCallback(() => {
@@ -291,7 +290,6 @@ export default function Staff() {
         teacher_name: newBreakPreset.teacher_name,
         weekday: parseInt(newBreakPreset.weekday, 10),
         start_time: newBreakPreset.start_time,
-        end_time: newBreakPreset.end_time,
         active: true,
       })
       success('Break preset added')
@@ -635,7 +633,7 @@ export default function Staff() {
             )}
             <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 mb-4">
               <p className="text-xs text-gray-600 mb-2">
-                Recurring break presets are applied to booking capacity and shown in this calendar.
+                Recurring break presets (1 hour from start time) are applied to booking capacity and shown in this calendar.
               </p>
               <div className="flex flex-wrap items-end gap-2">
                 <select
@@ -661,14 +659,9 @@ export default function Staff() {
                 </select>
                 <input
                   type="time"
+                  title="1 hour break from this time"
                   value={newBreakPreset.start_time}
                   onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, start_time: e.target.value }))}
-                  className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
-                />
-                <input
-                  type="time"
-                  value={newBreakPreset.end_time}
-                  onChange={(e) => setNewBreakPreset((prev) => ({ ...prev, end_time: e.target.value }))}
                   className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
                 />
                 <button
@@ -691,9 +684,11 @@ export default function Staff() {
                   <ul className="divide-y divide-gray-100">
                     {breakPresets.map((p) => (
                       <li key={p.id} className="px-2 py-1.5 flex items-center justify-between gap-2 text-xs">
-                        <span className={p.active === false ? 'text-gray-400 line-through' : 'text-gray-700'}>
-                          {p.teacher_name} · {WEEKDAY_OPTIONS.find((d) => d.value === Number(p.weekday))?.label || p.weekday}{' '}
-                          {String(p.start_time).slice(0, 5)}-{String(p.end_time).slice(0, 5)}
+                        <span
+                          className={p.active === false ? 'text-gray-400 line-through' : 'text-gray-700'}
+                          title={`${WEEKDAY_OPTIONS.find((d) => d.value === Number(p.weekday))?.label || p.weekday} ${String(p.start_time).slice(0, 5)}–${String(p.end_time).slice(0, 5)} (1h)`}
+                        >
+                          {p.teacher_name}
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <button
@@ -837,13 +832,19 @@ export default function Staff() {
                                         right: 'auto',
                                         zIndex: 10 + cascadeIndex,
                                       }}
-                                      title={`${block.kind === 'preset_break' ? 'Break' : block.teacher}: ${block.start_time} – ${block.end_time}`}
+                                      title={
+                                        block.kind === 'preset_break'
+                                          ? `${block.teacher} · ${block.start_time} (1h)`
+                                          : `${block.teacher}: ${block.start_time} – ${block.end_time}`
+                                      }
                                     >
                                       <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
-                                        {block.kind === 'preset_break' ? `${block.teacher} break` : block.teacher}
+                                        {block.teacher}
                                       </span>
                                       <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
-                                        {block.start_time}–{block.end_time}
+                                        {block.kind === 'preset_break'
+                                          ? `${block.start_time} (1h)`
+                                          : `${block.start_time}–${block.end_time}`}
                                       </span>
                                     </div>
                                   )
