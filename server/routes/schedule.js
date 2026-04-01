@@ -42,6 +42,27 @@ const GRID_TIME_SLOTS = [
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
 
+function isOwnerCoursePayment(payment) {
+  return String(payment || '').toLowerCase().includes('owner');
+}
+
+function normalizeTeacherNameForOwner(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+/** Staff id from OWNER_COURSE_STAFF_ID; resolves `staff.name` to match `teacher_schedules.teacher_name`. */
+async function resolveOwnerCourseTeacherName() {
+  const raw = process.env.OWNER_COURSE_STAFF_ID;
+  if (raw == null || String(raw).trim() === '') return null;
+  const id = parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(id)) return null;
+  const r = await query(
+    `SELECT name FROM staff WHERE id = $1 AND COALESCE(active, TRUE) = TRUE`,
+    [id]
+  );
+  return (r.rows[0]?.name || '').trim() || null;
+}
+
 function deriveLessonKindFromStudent(student) {
   const payment = String(student?.payment || '').toLowerCase();
   if (payment.includes('owner')) return 'owner';
@@ -105,9 +126,11 @@ router.get('/week', async (req, res) => {
     const studentIdNum =
       studentIdParam != null && studentIdParam !== '' ? Number(studentIdParam) : NaN;
     let studentNameForGrid = null;
+    let studentPaymentForGrid = null;
     if (Number.isFinite(studentIdNum)) {
-      const sn = await query('SELECT name FROM students WHERE id = $1', [studentIdNum]);
+      const sn = await query('SELECT name, payment FROM students WHERE id = $1', [studentIdNum]);
       studentNameForGrid = (sn.rows[0]?.name || '').trim() || null;
+      studentPaymentForGrid = sn.rows[0]?.payment ?? null;
     }
     const [scheduleResult, teachersResult, breakPresetsResult] = await Promise.all([
       query(
@@ -285,6 +308,24 @@ router.get('/week', async (req, res) => {
       }
     }
 
+    /** Owner's course (payment contains "owner"): only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
+    const ownerShamBlocked = {};
+    if (Number.isFinite(studentIdNum) && isOwnerCoursePayment(studentPaymentForGrid)) {
+      const shamName = await resolveOwnerCourseTeacherName();
+      if (shamName) {
+        const shamNorm = normalizeTeacherNameForOwner(shamName);
+        for (let di = 0; di < 7; di += 1) {
+          const dateStr = addDaysToYyyyMmDd(weekStart, di);
+          for (const timeStr of GRID_TIME_SLOTS) {
+            const key = `${dateStr}T${timeStr}`;
+            const teachers = teachersBySlot[key] || [];
+            const hasSham = teachers.some((t) => normalizeTeacherNameForOwner(t) === shamNorm);
+            if (!hasSham) ownerShamBlocked[key] = true;
+          }
+        }
+      }
+    }
+
     /** When `student_id` query is set, keys where that student already has a lesson this hour (JST bucket). */
     const studentBookedSlots = {};
     if (Number.isFinite(studentIdNum)) {
@@ -311,6 +352,7 @@ router.get('/week', async (req, res) => {
       slotMix,
       studentBookedSlots,
       breakRuleBlocked,
+      ownerShamBlocked,
       staffBreakBySlot,
     });
   } catch (err) {
@@ -561,6 +603,20 @@ router.post('/book', async (req, res) => {
         if (tn && !presetBreakTeacherSet.has(tn)) teacherSet.add(tn);
       }
     }
+
+    if (isOwnerCoursePayment(student.payment)) {
+      const shamTeacherName = await resolveOwnerCourseTeacherName();
+      if (shamTeacherName) {
+        const shamNorm = normalizeTeacherNameForOwner(shamTeacherName);
+        const hasSham = [...teacherSet].some((t) => normalizeTeacherNameForOwner(t) === shamNorm);
+        if (!hasSham) {
+          return res.status(400).json({
+            error: `Owner's course bookings require ${shamTeacherName} to be on shift for this hour. Choose another time.`,
+          });
+        }
+      }
+    }
+
     let teacherCount = teacherSet.size;
     if (teacherCount === 0) teacherCount = 1;
     const lessonCountResult = await query(

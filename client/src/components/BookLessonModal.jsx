@@ -258,6 +258,8 @@ export default function BookLessonModal({
   const [studentBookedSlots, setStudentBookedSlots] = useState({})
   /** Keys where booking would violate the 5 consecutive teaching-hour rule (server-aligned). */
   const [breakRuleBlocked, setBreakRuleBlocked] = useState({})
+  /** Owner's course: slots where OWNER_COURSE_STAFF_ID teacher is not on shift (server). */
+  const [ownerShamBlocked, setOwnerShamBlocked] = useState({})
   /** Keys -> staff break entries from `lesson_kind = staff_break` (non-booking display). */
   const [staffBreakBySlot, setStaffBreakBySlot] = useState({})
   const [loading, setLoading] = useState(true)
@@ -317,6 +319,7 @@ export default function BookLessonModal({
       setSlotMix(cached.slotMix || {})
       setStudentBookedSlots(cached.studentBookedSlots || {})
       setBreakRuleBlocked(cached.breakRuleBlocked || {})
+      setOwnerShamBlocked(cached.ownerShamBlocked || {})
       setStaffBreakBySlot(cached.staffBreakBySlot || {})
       setHasLoadedWeekOnce(true)
       setLoading(false)
@@ -334,6 +337,7 @@ export default function BookLessonModal({
         setSlotMix(data.slotMix || {})
         setStudentBookedSlots(data.studentBookedSlots || {})
         setBreakRuleBlocked(data.breakRuleBlocked || {})
+        setOwnerShamBlocked(data.ownerShamBlocked || {})
         setStaffBreakBySlot(data.staffBreakBySlot || {})
         setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
         setHasLoadedWeekOnce(true)
@@ -410,11 +414,12 @@ export default function BookLessonModal({
         if (capacity === 0 || booked >= capacity) return false
         if (isKidAdultMixBlocked(student, slotMix[key])) return false
         if (breakRuleBlocked[key]) return false
+        if (ownerShamBlocked[key]) return false
         if (isSlotPastJst(dateStr, timeStr)) return false
         return true
       })
     )
-  }, [slots, teachersBySlot, slotMix, breakRuleBlocked, studentBookedSlots, student])
+  }, [slots, teachersBySlot, slotMix, breakRuleBlocked, ownerShamBlocked, studentBookedSlots, student])
 
   const goWeek = (delta) => {
     setWeekStartStr(addDaysToDateStr(weekStartStr, delta * 7))
@@ -439,6 +444,7 @@ export default function BookLessonModal({
     if (capacity === 0 || booked >= capacity) return
     if (isKidAdultMixBlocked(student, slotMix[key])) return
     if (breakRuleBlocked[key]) return
+    if (ownerShamBlocked[key]) return
     setSelectedSlotKeys((prev) => [...prev, key])
   }
 
@@ -512,6 +518,7 @@ export default function BookLessonModal({
         setSlotMix(weekData.slotMix || {})
         setStudentBookedSlots(weekData.studentBookedSlots || {})
         setBreakRuleBlocked(weekData.breakRuleBlocked || {})
+        setOwnerShamBlocked(weekData.ownerShamBlocked || {})
         setStaffBreakBySlot(weekData.staffBreakBySlot || {})
       }
       if (latestRes?.latestByMonth) {
@@ -536,6 +543,7 @@ export default function BookLessonModal({
       setSlotMix(data.slotMix || {})
       setStudentBookedSlots(data.studentBookedSlots || {})
       setBreakRuleBlocked(data.breakRuleBlocked || {})
+      setOwnerShamBlocked(data.ownerShamBlocked || {})
       setStaffBreakBySlot(data.staffBreakBySlot || {})
       setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
     } catch (e) {
@@ -668,6 +676,13 @@ export default function BookLessonModal({
                   : 'Adult: only hours without kids (子) lessons can be booked.'}
               </p>
             )}
+            {String(student?.Payment || student?.payment || '')
+              .toLowerCase()
+              .includes('owner') && (
+              <p className="mb-2 text-[11px] text-rose-800/90 leading-snug">
+                Owner&apos;s course: only book hours when your course teacher is on shift for that slot.
+              </p>
+            )}
 
             <div className="flex items-center justify-between mb-4">
               <button
@@ -728,6 +743,7 @@ export default function BookLessonModal({
                           const mix = slotMix[key]
                           const mixBlocked = isKidAdultMixBlocked(student, mix)
                           const breakBlocked = !!breakRuleBlocked[key]
+                          const shamBlocked = !!ownerShamBlocked[key]
                           const alreadyYours = !!studentBookedSlots[key]
                           const isSelected = selectedSlotKeys.includes(key)
                           const isPast = isSlotPastJst(dateStr, timeStr)
@@ -735,7 +751,7 @@ export default function BookLessonModal({
                           const oneLeft = capacity > 0 && booked === capacity - 1
                           const staffBreaks = staffBreakBySlot[key] || []
                           const statusBead =
-                            !isPast && capacity > 0 && !mixBlocked && !alreadyYours && !breakBlocked
+                            !isPast && capacity > 0 && !mixBlocked && !alreadyYours && !breakBlocked && !shamBlocked
                               ? isFull
                                 ? 'bg-red-500'
                                 : oneLeft
@@ -752,6 +768,10 @@ export default function BookLessonModal({
                             breakBlocked && !isPast && capacity > 0 && !isFull && !alreadyYours && !mixBlocked
                               ? 'Break needed'
                               : null
+                          const shamLabel =
+                            shamBlocked && !isPast && capacity > 0 && !isFull && !alreadyYours && !mixBlocked && !breakBlocked
+                              ? 'Sham only'
+                              : null
                           const label = alreadyYours
                             ? 'Yours'
                             : isSelected
@@ -760,6 +780,8 @@ export default function BookLessonModal({
                               ? mixLabel
                               : breakLabel
                                 ? breakLabel
+                                : shamLabel
+                                  ? shamLabel
                                 : isPast
                                   ? 'Past'
                                   : capacity === 0
@@ -775,7 +797,8 @@ export default function BookLessonModal({
                             isFull ||
                             mixBlocked ||
                             alreadyYours ||
-                            breakBlocked
+                            breakBlocked ||
+                            shamBlocked
                           const slotTypeLabel =
                             slotType === 'kids' ? '子'
                               : slotType === 'adult' ? 'Adult'
@@ -798,7 +821,8 @@ export default function BookLessonModal({
                                     isFull ||
                                     mixBlocked ||
                                     alreadyYours ||
-                                    breakBlocked
+                                    breakBlocked ||
+                                    shamBlocked
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
@@ -815,9 +839,11 @@ export default function BookLessonModal({
                                           ? 'bg-amber-50 text-amber-800 cursor-default'
                                           : mixBlocked
                                             ? 'bg-indigo-50 text-indigo-800 cursor-not-allowed'
-                                            : breakBlocked
-                                              ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
-                                              : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
+                                            : shamBlocked
+                                              ? 'bg-rose-50 text-rose-900 cursor-not-allowed'
+                                              : breakBlocked
+                                                ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
+                                                : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
                                 <div className="booking-slot-row-primary">
@@ -829,7 +855,7 @@ export default function BookLessonModal({
                                   </span>
                                 </div>
                                 <span
-                                  className={`booking-slot-meta ${mixBlocked && !isFull ? 'text-indigo-700/85' : ''}`}
+                                  className={`booking-slot-meta ${mixBlocked && !isFull ? 'text-indigo-700/85' : ''} ${shamBlocked && !isFull ? 'text-rose-800/90' : ''}`}
                                 >
                                   {slotTypeLabel ?? '—'}
                                 </span>
