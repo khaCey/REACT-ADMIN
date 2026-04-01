@@ -282,6 +282,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   studentId={studentId}
                   student={student}
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
+                  onMonthLessonsUpdated={fetchData}
                   onLoadingChange={setLessonsLoading}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
@@ -544,10 +545,21 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setPreBookLessonModal(false)
           setOverridePaidLessons(null)
         }}
-        onConfirm={(x) => {
+        onConfirm={async (x) => {
+          try {
+            await api.upsertStudentMonthLessons({
+              student_id: studentId,
+              month: getCurrentJstYyyyMm(),
+              lessons: x,
+            })
+          } catch (e) {
+            setError(e?.message || 'Failed to save monthly lesson count')
+            return
+          }
           setOverridePaidLessons(x)
           setPreBookLessonModal(false)
           setBookLessonModal(true)
+          await fetchData()
         }}
       />
     )}

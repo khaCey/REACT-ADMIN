@@ -40,6 +40,17 @@ export const api = {
   updateNote: (id, data) => fetchApi(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteNote: (id) => fetchApi(`/notes/${id}`, { method: 'DELETE' }),
 
+  /** Upsert monthly lesson pack size (`lessons` table); `month` is YYYY-MM. */
+  upsertStudentMonthLessons: ({ student_id, month, lessons }) =>
+    fetchApi('/lessons', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_id,
+        month,
+        lessons,
+      }),
+    }),
+
   getFeatureFlags: () => fetchApi('/config/feature-flags'),
   getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
   createBackup: () => fetchApi('/admin/backup', { method: 'POST' }),

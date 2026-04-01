@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import LessonDetailsModal from './LessonDetailsModal'
 import ConfirmActionModal from './ConfirmActionModal'
+import PreBookLessonModal from './PreBookLessonModal'
 import { useToast } from '../context/ToastContext'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
@@ -117,7 +118,14 @@ function useLatestByMonth(studentId, refreshTrigger) {
   return { data, loading, error, activeMonth, setActiveMonth, refetch: fetchData }
 }
 
-export default function LessonsThisMonth({ studentId, student, onBookLesson, sectionClassName, onLoadingChange }) {
+export default function LessonsThisMonth({
+  studentId,
+  student,
+  onBookLesson,
+  sectionClassName,
+  onLoadingChange,
+  onMonthLessonsUpdated,
+}) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
   const { data, loading, error, activeMonth, setActiveMonth, refetch } = useLatestByMonth(studentId, lastSynced)
@@ -129,6 +137,8 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [removing, setRemoving] = useState(false)
   const [actionError, setActionError] = useState(null)
+  const [changeCountOpen, setChangeCountOpen] = useState(false)
+  const [changeCountMonthKey, setChangeCountMonthKey] = useState(null)
 
   const handleCancel = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
@@ -180,6 +190,13 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
     } finally {
       setRemoving(false)
     }
+  }
+
+  const openChangeLessonCount = (monthKey) => {
+    if (studentId == null || !monthKey) return
+    setActionError(null)
+    setChangeCountMonthKey(monthKey)
+    setChangeCountOpen(true)
   }
 
   const wrapSection = (inner) => {
@@ -240,6 +257,40 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
   const now = new Date()
   const year = monthData?.year ?? now.getFullYear()
   const monthIndex = monthData?.monthIndex ?? now.getMonth()
+
+  const changeCountEntry = changeCountMonthKey ? data[changeCountMonthKey] : null
+  const changeCountModal =
+    changeCountOpen && studentId != null && changeCountMonthKey && changeCountEntry ? (
+      <PreBookLessonModal
+        key={changeCountMonthKey}
+        overlayClassName="z-[10002]"
+        initialPackTotal={
+          changeCountEntry.paidLessonsCount > 0 ? changeCountEntry.paidLessonsCount : 4
+        }
+        description={`${changeCountEntry.label || changeCountMonthKey} の月何回（保存すると予約タイトルと未設定枠に反映されます）`}
+        confirmLabel="Save"
+        onClose={() => {
+          setChangeCountOpen(false)
+          setChangeCountMonthKey(null)
+        }}
+        onConfirm={async (n) => {
+          try {
+            await api.upsertStudentMonthLessons({
+              student_id: studentId,
+              month: changeCountMonthKey,
+              lessons: n,
+            })
+            success('月何回を保存しました')
+            setChangeCountOpen(false)
+            setChangeCountMonthKey(null)
+            await refetch()
+            onMonthLessonsUpdated?.()
+          } catch (e) {
+            setActionError(e?.message || 'Save failed')
+          }
+        }}
+      />
+    ) : null
 
   const monthToggles = (
     <div className="flex items-center gap-1">
@@ -331,32 +382,70 @@ export default function LessonsThisMonth({ studentId, student, onBookLesson, sec
 
   if (sectionClassName) {
     return (
-      <section className={sectionClassName}>
-        <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 flex-shrink-0">
-          <h3 className="font-semibold text-sm">Lessons This Month</h3>
-          {monthKeys.length > 0 && monthToggles}
-          {onBookLesson ? (
-            <button
-              type="button"
-              onClick={onBookLesson}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer shrink-0"
-            >
-              <Calendar className="w-4 h-4" />
-              Book lesson
-            </button>
-          ) : null}
-        </header>
-        {content}
-      </section>
+      <>
+        <section className={sectionClassName}>
+          <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 flex-shrink-0">
+            <h3 className="font-semibold text-sm">Lessons This Month</h3>
+            {monthKeys.length > 0 && monthToggles}
+            <div className="flex items-center gap-1 shrink-0">
+              {studentId != null && monthKeys.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => openChangeLessonCount(current)}
+                  className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
+                >
+                  回数変化
+                </button>
+              ) : null}
+              {onBookLesson ? (
+                <button
+                  type="button"
+                  onClick={onBookLesson}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                >
+                  <Calendar className="w-4 h-4" />
+                  Book lesson
+                </button>
+              ) : null}
+            </div>
+          </header>
+          {content}
+        </section>
+        {changeCountModal}
+      </>
     )
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0">
-      <div className="flex items-center gap-1 border-b border-gray-200 px-2 py-1.5">
-        {monthToggles}
+    <>
+      <div className="flex flex-1 flex-col min-h-0">
+        <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-2 py-1.5">
+          <div className="flex items-center gap-1 min-w-0">{monthToggles}</div>
+          <div className="flex items-center gap-1 shrink-0">
+            {studentId != null && monthKeys.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => openChangeLessonCount(current)}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
+              >
+                回数変化
+              </button>
+            ) : null}
+            {onBookLesson ? (
+              <button
+                type="button"
+                onClick={onBookLesson}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+              >
+                <Calendar className="w-4 h-4" />
+                Book
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {content}
       </div>
-      {content}
-    </div>
+      {changeCountModal}
+    </>
   )
 }

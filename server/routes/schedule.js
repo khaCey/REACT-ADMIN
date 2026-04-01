@@ -808,6 +808,13 @@ router.post('/book', async (req, res) => {
       totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
     }
     if (!totalLessons) {
+      const packRow = await query(
+        'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
+        [studentIdNum, monthKey]
+      );
+      totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
+    }
+    if (!totalLessons) {
       return res.status(400).json({
         error: 'Missing lesson pack total. Enter total lessons before booking.',
       });

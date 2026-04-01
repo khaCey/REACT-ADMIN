@@ -1,10 +1,30 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
-export default function PreBookLessonModal({ onClose, onConfirm, overlayClassName, description }) {
-  const [packTotal, setPackTotal] = useState('4')
+function seedFromInitial(initialPackTotal) {
+  if (initialPackTotal == null || initialPackTotal === '') return '4'
+  const n = Number(initialPackTotal)
+  if (Number.isFinite(n) && n > 0) return String(Math.floor(n))
+  return String(initialPackTotal).trim() || '4'
+}
+
+export default function PreBookLessonModal({
+  onClose,
+  onConfirm,
+  overlayClassName,
+  description,
+  initialPackTotal,
+  confirmLabel,
+}) {
+  const [packTotal, setPackTotal] = useState(() => seedFromInitial(initialPackTotal))
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (initialPackTotal == null || initialPackTotal === '') return
+    setPackTotal(seedFromInitial(initialPackTotal))
+    setError('')
+  }, [initialPackTotal])
 
   const handleConfirm = async () => {
     const n = parseInt(String(packTotal).trim(), 10)
@@ -60,7 +80,7 @@ export default function PreBookLessonModal({ onClose, onConfirm, overlayClassNam
             disabled={submitting}
             className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
           >
-            {submitting ? 'Opening...' : 'Continue'}
+            {submitting ? (confirmLabel ? 'Saving…' : 'Opening…') : confirmLabel || 'Continue'}
           </button>
         </div>
       </div>

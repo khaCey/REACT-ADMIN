@@ -192,7 +192,15 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       const isPaid = paidMonths.has(yyyyMm);
       const sumPaid = paidLessonsSumByMonth[yyyyMm] || 0;
       const maxPaid = paidLessonsMaxByMonth[yyyyMm] || 0;
-      const paidLessons = Math.max(sumPaid, maxPaid);
+      let paidLessons = Math.max(sumPaid, maxPaid);
+      const lessonPackRes = await query(
+        'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
+        [Number(id) || id, yyyyMm]
+      );
+      const storedPack = parseInt(lessonPackRes.rows[0]?.lessons, 10) || 0;
+      if (storedPack > 0) {
+        paidLessons = storedPack;
+      }
       // Rows from DB only (before unscheduled placeholders): all are real schedule rows for the month.
       const bookedLessonsCount = lessons.length;
       const scheduledCount = lessons.filter((l) => l.status !== 'unscheduled').length;
@@ -216,7 +224,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         Payment: isPaid ? '済' : '未',
         lessons,
         missingCount,
-        /** Lesson credits for this month: max(total sum of amounts, largest single payment). */
+        /** Lesson pack size: `lessons` table override if set, else payment-derived (sum vs max). */
         paidLessonsCount: paidLessons,
         /** Lessons on the schedule this month (includes cancelled/rescheduled rows). */
         bookedLessonsCount,
