@@ -69,6 +69,25 @@ app.get('/api/health', (req, res) => {
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+const LATEST_BY_MONTH_JST_MS = 9 * 60 * 60 * 1000;
+function yyyyMmJstNow() {
+  const jst = new Date(Date.now() + LATEST_BY_MONTH_JST_MS);
+  return `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+function yyyyMmAddOne(yyyyMm) {
+  const [ys, ms] = String(yyyyMm).split('-');
+  const y = parseInt(ys, 10);
+  const mo = parseInt(ms, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null;
+  let ny = y;
+  let nm = mo + 1;
+  if (nm > 12) {
+    nm = 1;
+    ny += 1;
+  }
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
   try {
     const { id } = req.params;
@@ -84,18 +103,20 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       if (swapped !== studentName) nameVariants.push(swapped);
     }
 
-    const now = new Date();
-    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const thisYyyyMm = `${thisMonth.getFullYear()}-${String(thisMonth.getMonth() + 1).padStart(2, '0')}`;
-    const nextYyyyMm = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+    const jstNow = new Date(Date.now() + LATEST_BY_MONTH_JST_MS);
+    const defaultPaymentYear = jstNow.getUTCFullYear();
+    const thisYyyyMm = yyyyMmJstNow();
+    const nextYyyyMm = yyyyMmAddOne(thisYyyyMm);
 
     const paymentsResult = await query(
       'SELECT month, date, year, amount FROM payments WHERE student_id = $1 ORDER BY month',
       [Number(id) || id]
     );
     const paidMonths = new Set();
-    const paidLessonsByMonth = {};
+    /** Sum of payment `amount` (lesson credits) per calendar month. */
+    const paidLessonsSumByMonth = {};
+    /** Largest single `amount` in that month (legacy / alternate reading). */
+    const paidLessonsMaxByMonth = {};
     const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];
     for (const p of paymentsResult.rows) {
       let m = (p.month || '').trim();
@@ -108,7 +129,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         paidMonths.add(yyyyMm);
       } else if (m) {
         const match = m.match(/(\d{4})/);
-        const year = match ? match[1] : String(p.year || now.getFullYear());
+        const year = match ? match[1] : String(p.year || defaultPaymentYear);
         const mn = m.toLowerCase().replace(/\d{4}/g, '').trim();
         const idx = monthNames.findIndex((n) => mn.startsWith(n) || n.startsWith(mn.slice(0, 3)));
         if (idx >= 0) {
@@ -126,11 +147,12 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       }
       if (yyyyMm) {
         const amt = Math.max(0, parseInt(p.amount, 10) || 0);
-        paidLessonsByMonth[yyyyMm] = Math.max(paidLessonsByMonth[yyyyMm] || 0, amt);
+        paidLessonsSumByMonth[yyyyMm] = (paidLessonsSumByMonth[yyyyMm] || 0) + amt;
+        paidLessonsMaxByMonth[yyyyMm] = Math.max(paidLessonsMaxByMonth[yyyyMm] || 0, amt);
       }
     }
 
-    const allYyyyMm = [thisYyyyMm, nextYyyyMm];
+    const allYyyyMm = [thisYyyyMm, nextYyyyMm].filter(Boolean);
 
     const latestByMonth = {};
 
@@ -168,7 +190,9 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       });
 
       const isPaid = paidMonths.has(yyyyMm);
-      const paidLessons = paidLessonsByMonth[yyyyMm] || 0;
+      const sumPaid = paidLessonsSumByMonth[yyyyMm] || 0;
+      const maxPaid = paidLessonsMaxByMonth[yyyyMm] || 0;
+      const paidLessons = Math.max(sumPaid, maxPaid);
       // Rows from DB only (before unscheduled placeholders): all are real schedule rows for the month.
       const bookedLessonsCount = lessons.length;
       const scheduledCount = lessons.filter((l) => l.status !== 'unscheduled').length;
@@ -184,7 +208,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         });
       }
       const [y, mo] = yyyyMm.split('-');
-      const currentYear = now.getFullYear();
+      const currentYear = jstNow.getUTCFullYear();
       const monthLabel = parseInt(y, 10) !== currentYear
         ? `${MONTH_NAMES[parseInt(mo, 10) - 1]} ${y}`
         : MONTH_NAMES[parseInt(mo, 10) - 1];
@@ -192,7 +216,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         Payment: isPaid ? '済' : '未',
         lessons,
         missingCount,
-        /** Payment row `amount` (lesson credits) for this month — paired with bookedLessonsCount for UI. */
+        /** Lesson credits for this month: max(total sum of amounts, largest single payment). */
         paidLessonsCount: paidLessons,
         /** Lessons on the schedule this month (includes cancelled/rescheduled rows). */
         bookedLessonsCount,

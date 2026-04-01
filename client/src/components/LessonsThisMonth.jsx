@@ -8,6 +8,30 @@ import { useToast } from '../context/ToastContext'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+
+/** Match server `/students/:id/latest-by-month` window (Asia/Tokyo calendar month). */
+function getCurrentYyyyMmJst() {
+  const jst = new Date(Date.now() + JST_OFFSET_MS)
+  const y = jst.getUTCFullYear()
+  const m = jst.getUTCMonth() + 1
+  return `${y}-${String(m).padStart(2, '0')}`
+}
+
+function addOneMonthYyyyMm(yyyyMm) {
+  const [ys, ms] = String(yyyyMm).split('-')
+  const y = parseInt(ys, 10)
+  const mo = parseInt(ms, 10)
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
+  let ny = y
+  let nm = mo + 1
+  if (nm > 12) {
+    nm = 1
+    ny += 1
+  }
+  return `${ny}-${String(nm).padStart(2, '0')}`
+}
+
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60' },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60' },
@@ -74,11 +98,9 @@ function useLatestByMonth(studentId, refreshTrigger) {
       .getStudentLatestByMonth(studentId)
       .then((res) => {
         const latest = res.latestByMonth || {}
-        const now = new Date()
-        const thisYyyyMm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-        const nextYyyyMm = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`
-        const ordered = [thisYyyyMm, nextYyyyMm].filter((k) => k in latest)
+        const thisYyyyMm = getCurrentYyyyMmJst()
+        const nextYyyyMm = addOneMonthYyyyMm(thisYyyyMm)
+        const ordered = [thisYyyyMm, nextYyyyMm].filter((k) => k && k in latest)
         const filtered = Object.fromEntries(ordered.map((k) => [k, latest[k]]))
         setData(filtered)
         setActiveMonth((prev) => (prev == null ? thisYyyyMm : prev))
