@@ -91,7 +91,8 @@ router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
  * - Rows for students in BOOKING_DISABLED_STUDENT_IDS are omitted (not counted in slots/slotMix).
  * - `breakRuleBlocked`: slot keys where spare capacity exists but no on-shift teacher can take another
  *   regular lesson without exceeding 5 consecutive JST teaching hours (see teacherBreakRules).
- * - `staffBreakBySlot`: keys -> [{ teacher_name, title }] for rows with lesson_kind staff_break (UI cards).
+ * - `staffBreakBySlot`: keys -> break entries; calendar rows include `break_source: 'schedule'`; expanded
+ *   presets include `preset_id`, `break_source: 'preset'`, and `preset_weekday` / `preset_*_time` for editing.
  */
 router.get('/week', async (req, res) => {
   try {
@@ -134,14 +135,14 @@ router.get('/week', async (req, res) => {
         [weekStart]
       ),
       query(
-        `SELECT teacher_name, weekday, start_time, end_time
+        `SELECT id, teacher_name, weekday, start_time, end_time
          FROM teacher_break_presets
          WHERE active = TRUE`
       ),
     ]);
     /** key -> bucket: distinct events + kids/adult flags for booking UI (matches POST /book mixing rules) */
     const slotBuckets = new Map();
-    /** Slot keys -> list of { teacher_name, title } for lesson_kind staff_break (UI cards). */
+    /** Slot keys -> list of break cards (calendar staff_break and/or expanded presets). */
     const staffBreakBySlot = {};
     for (const r of scheduleResult.rows) {
       const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
@@ -155,6 +156,7 @@ router.get('/week', async (req, res) => {
         staffBreakBySlot[key].push({
           teacher_name: tn,
           title: (r.title != null ? String(r.title).trim() : '') || null,
+          break_source: 'schedule',
         });
         continue;
       }
@@ -206,11 +208,12 @@ router.get('/week', async (req, res) => {
     /** Preset breaks expanded to slot keys (date+hour), used for capacity reduction + UI break cards. */
     const presetBreakBySlot = {};
     for (const r of breakPresetsResult.rows || []) {
+      const presetId = parseInt(r.id, 10);
       const teacherName = String(r.teacher_name || '').trim();
       const start = parseClock5(r.start_time);
       const end = parseClock5(r.end_time);
       const weekday = parseInt(r.weekday, 10);
-      if (!teacherName || !start || !end || !Number.isFinite(weekday)) continue;
+      if (!Number.isFinite(presetId) || !teacherName || !start || !end || !Number.isFinite(weekday)) continue;
       for (let di = 0; di < 7; di += 1) {
         const dateStr = addDaysToYyyyMmDd(weekStart, di);
         if (dateWeekday(dateStr) !== weekday) continue;
@@ -221,6 +224,11 @@ router.get('/week', async (req, res) => {
           presetBreakBySlot[key].push({
             teacher_name: teacherName,
             title: `${teacherName}'s Break`,
+            preset_id: presetId,
+            break_source: 'preset',
+            preset_weekday: weekday,
+            preset_start_time: start,
+            preset_end_time: end,
           });
         }
       }
@@ -236,9 +244,12 @@ router.get('/week', async (req, res) => {
     for (const k of Object.keys(staffBreakBySlot)) {
       const seen = new Set();
       staffBreakBySlot[k] = (staffBreakBySlot[k] || []).filter((b) => {
-        const id = `${b.teacher_name}::${b.title || ''}`;
-        if (seen.has(id)) return false;
-        seen.add(id);
+        const dedupe =
+          b.preset_id != null && Number.isFinite(Number(b.preset_id))
+            ? `preset:${b.preset_id}`
+            : `schedule:${b.teacher_name}::${b.title || ''}`;
+        if (seen.has(dedupe)) return false;
+        seen.add(dedupe);
         return true;
       });
     }
