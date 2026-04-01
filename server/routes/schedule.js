@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { query } from '../db/index.js';
+import { pool, query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
 import {
   parseJstToUtc,
@@ -20,6 +20,7 @@ import {
 import {
   createBookedLessonEventInGas,
   deleteBookedLessonEventInGas,
+  updateBookedLessonEventInGas,
   isBookingGasEnabled
 } from '../lib/bookingCalendarSync.js';
 
@@ -52,15 +53,16 @@ function normalizeTeacherNameForOwner(s) {
 
 /** Staff id from OWNER_COURSE_STAFF_ID; resolves `staff.name` to match `teacher_schedules.teacher_name`. */
 async function resolveOwnerCourseTeacherName() {
+  const fallbackName = 'Sham';
   const raw = process.env.OWNER_COURSE_STAFF_ID;
-  if (raw == null || String(raw).trim() === '') return null;
+  if (raw == null || String(raw).trim() === '') return fallbackName;
   const id = parseInt(String(raw).trim(), 10);
-  if (!Number.isFinite(id)) return null;
+  if (!Number.isFinite(id)) return fallbackName;
   const r = await query(
     `SELECT name FROM staff WHERE id = $1 AND COALESCE(active, TRUE) = TRUE`,
     [id]
   );
-  return (r.rows[0]?.name || '').trim() || null;
+  return (r.rows[0]?.name || '').trim() || fallbackName;
 }
 
 function deriveLessonKindFromStudent(student) {
@@ -69,6 +71,12 @@ function deriveLessonKindFromStudent(student) {
   const status = String(student?.status || '').toLowerCase();
   if (status.includes('demo') || status.includes('trial')) return 'demo';
   return 'regular';
+}
+
+function parsePackTotalFromTitle(title) {
+  const m = String(title || '').match(/\/\s*(\d+)\s*$/);
+  const n = m ? parseInt(m[1], 10) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function addDaysToYyyyMmDd(dateStr, n) {
@@ -978,6 +986,10 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
+    if (isBookingGasEnabled()) {
+      // Google Calendar Graphite = colorId "8".
+      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
+    }
     await query(`UPDATE monthly_schedule SET status = 'cancelled' WHERE event_id = $1`, [eventId]);
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     for (let i = 0; i < oldRows.length; i++) {
@@ -1007,6 +1019,10 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
     const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    }
+    if (isBookingGasEnabled()) {
+      // Clear event color so calendar uses default color again.
+      await updateBookedLessonEventInGas(eventId, { clearColor: true });
     }
     await query(`UPDATE monthly_schedule SET status = 'scheduled' WHERE event_id = $1`, [eventId]);
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
@@ -1083,6 +1099,170 @@ router.patch(/^\/(.+)\/reschedule\/?$/, async (req, res) => {
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** Linked reschedule: create a new booking, cancel source, and store reschedule linkage. */
+router.post('/reschedule-linked', async (req, res) => {
+  let client;
+  try {
+    const {
+      source_event_id,
+      student_id,
+      date,
+      time,
+      duration_minutes,
+      location,
+      source_student_name,
+    } = req.body || {};
+    const sourceEventId = String(source_event_id || '').trim();
+    const studentIdNum = Number(student_id);
+    const dateStrRaw = String(date || '').trim();
+    const timeStrRaw = String(time || '').trim();
+    if (!sourceEventId) return res.status(400).json({ error: 'source_event_id is required' });
+    if (!Number.isFinite(studentIdNum)) return res.status(400).json({ error: 'student_id must be a number' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStrRaw)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    if (!/^\d{2}:\d{2}$/.test(timeStrRaw)) return res.status(400).json({ error: 'time must be HH:MM' });
+
+    const studentResult = await query('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
+    if (studentResult.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
+    const student = studentResult.rows[0];
+    const studentName = String(student.name || '').trim();
+    const normalizedStudentName = studentName.replace(/\s+/g, ' ').trim();
+    const normalizedSourceName = String(source_student_name || '').replace(/\s+/g, ' ').trim();
+    const studentParts = normalizedStudentName.split(' ').filter(Boolean);
+    const swappedStudentName =
+      studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
+    const candidateRows = (
+      await query(
+        `SELECT event_id, student_name, student_id, status, title
+         FROM monthly_schedule
+         WHERE event_id = $1`,
+        [sourceEventId]
+      )
+    ).rows;
+    if (candidateRows.length === 0) {
+      return res.status(404).json({ error: 'Source lesson not found for student' });
+    }
+    const nameCandidates = [normalizedStudentName, swappedStudentName, normalizedSourceName].filter(Boolean);
+    const byStudentId = candidateRows.find((r) => Number(r.student_id) === studentIdNum);
+    const byName = candidateRows.find((r) => {
+      const n = String(r.student_name || '').replace(/\s+/g, ' ').trim();
+      return nameCandidates.includes(n);
+    });
+    const source = byStudentId || byName || (candidateRows.length === 1 ? candidateRows[0] : null);
+    if (!source) {
+      return res.status(404).json({ error: 'Source lesson not found for student' });
+    }
+    if (String(source.status || '').toLowerCase() === 'cancelled') {
+      return res.status(400).json({ error: 'Source lesson is already cancelled' });
+    }
+    const sourceStudentName = String(source.student_name || source_student_name || '').trim();
+    if (!sourceStudentName) return res.status(400).json({ error: 'Source student name is missing' });
+    const duration = Math.min(120, Math.max(30, Number(duration_minutes) || 50));
+    const [hh, mm] = timeStrRaw.split(':').map((x) => parseInt(x, 10) || 0);
+    const startDate = parseJstToUtc(dateStrRaw, hh, mm);
+    if (!startDate) return res.status(400).json({ error: 'Invalid date or time' });
+    const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+
+    const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
+    const monthKey = dateStrRaw.slice(0, 7);
+    let totalLessons = parsePackTotalFromTitle(source.title);
+    if (!totalLessons) {
+      const packRow = await query('SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2', [studentIdNum, monthKey]);
+      totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
+    }
+    if (!totalLessons) totalLessons = 1;
+
+    // Quota-neutral numbering: when moving within the same month, source lesson is effectively replaced.
+    const sourceMonth = (
+      await query(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
+    ).rows[0]?.ym;
+    const bookedCountResult = await query(
+      `SELECT COUNT(DISTINCT m.event_id) AS cnt
+       FROM monthly_schedule m
+       WHERE (m.status IS NULL OR m.status <> 'cancelled')
+         AND m.student_id = $1
+         AND to_char(m.date, 'YYYY-MM') = $2`,
+      [studentIdNum, monthKey]
+    );
+    const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+    const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
+    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
+
+    if (!isBookingGasEnabled()) {
+      return res.status(400).json({
+        error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
+      });
+    }
+    const gasRes = await createBookedLessonEventInGas({
+      student: {
+        id: student.id,
+        name: studentName,
+        status: student.status,
+        payment: student.payment,
+        is_child: !!student.is_child,
+      },
+      startIso: startDate.toISOString(),
+      endIso: endDate.toISOString(),
+      assignedTeacherName: null,
+      title,
+      location: locationLabel,
+    });
+    if (!gasRes.ok) {
+      return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const lessonKind = deriveLessonKindFromStudent(student);
+    await client.query(
+      `INSERT INTO monthly_schedule
+        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+       VALUES
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, 'unknown', $10)
+       ON CONFLICT (event_id, student_name)
+       DO UPDATE SET
+         title = EXCLUDED.title,
+         date = EXCLUDED.date,
+         start = EXCLUDED.start,
+         "end" = EXCLUDED."end",
+         status = EXCLUDED.status,
+         is_kids_lesson = EXCLUDED.is_kids_lesson,
+         teacher_name = EXCLUDED.teacher_name,
+         lesson_kind = EXCLUDED.lesson_kind,
+         lesson_mode = EXCLUDED.lesson_mode,
+         student_id = EXCLUDED.student_id`,
+      [gasRes.eventId, title, dateStrRaw, startDate.toISOString(), endDate.toISOString(), studentName, !!student.is_child, null, lessonKind, studentIdNum]
+    );
+    if (isBookingGasEnabled()) {
+      await updateBookedLessonEventInGas(sourceEventId, { colorId: '8' });
+    }
+    await client.query(`UPDATE monthly_schedule SET status = 'cancelled' WHERE event_id = $1 AND student_name = $2`, [sourceEventId, sourceStudentName]);
+    await client.query(
+      `INSERT INTO reschedules (from_event_id, from_student_name, to_event_id, to_student_name, created_by_staff_id)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (from_event_id, from_student_name)
+       DO UPDATE SET to_event_id = EXCLUDED.to_event_id, to_student_name = EXCLUDED.to_student_name, created_by_staff_id = EXCLUDED.created_by_staff_id, created_at = NOW()`,
+      [sourceEventId, sourceStudentName, gasRes.eventId, studentName, req.staff?.id ?? null]
+    );
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      ok: true,
+      source_event_id: sourceEventId,
+      new_event_id: gasRes.eventId,
+      date: dateStrRaw,
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
+    });
+  } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (client) client.release();
   }
 });
 
