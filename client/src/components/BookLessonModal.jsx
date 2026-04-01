@@ -403,23 +403,37 @@ export default function BookLessonModal({
   }, [])
 
   useEffect(() => {
-    // Remove selections that no longer exist in this week view.
+    // Invalidate selections only for the *visible* week. Keys from other weeks are kept so
+    // prev/next navigation does not wipe a multi-week selection (their capacity is not in `slots`).
+    const weekDateSet = new Set(
+      Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
+    )
     setSelectedSlotKeys((prev) =>
       prev.filter((key) => {
         const [dateStr, timeStr] = key.split('T')
         if (!dateStr || !timeStr) return false
         if (studentBookedSlots[key]) return false
+        if (isSlotPastJst(dateStr, timeStr)) return false
+        if (!weekDateSet.has(dateStr)) return true
         const booked = slots[key] || 0
         const capacity = (teachersBySlot[key] || []).length
         if (capacity === 0 || booked >= capacity) return false
         if (isKidAdultMixBlocked(student, slotMix[key])) return false
         if (breakRuleBlocked[key]) return false
         if (ownerShamBlocked[key]) return false
-        if (isSlotPastJst(dateStr, timeStr)) return false
         return true
       })
     )
-  }, [slots, teachersBySlot, slotMix, breakRuleBlocked, ownerShamBlocked, studentBookedSlots, student])
+  }, [
+    weekStartStr,
+    slots,
+    teachersBySlot,
+    slotMix,
+    breakRuleBlocked,
+    ownerShamBlocked,
+    studentBookedSlots,
+    student,
+  ])
 
   const goWeek = (delta) => {
     setWeekStartStr(addDaysToDateStr(weekStartStr, delta * 7))
