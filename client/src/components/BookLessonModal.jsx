@@ -640,7 +640,7 @@ export default function BookLessonModal({
                     {TIME_SLOTS.map((timeStr) => (
                       <div
                         key={timeStr}
-                        className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-b border-gray-100 min-h-[30px]"
+                        className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-b border-gray-100 min-h-[36px]"
                       >
                         {timeStr}
                       </div>
@@ -716,21 +716,8 @@ export default function BookLessonModal({
                           return (
                             <div
                               key={timeStr}
-                              className="flex min-h-[30px] flex-col gap-0.5 border-b border-r border-gray-100 py-0.5 px-0.5"
+                              className="flex min-h-[36px] flex-col gap-0.5 border-b border-r border-gray-100 py-0.5 px-0.5"
                             >
-                              {staffBreaks.length > 0 && (
-                                <div className="flex flex-col gap-0.5 shrink-0">
-                                  {staffBreaks.map((b, bi) => (
-                                    <div
-                                      key={`${b.teacher_name}-${bi}`}
-                                      className="rounded border border-slate-200/80 bg-slate-100/95 px-1 py-0.5 text-center text-[9px] font-medium leading-tight text-slate-700 pointer-events-none select-none"
-                                      title={b.title || undefined}
-                                    >
-                                      {b.title?.trim() || `${b.teacher_name}'s Break`}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
                               <button
                                 type="button"
                                 disabled={
@@ -744,7 +731,7 @@ export default function BookLessonModal({
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
-                                className={`booking-slot-btn flex-1 min-h-[24px] px-2 transition-colors ${
+                                className={`booking-slot-btn flex-1 min-h-[28px] px-2 transition-colors ${
                                   isSelected
                                     ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
                                     : isPast
@@ -762,16 +749,31 @@ export default function BookLessonModal({
                                               : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
-                                {showStatusBead && (
-                                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusBead}`} aria-hidden />
-                                )}
-                                <span className={`booking-slot-primary ${showStrike ? 'line-through' : ''}`}>
-                                  {primaryLabel}
-                                </span>
+                                <div className="booking-slot-row-primary">
+                                  {showStatusBead && (
+                                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusBead}`} aria-hidden />
+                                  )}
+                                  <span className={`booking-slot-primary ${showStrike ? 'line-through' : ''}`}>
+                                    {primaryLabel}
+                                  </span>
+                                </div>
                                 <span className="booking-slot-meta">
                                   {slotTypeLabel ?? '—'}
                                 </span>
                               </button>
+                              {staffBreaks.length > 0 && (
+                                <div className="flex flex-col gap-px shrink-0 w-full min-w-0">
+                                  {staffBreaks.map((b, bi) => (
+                                    <div
+                                      key={`${b.teacher_name}-${bi}`}
+                                      className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-px text-center text-[8px] font-medium leading-tight text-slate-600 pointer-events-none select-none"
+                                      title={b.title || undefined}
+                                    >
+                                      {b.title?.trim() || `${b.teacher_name}'s Break`}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )
                         })}
