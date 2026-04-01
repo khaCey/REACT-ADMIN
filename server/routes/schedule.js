@@ -220,7 +220,7 @@ router.get('/week', async (req, res) => {
           if (!presetBreakBySlot[key]) presetBreakBySlot[key] = [];
           presetBreakBySlot[key].push({
             teacher_name: teacherName,
-            title: `Preset break ${start}-${end}`,
+            title: `${teacherName}'s Break`,
           });
         }
       }
