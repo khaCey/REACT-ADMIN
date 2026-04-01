@@ -139,6 +139,9 @@ export const api = {
   },
   bookLesson: (body) =>
     fetchApi('/schedule/book', { method: 'POST', body: JSON.stringify(body) }),
+  /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
+  renumberMonthLessonTitles: (body) =>
+    fetchApi('/schedule/renumber-month-titles', { method: 'POST', body: JSON.stringify(body) }),
   cancelScheduleEvent: (eventId) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/cancel`, { method: 'PATCH' }),
   uncancelScheduleEvent: (eventId) =>

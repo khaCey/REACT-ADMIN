@@ -201,9 +201,9 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       if (storedPack > 0) {
         paidLessons = storedPack;
       }
-      // Rows from DB only (before unscheduled placeholders): all are real schedule rows for the month.
-      const bookedLessonsCount = lessons.length;
-      const scheduledCount = lessons.filter((l) => l.status !== 'unscheduled').length;
+      // Rows from DB only (before unscheduled placeholders). Cancelled rows do not consume pack slots.
+      const scheduledCount = lessons.filter((l) => (l.status || '').toLowerCase() !== 'cancelled').length;
+      const bookedLessonsCount = scheduledCount;
       const missingCount = Math.max(0, paidLessons - scheduledCount);
       for (let i = 0; i < missingCount; i++) {
         lessons.push({
@@ -226,7 +226,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         missingCount,
         /** Lesson pack size: `lessons` table override if set, else payment-derived (sum vs max). */
         paidLessonsCount: paidLessons,
-        /** Lessons on the schedule this month (includes cancelled/rescheduled rows). */
+        /** Non-cancelled lesson rows this month (before unscheduled placeholders). */
         bookedLessonsCount,
         year: parseInt(y, 10),
         monthIndex: parseInt(mo, 10) - 1,

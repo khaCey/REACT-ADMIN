@@ -6,6 +6,7 @@ import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ExtendShiftModal from './ExtendShiftModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import PreBookLessonModal from './PreBookLessonModal'
+import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
@@ -168,14 +169,78 @@ function getCurrentMonthSummary(latestByMonth) {
   return toLessonMonthSummary(ym, latestByMonth[ym])
 }
 
-/** POST /book `pack_total`: inline or parent override, else current JST month paid count from latest-by-month. */
-function derivePackTotalForBooking(preloadedLatestByMonth, overridePaidLessons, localPackOverride) {
+function paidPackForMonth(ym, latestByMonth) {
+  const e = latestByMonth?.[ym]
+  if (!e || typeof e.paidLessonsCount !== 'number') return 0
+  return e.paidLessonsCount > 0 ? e.paidLessonsCount : 0
+}
+
+function countActiveLessonsInMonth(ym, latestByMonth) {
+  const e = latestByMonth?.[ym]
+  if (!e?.lessons) return 0
+  return e.lessons.filter(
+    (l) => (l.status || '').toLowerCase() !== 'cancelled' && l.status !== 'unscheduled'
+  ).length
+}
+
+function slotMonthFromKey(key) {
+  const d = String(key || '').split('T')[0]
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d.slice(0, 7) : ''
+}
+
+function countSlotsInMonthForKeys(selectedKeys, ym) {
+  return selectedKeys.filter((k) => slotMonthFromKey(k) === ym).length
+}
+
+/**
+ * POST /book pack_total: override/local, else per selected calendar month from latest-by-month.
+ * @returns {{ mode: 'none' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
+ */
+function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPackOverride, selectedSlotKeys) {
   const loc = Number(localPackOverride)
-  if (Number.isFinite(loc) && loc > 0) return loc
+  if (Number.isFinite(loc) && loc > 0) return { mode: 'single', value: loc }
   const overrideTotal = Number(overridePaidLessons)
-  if (Number.isFinite(overrideTotal) && overrideTotal > 0) return overrideTotal
-  const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
-  if (monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0) return monthSummary.paid
+  if (Number.isFinite(overrideTotal) && overrideTotal > 0) return { mode: 'single', value: overrideTotal }
+
+  const months = [...new Set(selectedSlotKeys.map((k) => slotMonthFromKey(k)).filter(Boolean))]
+  if (months.length === 0) {
+    const cur = getCurrentMonthSummary(latestByMonth)
+    if (cur && typeof cur.paid === 'number' && cur.paid > 0) return { mode: 'single', value: cur.paid }
+    return { mode: 'none' }
+  }
+  const perMonth = {}
+  for (const ym of months) {
+    const p = paidPackForMonth(ym, latestByMonth)
+    if (!p) return { mode: 'none' }
+    perMonth[ym] = p
+  }
+  return { mode: 'perMonth', perMonth }
+}
+
+function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth) {
+  const months = [...new Set(selectedSlotKeys.map((k) => slotMonthFromKey(k)).filter(Boolean))].sort()
+  for (const ym of months) {
+    const paid = paidPackForMonth(ym, latestByMonth)
+    const active = countActiveLessonsInMonth(ym, latestByMonth)
+    const adding = countSlotsInMonthForKeys(selectedSlotKeys, ym)
+    if (paid > 0 && active + adding > paid) {
+      return {
+        ym,
+        label: latestByMonth?.[ym]?.label || ym,
+        active,
+        paid,
+        adding,
+        minPack: active + adding,
+      }
+    }
+  }
+  return null
+}
+
+function packTotalForSlotDate(packResult, dateStr) {
+  const ym = String(dateStr || '').slice(0, 7)
+  if (packResult.mode === 'single') return packResult.value
+  if (packResult.mode === 'perMonth' && packResult.perMonth?.[ym]) return packResult.perMonth[ym]
   return undefined
 }
 
@@ -283,6 +348,11 @@ export default function BookLessonModal({
   const [packTotalPromptOpen, setPackTotalPromptOpen] = useState(false)
   /** Set when user confirms 月何回 inside this modal (persists until modal closes). */
   const [localPackOverride, setLocalPackOverride] = useState(null)
+  /** After renumber / over-quota save, overrides parent preloaded latest-by-month until prop changes. */
+  const [latestByMonthLocal, setLatestByMonthLocal] = useState(null)
+  const [overQuotaState, setOverQuotaState] = useState(null)
+  const [overQuotaConfirmOpen, setOverQuotaConfirmOpen] = useState(false)
+  const [overQuotaEditOpen, setOverQuotaEditOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
@@ -318,6 +388,10 @@ export default function BookLessonModal({
       setLessonMonthSummaries(selectVisibleLessonMonthSummaries(preloadedLatestByMonth))
       setLessonBalanceLoaded(true)
     }
+  }, [preloadedLatestByMonth])
+
+  useEffect(() => {
+    setLatestByMonthLocal(null)
   }, [preloadedLatestByMonth])
 
   useEffect(() => {
@@ -485,6 +559,8 @@ export default function BookLessonModal({
     setSelectedSlotKeys((prev) => [...prev, key])
   }
 
+  const effectiveLatest = latestByMonthLocal ?? preloadedLatestByMonth
+
   const handleSubmitSelected = async () => {
     const sidRaw = resolveBookStudentId(studentId, student)
     if (sidRaw == null || sidRaw === '') {
@@ -495,19 +571,26 @@ export default function BookLessonModal({
       setError('Please select one or more slots first.')
       return
     }
-    const packTotal = derivePackTotalForBooking(
-      preloadedLatestByMonth,
+    const packResult = derivePackTotalForBooking(
+      effectiveLatest,
       overridePaidLessons,
-      localPackOverride
+      localPackOverride,
+      selectedSlotKeys
     )
-    if (packTotal == null || packTotal <= 0) {
+    if (packResult.mode === 'none') {
       setPackTotalPromptOpen(true)
       return
     }
-    await submitBookingsWithPackTotal(packTotal)
+    const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest)
+    if (over) {
+      setOverQuotaState(over)
+      setOverQuotaConfirmOpen(true)
+      return
+    }
+    await submitBookingsWithPackResult(packResult)
   }
 
-  const submitBookingsWithPackTotal = async (packTotal) => {
+  const submitBookingsWithPackResult = async (packResult) => {
     const sidRaw = resolveBookStudentId(studentId, student)
     if (sidRaw == null || sidRaw === '') {
       setError('Missing student. Close and reopen booking, or refresh the page.')
@@ -526,6 +609,11 @@ export default function BookLessonModal({
       for (const key of selected) {
         const [date, time] = key.split('T')
         if (!date || !time) continue
+        const packTotal = packTotalForSlotDate(packResult, date)
+        if (packTotal == null || packTotal <= 0) {
+          failed.push(`${date} ${time}: Missing lesson pack total for this month.`)
+          continue
+        }
         try {
           await api.getBookingWarning(date, time, student_id)
           await api.bookLesson({
@@ -992,7 +1080,87 @@ export default function BookLessonModal({
           onConfirm={async (n) => {
             setLocalPackOverride(n)
             setPackTotalPromptOpen(false)
-            await submitBookingsWithPackTotal(n)
+            const pr = derivePackTotalForBooking(
+              effectiveLatest,
+              overridePaidLessons,
+              n,
+              selectedSlotKeys
+            )
+            if (pr.mode === 'none') return
+            const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest)
+            if (over) {
+              setOverQuotaState(over)
+              setOverQuotaConfirmOpen(true)
+              return
+            }
+            await submitBookingsWithPackResult(pr)
+          }}
+        />
+      )}
+      {overQuotaConfirmOpen && overQuotaState && (
+        <ConfirmActionModal
+          title="月何回を超える予約"
+          message={`${overQuotaState.label}: 既存 ${overQuotaState.active} 件 + 今回 ${overQuotaState.adding} 件で、現在の月何回（${overQuotaState.paid}）を超えます。月何回を少なくとも ${overQuotaState.minPack} に上げてください。`}
+          confirmLabel="月何回を更新"
+          onClose={() => {
+            setOverQuotaConfirmOpen(false)
+            setOverQuotaState(null)
+          }}
+          onConfirm={() => {
+            setOverQuotaConfirmOpen(false)
+            setOverQuotaEditOpen(true)
+          }}
+        />
+      )}
+      {overQuotaEditOpen && overQuotaState && (
+        <PreBookLessonModal
+          key={overQuotaState.ym}
+          overlayClassName="z-[10003]"
+          initialPackTotal={overQuotaState.minPack}
+          description={`${overQuotaState.label} の月何回を ${overQuotaState.minPack} 以上に設定します。保存すると既存レッスンのタイトル（i/N）をこの回数に合わせて更新し、続けて予約します。`}
+          confirmLabel="Save"
+          onClose={() => {
+            setOverQuotaEditOpen(false)
+            setOverQuotaState(null)
+          }}
+          onConfirm={async (n) => {
+            const sidRaw = resolveBookStudentId(studentId, student)
+            if (sidRaw == null) return
+            const numericId = Number(sidRaw)
+            const student_id = Number.isFinite(numericId) ? numericId : sidRaw
+            setError(null)
+            try {
+              await api.renumberMonthLessonTitles({
+                student_id,
+                month: overQuotaState.ym,
+                pack_total: n,
+              })
+              const fresh = await api.getStudentLatestByMonth(student_id)
+              setLatestByMonthLocal(fresh.latestByMonth ?? null)
+              setLessonMonthSummaries(selectVisibleLessonMonthSummaries(fresh.latestByMonth))
+              setOverQuotaEditOpen(false)
+              setOverQuotaState(null)
+              setLocalPackOverride(n)
+              const pr = derivePackTotalForBooking(
+                fresh.latestByMonth,
+                overridePaidLessons,
+                n,
+                selectedSlotKeys
+              )
+              if (pr.mode === 'none') {
+                setError('月何回を保存しましたが、予約に必要なデータがまだありません。')
+                return
+              }
+              const over2 = checkOverQuotaForSelection(selectedSlotKeys, fresh.latestByMonth)
+              if (over2) {
+                setOverQuotaState(over2)
+                setOverQuotaConfirmOpen(true)
+                return
+              }
+              await submitBookingsWithPackResult(pr)
+            } catch (e) {
+              setError(e?.message || 'Failed to update monthly pack')
+            }
           }}
         />
       )}

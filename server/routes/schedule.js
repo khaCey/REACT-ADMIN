@@ -452,6 +452,74 @@ router.get('/week', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/schedule/renumber-month-titles
+ * Upsert `lessons` pack size for the month and rewrite `monthly_schedule.title` as `Name (Loc) i/N` in start order.
+ */
+router.post('/renumber-month-titles', async (req, res) => {
+  try {
+    const { student_id, month, pack_total } = req.body || {};
+    const monthKey = String(month || '').trim().slice(0, 7);
+    const pack = Math.max(1, parseInt(pack_total, 10) || 0);
+    const sid = Number(student_id);
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey) || !Number.isFinite(sid) || sid <= 0) {
+      return res.status(400).json({ error: 'student_id, month (YYYY-MM), and pack_total are required' });
+    }
+    if (!pack) {
+      return res.status(400).json({ error: 'pack_total must be at least 1' });
+    }
+
+    const studentResult = await query('SELECT id, name FROM students WHERE id = $1', [sid]);
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    const studentName = String(studentResult.rows[0].name || '').trim();
+    if (!studentName) {
+      return res.status(400).json({ error: 'Student has no name' });
+    }
+
+    await query(
+      `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
+       ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
+      [sid, monthKey, pack]
+    );
+
+    const rows = await query(
+      `SELECT event_id, student_name, title
+       FROM monthly_schedule
+       WHERE student_id = $1
+         AND to_char(date, 'YYYY-MM') = $2
+         AND (status IS NULL OR status <> 'cancelled')
+       ORDER BY start ASC`,
+      [sid, monthKey]
+    );
+
+    let locationLabel = 'Cafe';
+    const locRe = /\(([^)]+)\)\s+\d+\/\d+/;
+    for (const r of rows.rows) {
+      const m = String(r.title || '').match(locRe);
+      if (m) {
+        locationLabel = m[1].trim();
+        break;
+      }
+    }
+
+    let idx = 0;
+    for (const r of rows.rows) {
+      idx += 1;
+      const newTitle = `${studentName} (${locationLabel}) ${idx}/${pack}`;
+      await query(
+        `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
+        [newTitle, r.event_id, r.student_name]
+      );
+    }
+
+    res.json({ ok: true, updated: rows.rows.length, month: monthKey, pack_total: pack });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** GET /api/schedule/booking-warning?date=YYYY-MM-DD&time=HH:MM&student_id= - warn if this booking would leave a teacher with no break in 5+ hours. Does not block. */
 router.get('/booking-warning', async (req, res) => {
   try {
