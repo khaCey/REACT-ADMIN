@@ -84,6 +84,49 @@ function parseClock5(val) {
   return /^\d{2}:\d{2}$/.test(s) ? s : '';
 }
 
+function normalizeTeacherNameKey(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+/** Calendar / GAS often stores titles like "Preset break 12:00-13:00"; use "{Name}'s Break". */
+function displayBreakTitleFromCalendar(teacherName, rawTitle) {
+  const tn = String(teacherName || '').trim() || 'Staff';
+  const t = rawTitle != null ? String(rawTitle).trim() : '';
+  if (!t || /^preset\s+break/i.test(t)) {
+    return `${tn}'s Break`;
+  }
+  return t;
+}
+
+/**
+ * Match `teacher_break_presets` for a calendar `staff_break` hour (teacher, weekday, time in range).
+ * Lets the UI attach preset_id so breaks stay editable even when synced from Calendar.
+ */
+function matchPresetForSlot(teacherName, dateStr, timeStr, presetRows) {
+  const wd = dateWeekday(dateStr);
+  if (!Number.isFinite(wd)) return null;
+  const tn = normalizeTeacherNameKey(teacherName);
+  if (!tn) return null;
+  for (const pr of presetRows || []) {
+    if (normalizeTeacherNameKey(pr.teacher_name) !== tn) continue;
+    const pwd = parseInt(pr.weekday, 10);
+    if (!Number.isFinite(pwd) || pwd !== wd) continue;
+    const start = parseClock5(pr.start_time);
+    const end = parseClock5(pr.end_time);
+    if (!start || !end) continue;
+    if (!hourInHalfOpenRange(timeStr, start, end)) continue;
+    const presetId = parseInt(pr.id, 10);
+    if (!Number.isFinite(presetId)) continue;
+    return {
+      preset_id: presetId,
+      preset_weekday: pwd,
+      preset_start_time: start,
+      preset_end_time: end,
+    };
+  }
+  return null;
+}
+
 function dateWeekday(dateStr) {
   const d = new Date(`${dateStr}T12:00:00Z`);
   return Number.isNaN(d.getTime()) ? NaN : d.getUTCDay();
@@ -176,11 +219,23 @@ router.get('/week', async (req, res) => {
         const key = `${dateStr}T${timeStr}`;
         const tn = (r.teacher_name != null ? String(r.teacher_name).trim() : '') || 'Staff';
         if (!staffBreakBySlot[key]) staffBreakBySlot[key] = [];
-        staffBreakBySlot[key].push({
+        const rawTitle = r.title != null ? String(r.title).trim() : '';
+        const title = displayBreakTitleFromCalendar(tn, rawTitle);
+        const presetMatch = matchPresetForSlot(tn, dateStr, timeStr, breakPresetsResult.rows || []);
+        const entry = {
           teacher_name: tn,
-          title: (r.title != null ? String(r.title).trim() : '') || null,
-          break_source: 'schedule',
-        });
+          title,
+          break_source: presetMatch ? 'preset' : 'schedule',
+          ...(presetMatch
+            ? {
+                preset_id: presetMatch.preset_id,
+                preset_weekday: presetMatch.preset_weekday,
+                preset_start_time: presetMatch.preset_start_time,
+                preset_end_time: presetMatch.preset_end_time,
+              }
+            : {}),
+        };
+        staffBreakBySlot[key].push(entry);
         continue;
       }
       const key = `${dateStr}T${timeStr}`;
@@ -273,6 +328,21 @@ router.get('/week', async (req, res) => {
             : `schedule:${b.teacher_name}::${b.title || ''}`;
         if (seen.has(dedupe)) return false;
         seen.add(dedupe);
+        return true;
+      });
+    }
+    /** Drop calendar-only rows when the same teacher already has a preset-backed row this hour (avoid duplicate chips). */
+    for (const k of Object.keys(staffBreakBySlot)) {
+      const list = staffBreakBySlot[k] || [];
+      const presetTeachers = new Set(
+        list
+          .filter((b) => b.preset_id != null && Number.isFinite(Number(b.preset_id)))
+          .map((b) => normalizeTeacherNameKey(b.teacher_name))
+      );
+      staffBreakBySlot[k] = list.filter((b) => {
+        if (b.break_source === 'schedule' && presetTeachers.has(normalizeTeacherNameKey(b.teacher_name))) {
+          return false;
+        }
         return true;
       });
     }

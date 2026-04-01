@@ -130,6 +130,16 @@ function formatWeekLabel(dateStr) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+/** Calendar sync may still store "Preset break …"; show "{Name}'s Break" instead. */
+function formatBreakChipLabel(b) {
+  const name = String(b?.teacher_name || 'Staff').trim()
+  const raw = String(b?.title || '').trim()
+  if (!raw || /^preset\s+break/i.test(raw)) {
+    return `${name}'s Break`
+  }
+  return raw
+}
+
 /** Calendar month YYYY-MM in Asia/Tokyo (matches server latest-by-month keys). */
 function getCurrentYyyyMmJst() {
   const jst = new Date(Date.now() + JST_OFFSET_MS)
@@ -863,7 +873,7 @@ export default function BookLessonModal({
                               {staffBreaks.length > 0 && (
                                 <div className="flex flex-col gap-px shrink-0 w-full min-w-0">
                                   {staffBreaks.map((b, bi) => {
-                                    const label = b.title?.trim() || `${b.teacher_name}'s Break`
+                                    const label = formatBreakChipLabel(b)
                                     const isPreset =
                                       b.preset_id != null && Number.isFinite(Number(b.preset_id))
                                     if (canEditBreakPresets && isPreset) {
