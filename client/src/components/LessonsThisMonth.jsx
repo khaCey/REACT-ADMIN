@@ -394,7 +394,7 @@ export default function LessonsThisMonth({
                   onClick={() => openChangeLessonCount(current)}
                   className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
                 >
-                  回数変化
+                  月回数変更
                 </button>
               ) : null}
               {onBookLesson ? (
@@ -428,7 +428,7 @@ export default function LessonsThisMonth({
                 onClick={() => openChangeLessonCount(current)}
                 className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
               >
-                回数変化
+                月回数変更
               </button>
             ) : null}
             {onBookLesson ? (
