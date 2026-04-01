@@ -624,31 +624,34 @@ export default function BookLessonModal({
             </div>
 
             <div className="relative bg-white flex flex-col flex-1 min-h-0 overflow-hidden" style={{ maxHeight: '60vh', minHeight: 320 }}>
-                <div className="flex-shrink-0 flex bg-green-600 text-white shadow-md z-10">
-                  <div className="flex-shrink-0 w-14 px-3 py-2.5 text-sm font-semibold text-center border-r border-white/20">
+                <div
+                  className="flex-shrink-0 grid bg-green-600 text-white shadow-md z-10"
+                  style={{ gridTemplateColumns: `3.5rem repeat(${weekDates.length}, minmax(0, 1fr))` }}
+                >
+                  <div className="px-3 py-2.5 text-sm font-semibold text-center border-r border-white/20">
                     Time
                   </div>
                   {weekDates.map((dateStr) => (
-                    <div key={dateStr} className="flex-1 min-w-0 px-3 py-2.5 text-sm font-semibold text-center">
+                    <div key={dateStr} className="min-w-0 px-3 py-2.5 text-sm font-semibold text-center">
                       <div>{DAY_LABELS[getJstDayIndex(dateStr)]}</div>
                       <div className="text-xs font-normal text-white/90 mt-0.5">{dateStr.slice(8)}</div>
                     </div>
                   ))}
                 </div>
-                <div className="flex flex-1 min-h-0 overflow-y-auto pt-0.5">
-                  <div className="flex-shrink-0 w-14 border-r border-gray-100">
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pt-0.5">
+                  <div
+                    className="booking-week-grid grid w-full min-w-0"
+                    style={{
+                      gridTemplateColumns: `3.5rem repeat(${weekDates.length}, minmax(0, 1fr))`,
+                      gridAutoRows: 'minmax(56px, auto)',
+                    }}
+                  >
                     {TIME_SLOTS.map((timeStr) => (
-                      <div
-                        key={timeStr}
-                        className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-b border-gray-100 min-h-[36px]"
-                      >
-                        {timeStr}
-                      </div>
-                    ))}
-                  </div>
-                  {weekDates.map((dateStr) => (
-                      <div key={dateStr} className="flex-1 min-w-0 relative flex flex-col">
-                        {TIME_SLOTS.map((timeStr) => {
+                      <React.Fragment key={timeStr}>
+                        <div className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-b border-r border-gray-100 min-h-0 min-w-0">
+                          {timeStr}
+                        </div>
+                        {weekDates.map((dateStr) => {
                           const key = `${dateStr}T${timeStr}`
                           const booked = slots[key] || 0
                           const teachers = teachersBySlot[key] || []
@@ -715,8 +718,8 @@ export default function BookLessonModal({
                           const showStatusBead = !isSelected && !!statusBead
                           return (
                             <div
-                              key={timeStr}
-                              className="flex min-h-[36px] flex-col gap-0.5 border-b border-r border-gray-100 py-0.5 px-0.5"
+                              key={key}
+                              className="isolate min-h-0 min-w-0 overflow-hidden flex flex-col gap-0.5 border-b border-r border-gray-100 py-1 px-0.5"
                             >
                               <button
                                 type="button"
@@ -731,7 +734,7 @@ export default function BookLessonModal({
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
-                                className={`booking-slot-btn flex-1 min-h-[28px] px-2 transition-colors ${
+                                className={`booking-slot-btn flex-1 min-h-0 min-w-0 w-full px-2 rounded-sm transition-colors ${
                                   isSelected
                                     ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
                                     : isPast
@@ -779,8 +782,9 @@ export default function BookLessonModal({
                             </div>
                           )
                         })}
-                      </div>
-                  ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
                 </div>
             </div>
           </div>
