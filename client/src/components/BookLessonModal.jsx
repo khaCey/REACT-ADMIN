@@ -740,12 +740,12 @@ export default function BookLessonModal({
                                       ? 'bg-violet-50 text-violet-800 cursor-not-allowed'
                                       : capacity === 0
                                         ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                                        : mixBlocked
-                                          ? 'bg-indigo-50 text-indigo-800 cursor-not-allowed'
-                                          : breakBlocked
-                                            ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
-                                            : isFull
-                                              ? 'bg-amber-50 text-amber-800 cursor-default'
+                                        : isFull
+                                          ? 'bg-amber-50 text-amber-800 cursor-default'
+                                          : mixBlocked
+                                            ? 'bg-indigo-50 text-indigo-800 cursor-not-allowed'
+                                            : breakBlocked
+                                              ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
                                               : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
@@ -758,7 +758,7 @@ export default function BookLessonModal({
                                   </span>
                                 </div>
                                 <span
-                                  className={`booking-slot-meta ${mixBlocked ? 'text-indigo-700/85' : ''}`}
+                                  className={`booking-slot-meta ${mixBlocked && !isFull ? 'text-indigo-700/85' : ''}`}
                                 >
                                   {slotTypeLabel ?? '—'}
                                 </span>
