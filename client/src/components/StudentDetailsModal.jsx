@@ -281,7 +281,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                 <LessonsThisMonth
                   studentId={studentId}
                   student={student}
-                  onBookLesson={bookingExcluded ? undefined : () => setBookLessonModal(true)}
+                  onBookLesson={bookingExcluded ? undefined : openBookingFlow}
                   onLoadingChange={setLessonsLoading}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />

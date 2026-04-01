@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 
-export default function PreBookLessonModal({ onClose, onConfirm }) {
+export default function PreBookLessonModal({ onClose, onConfirm, overlayClassName, description }) {
   const [packTotal, setPackTotal] = useState('4')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -22,10 +22,15 @@ export default function PreBookLessonModal({ onClose, onConfirm }) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+    <div
+      className={`fixed inset-0 flex items-center justify-center bg-black/50 p-4 ${overlayClassName ?? 'z-[10001]'}`}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="w-full max-w-md rounded-xl bg-white shadow-xl ring-1 ring-black/5">
         <div className="border-b border-gray-200 px-5 py-3">
           <h3 className="text-base font-semibold text-gray-900">月何回</h3>
+          {description ? <p className="mt-1.5 text-sm text-gray-600 font-normal">{description}</p> : null}
         </div>
         <div className="px-5 py-4">
           <label className="block text-sm font-medium text-gray-700">月何回</label>

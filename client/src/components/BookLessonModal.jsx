@@ -5,6 +5,7 @@ import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ExtendShiftModal from './ExtendShiftModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
+import PreBookLessonModal from './PreBookLessonModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
@@ -167,6 +168,17 @@ function getCurrentMonthSummary(latestByMonth) {
   return toLessonMonthSummary(ym, latestByMonth[ym])
 }
 
+/** POST /book `pack_total`: inline or parent override, else current JST month paid count from latest-by-month. */
+function derivePackTotalForBooking(preloadedLatestByMonth, overridePaidLessons, localPackOverride) {
+  const loc = Number(localPackOverride)
+  if (Number.isFinite(loc) && loc > 0) return loc
+  const overrideTotal = Number(overridePaidLessons)
+  if (Number.isFinite(overrideTotal) && overrideTotal > 0) return overrideTotal
+  const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
+  if (monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0) return monthSummary.paid
+  return undefined
+}
+
 /** True when JST "today" is in the last END_OF_MONTH_LOOKAHEAD_DAYS of the month. */
 function isEndOfMonthJst() {
   const jst = new Date(Date.now() + JST_OFFSET_MS)
@@ -268,6 +280,9 @@ export default function BookLessonModal({
   const [hasLoadedWeekOnce, setHasLoadedWeekOnce] = useState(false)
   const [error, setError] = useState(null)
   const [selectedSlotKeys, setSelectedSlotKeys] = useState([])
+  const [packTotalPromptOpen, setPackTotalPromptOpen] = useState(false)
+  /** Set when user confirms 月何回 inside this modal (persists until modal closes). */
+  const [localPackOverride, setLocalPackOverride] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
@@ -480,19 +495,29 @@ export default function BookLessonModal({
       setError('Please select one or more slots first.')
       return
     }
+    const packTotal = derivePackTotalForBooking(
+      preloadedLatestByMonth,
+      overridePaidLessons,
+      localPackOverride
+    )
+    if (packTotal == null || packTotal <= 0) {
+      setPackTotalPromptOpen(true)
+      return
+    }
+    await submitBookingsWithPackTotal(packTotal)
+  }
+
+  const submitBookingsWithPackTotal = async (packTotal) => {
+    const sidRaw = resolveBookStudentId(studentId, student)
+    if (sidRaw == null || sidRaw === '') {
+      setError('Missing student. Close and reopen booking, or refresh the page.')
+      return
+    }
     const numericId = Number(sidRaw)
     const student_id = Number.isFinite(numericId) ? numericId : sidRaw
     setError(null)
     setSubmitting(true)
     try {
-      const monthSummary = getCurrentMonthSummary(preloadedLatestByMonth)
-      const overrideTotal = Number(overridePaidLessons)
-      const packTotal =
-        Number.isFinite(overrideTotal) && overrideTotal > 0
-          ? overrideTotal
-          : monthSummary && typeof monthSummary.paid === 'number' && monthSummary.paid > 0
-            ? monthSummary.paid
-            : undefined
       const selected = [...selectedSlotKeys].sort()
       const failed = []
       const touchedMonths = new Set()
@@ -959,6 +984,18 @@ export default function BookLessonModal({
   return createPortal(
     <>
       {modal}
+      {packTotalPromptOpen && (
+        <PreBookLessonModal
+          overlayClassName="z-[10002]"
+          description="No monthly lesson total was found from payments for this flow. Enter 月何回 (lessons in the pack) so bookings can be labeled in the calendar."
+          onClose={() => setPackTotalPromptOpen(false)}
+          onConfirm={async (n) => {
+            setLocalPackOverride(n)
+            setPackTotalPromptOpen(false)
+            await submitBookingsWithPackTotal(n)
+          }}
+        />
+      )}
       {extendShiftOpen && (
         <ExtendShiftModal onClose={() => setExtendShiftOpen(false)} />
       )}
