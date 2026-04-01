@@ -263,6 +263,8 @@ export default function BookLessonModal({
   /** Keys -> staff break entries from `lesson_kind = staff_break` (non-booking display). */
   const [staffBreakBySlot, setStaffBreakBySlot] = useState({})
   const [loading, setLoading] = useState(true)
+  /** Monday YYYY-MM-DD of the week that `slots` / `teachersBySlot` currently describe (null until first load). */
+  const [scheduleWeekStart, setScheduleWeekStart] = useState(null)
   const [hasLoadedWeekOnce, setHasLoadedWeekOnce] = useState(false)
   const [error, setError] = useState(null)
   const [selectedSlotKeys, setSelectedSlotKeys] = useState([])
@@ -321,6 +323,7 @@ export default function BookLessonModal({
       setBreakRuleBlocked(cached.breakRuleBlocked || {})
       setOwnerShamBlocked(cached.ownerShamBlocked || {})
       setStaffBreakBySlot(cached.staffBreakBySlot || {})
+      setScheduleWeekStart(weekStartStr)
       setHasLoadedWeekOnce(true)
       setLoading(false)
       return
@@ -339,6 +342,7 @@ export default function BookLessonModal({
         setBreakRuleBlocked(data.breakRuleBlocked || {})
         setOwnerShamBlocked(data.ownerShamBlocked || {})
         setStaffBreakBySlot(data.staffBreakBySlot || {})
+        setScheduleWeekStart(weekStartStr)
         setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
         setHasLoadedWeekOnce(true)
       })
@@ -405,6 +409,9 @@ export default function BookLessonModal({
   useEffect(() => {
     // Invalidate selections only for the *visible* week. Keys from other weeks are kept so
     // prev/next navigation does not wipe a multi-week selection (their capacity is not in `slots`).
+    // Skip until `slots` match the visible week: after changing week, state still holds the previous
+    // week's map briefly; validating then would drop all selections for the week we navigated to.
+    if (scheduleWeekStart !== weekStartStr) return
     const weekDateSet = new Set(
       Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
     )
@@ -425,6 +432,7 @@ export default function BookLessonModal({
       })
     )
   }, [
+    scheduleWeekStart,
     weekStartStr,
     slots,
     teachersBySlot,
@@ -534,6 +542,7 @@ export default function BookLessonModal({
         setBreakRuleBlocked(weekData.breakRuleBlocked || {})
         setOwnerShamBlocked(weekData.ownerShamBlocked || {})
         setStaffBreakBySlot(weekData.staffBreakBySlot || {})
+        setScheduleWeekStart(weekStartStr)
       }
       if (latestRes?.latestByMonth) {
         setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
@@ -559,6 +568,7 @@ export default function BookLessonModal({
       setBreakRuleBlocked(data.breakRuleBlocked || {})
       setOwnerShamBlocked(data.ownerShamBlocked || {})
       setStaffBreakBySlot(data.staffBreakBySlot || {})
+      setScheduleWeekStart(weekStartStr)
       setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
     } catch (e) {
       setError(e.message)
