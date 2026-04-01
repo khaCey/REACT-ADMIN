@@ -53,16 +53,9 @@ function normalizeTeacherNameForOwner(s) {
 
 /** Staff id from OWNER_COURSE_STAFF_ID; resolves `staff.name` to match `teacher_schedules.teacher_name`. */
 async function resolveOwnerCourseTeacherName() {
-  const fallbackName = 'Sham';
-  const raw = process.env.OWNER_COURSE_STAFF_ID;
-  if (raw == null || String(raw).trim() === '') return fallbackName;
-  const id = parseInt(String(raw).trim(), 10);
-  if (!Number.isFinite(id)) return fallbackName;
-  const r = await query(
-    `SELECT name FROM staff WHERE id = $1 AND COALESCE(active, TRUE) = TRUE`,
-    [id]
-  );
-  return (r.rows[0]?.name || '').trim() || fallbackName;
+  // Product rule: owner's course is strictly tied to Sham's shift.
+  // Keep this explicit so env misconfiguration cannot widen availability.
+  return 'Sham';
 }
 
 function deriveLessonKindFromStudent(student) {
