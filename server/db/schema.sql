@@ -87,6 +87,20 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NO
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES students(id);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_mode VARCHAR(20) NOT NULL DEFAULT 'unknown';
 
+-- Linked reschedules: source lesson -> destination lesson
+CREATE TABLE IF NOT EXISTS reschedules (
+  id SERIAL PRIMARY KEY,
+  from_event_id VARCHAR(255) NOT NULL,
+  from_student_name VARCHAR(255) NOT NULL,
+  to_event_id VARCHAR(255) NOT NULL,
+  to_student_name VARCHAR(255) NOT NULL,
+  created_by_staff_id INTEGER REFERENCES staff(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT reschedules_from_unique UNIQUE (from_event_id, from_student_name)
+);
+CREATE INDEX IF NOT EXISTS idx_reschedules_from ON reschedules(from_event_id, from_student_name);
+CREATE INDEX IF NOT EXISTS idx_reschedules_to ON reschedules(to_event_id, to_student_name);
+
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (
   date DATE,

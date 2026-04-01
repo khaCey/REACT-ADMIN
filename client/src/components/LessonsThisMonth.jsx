@@ -36,9 +36,9 @@ function addOneMonthYyyyMm(yyyyMm) {
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60' },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60' },
-  rescheduled: { accent: 'bg-amber-500', bg: 'bg-amber-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60' },
+  rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60' },
   demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60' },
-  unscheduled: { accent: 'bg-red-500', bg: 'bg-red-50', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60' },
+  unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60' },
 }
 
 const CARD_SIZES = {
@@ -47,7 +47,11 @@ const CARD_SIZES = {
   large: { date: 'text-[0.8rem]', dow: 'text-[0.7rem]', time: 'text-[0.75rem]', status: 'text-[0.7rem]', dot: 'h-2 w-2', pad: 'px-2 py-1.5', accent: 'w-1.5' },
 }
 
+
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
+  const rawStatus = String(lesson.status || '').toLowerCase()
+  // Keep rescheduled source lessons orange in this list view.
+  const displayStatus = lesson.rescheduledTo ? 'rescheduled' : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -56,16 +60,16 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const dow = date && !isNaN(date.getTime()) ? DOW[date.getDay()] : ''
   const dayStr = isUnscheduled ? '--' : (lesson.day && lesson.day !== '--' ? `${parseInt(lesson.day)}日` : '--')
   const timeStr = isUnscheduled ? '--' : (lesson.time ? lesson.time.replace(':', '：') : '--')
-  const title = (lesson.status || '').charAt(0).toUpperCase() + (lesson.status || '').slice(1)
-  const styles = CARD_STYLES[lesson.status] || CARD_STYLES.cancelled
+  const title = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)
+  const styles = CARD_STYLES[displayStatus] || CARD_STYLES.cancelled
   const sz = CARD_SIZES[size] || CARD_SIZES.normal
 
   return (
     <button
       type="button"
       onClick={() => onClick?.(lesson)}
-      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-inset ${styles.hoverRing} cursor-pointer overflow-hidden`}
-      data-status={lesson.status}
+      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-inset ${styles.hoverRing} cursor-pointer overflow-hidden`}
+      data-status={displayStatus}
       aria-label={`Lesson ${dayStr} ${timeStr} (${title})`}
     >
       <span className={`absolute left-0 top-0 h-full ${sz.accent} rounded-l-lg ${styles.accent}`} />
@@ -140,32 +144,48 @@ export default function LessonsThisMonth({
   const [changeCountOpen, setChangeCountOpen] = useState(false)
   const [changeCountMonthKey, setChangeCountMonthKey] = useState(null)
 
-  const handleCancel = (lesson) => {
+  const handleCancel = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
-    api.cancelScheduleEvent(lesson.eventID).then(() => {
+    try {
+      await api.cancelScheduleEvent(lesson.eventID)
       success('Lesson cancelled')
-      return refetch()
-    }).catch((e) => setActionError(e.message))
+      try {
+        await refetch()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Cancelled, but refresh failed')
+      }
+      return true
+    } catch (e) {
+      setActionError(e.message)
+      return false
+    }
   }
-  const handleUncancel = (lesson) => {
+  const handleUncancel = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
-    api.uncancelScheduleEvent(lesson.eventID).then(() => {
+    try {
+      await api.uncancelScheduleEvent(lesson.eventID)
       success('Lesson uncancelled')
-      return refetch()
-    }).catch((e) => setActionError(e.message))
+      try {
+        await refetch()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Uncancelled, but refresh failed')
+      }
+      return true
+    } catch (e) {
+      setActionError(e.message)
+      return false
+    }
   }
   const handleReschedule = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
-    // Reschedule requires new date/time – for now just open a simple prompt; could be a proper modal later
-    const newDate = prompt('New date (YYYY-MM-DD):')
-    if (!newDate) return
-    api.rescheduleScheduleEvent(lesson.eventID, { date: newDate }).then(() => {
-      success('Lesson rescheduled')
-      return refetch()
-    }).catch((e) => setActionError(e.message))
+    if (typeof onBookLesson !== 'function') {
+      setActionError('Booking modal is not available for reschedule.')
+      return
+    }
+    onBookLesson({ rescheduleSource: lesson })
   }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
@@ -324,16 +344,14 @@ export default function LessonsThisMonth({
           (() => {
             const count = monthData.lessons.length
             const cardSize = count <= 5 ? 'large' : count <= 10 ? 'normal' : 'compact'
-            const oneRow = count <= 6
-            const twoRows = count >= 7
             return (
-              <div className="flex flex-1 flex-col justify-center min-h-0 overflow-hidden">
+              <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
                 <div
-                  className={`flex flex-col min-h-0 overflow-hidden ${oneRow ? 'h-1/2' : 'flex-1'}`}
+                  className="flex flex-col min-h-0 overflow-hidden flex-1"
                 >
                   <div
-                    className="lr-cards grid gap-1 py-1 pr-1 h-full w-full overflow-hidden grid-cols-[repeat(auto-fill,minmax(88px,1fr))]"
-                    style={twoRows ? { gridTemplateRows: 'repeat(2, 1fr)' } : undefined}
+                    className="lr-cards grid gap-1 py-1 pr-1 h-full w-full overflow-hidden grid-cols-[repeat(auto-fill,minmax(98px,1fr))]"
+                    style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
                   >
                     {monthData.lessons.map((lesson, i) => (
                       <LessonCard

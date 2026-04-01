@@ -317,6 +317,7 @@ export default function BookLessonModal({
   student,
   preloadedLatestByMonth,
   overridePaidLessons = null,
+  rescheduleSource = null,
   onClose,
   onBooked,
 }) {
@@ -353,6 +354,9 @@ export default function BookLessonModal({
   const [overQuotaState, setOverQuotaState] = useState(null)
   const [overQuotaConfirmOpen, setOverQuotaConfirmOpen] = useState(false)
   const [overQuotaEditOpen, setOverQuotaEditOpen] = useState(false)
+  /** Slot that triggered click-time over-quota warning (kept pending until pack is updated). */
+  const [pendingOverQuotaSlotKey, setPendingOverQuotaSlotKey] = useState(null)
+  const [successModal, setSuccessModal] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
@@ -546,6 +550,7 @@ export default function BookLessonModal({
     const key = `${dateStr}T${timeStr}`
     if (selectedSlotKeys.includes(key)) {
       setSelectedSlotKeys((prev) => prev.filter((k) => k !== key))
+      if (pendingOverQuotaSlotKey === key) setPendingOverQuotaSlotKey(null)
       return
     }
     if (studentBookedSlots[key]) return
@@ -556,7 +561,19 @@ export default function BookLessonModal({
     if (isKidAdultMixBlocked(student, slotMix[key])) return
     if (breakRuleBlocked[key]) return
     if (ownerShamBlocked[key]) return
-    setSelectedSlotKeys((prev) => [...prev, key])
+    if (rescheduleSource) {
+      setSelectedSlotKeys([key])
+      return
+    }
+    const nextSelected = [...selectedSlotKeys, key]
+    const over = checkOverQuotaForSelection(nextSelected, effectiveLatest)
+    if (over) {
+      setOverQuotaState(over)
+      setPendingOverQuotaSlotKey(key)
+      setOverQuotaConfirmOpen(true)
+      return
+    }
+    setSelectedSlotKeys(nextSelected)
   }
 
   const effectiveLatest = latestByMonthLocal ?? preloadedLatestByMonth
@@ -569,6 +586,56 @@ export default function BookLessonModal({
     }
     if (selectedSlotKeys.length === 0) {
       setError('Please select one or more slots first.')
+      return
+    }
+    if (rescheduleSource) {
+      if (selectedSlotKeys.length !== 1) {
+        setError('Select exactly one target slot for reschedule.')
+        return
+      }
+      const [date, time] = selectedSlotKeys[0].split('T')
+      setSubmitting(true)
+      setError(null)
+      try {
+        await api.rescheduleLesson({
+          source_event_id: rescheduleSource.eventID,
+          source_student_name: student?.Name || student?.name || '',
+          student_id: sidRaw,
+          date,
+          time,
+          duration_minutes: 50,
+          location: 'Cafe',
+        })
+        success('Lesson rescheduled')
+        onBooked?.()
+        const [weekData, latestRes] = await Promise.all([
+          api.getWeekSchedule(weekStartStr, { studentId: sidRaw }).catch(() => null),
+          api.getStudentLatestByMonth(sidRaw).catch(() => null),
+        ])
+        if (weekData) {
+          setSlots(weekData.slots || {})
+          setTeachersBySlot(weekData.teachersBySlot || {})
+          setSlotTypes(weekData.slotTypes || {})
+          setSlotMix(weekData.slotMix || {})
+          setStudentBookedSlots(weekData.studentBookedSlots || {})
+          setBreakRuleBlocked(weekData.breakRuleBlocked || {})
+          setOwnerShamBlocked(weekData.ownerShamBlocked || {})
+          setStaffBreakBySlot(weekData.staffBreakBySlot || {})
+          setScheduleWeekStart(weekStartStr)
+        }
+        if (latestRes?.latestByMonth) {
+          setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
+        }
+        setSelectedSlotKeys([])
+        setSuccessModal({
+          title: 'Reschedule completed',
+          message: 'The lesson was rescheduled successfully.',
+        })
+      } catch (e) {
+        setError(e?.message || 'Failed to reschedule lesson')
+      } finally {
+        setSubmitting(false)
+      }
       return
     }
     const packResult = derivePackTotalForBooking(
@@ -590,7 +657,7 @@ export default function BookLessonModal({
     await submitBookingsWithPackResult(packResult)
   }
 
-  const submitBookingsWithPackResult = async (packResult) => {
+  const submitBookingsWithPackResult = async (packResult, slotKeysOverride = null) => {
     const sidRaw = resolveBookStudentId(studentId, student)
     if (sidRaw == null || sidRaw === '') {
       setError('Missing student. Close and reopen booking, or refresh the page.')
@@ -601,7 +668,7 @@ export default function BookLessonModal({
     setError(null)
     setSubmitting(true)
     try {
-      const selected = [...selectedSlotKeys].sort()
+      const selected = [...(slotKeysOverride ?? selectedSlotKeys)].sort()
       const failed = []
       const touchedMonths = new Set()
       let successCount = 0
@@ -659,6 +726,12 @@ export default function BookLessonModal({
       }
       if (latestRes?.latestByMonth) {
         setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
+      }
+      if (successCount > 0 && failed.length === 0) {
+        setSuccessModal({
+          title: 'Booking completed',
+          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} booked successfully.`,
+        })
       }
     } catch (e) {
       setError(e.message)
@@ -769,6 +842,11 @@ export default function BookLessonModal({
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
               <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">Book a New Lesson</h3>
+              {rescheduleSource && (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  Reschedule mode: pick one new slot to move this lesson.
+                </p>
+              )}
               <p className="text-xs text-gray-600 mt-0.5">
                 {studentName} {studentKanji ? `(${studentKanji})` : ''}
               </p>
@@ -887,9 +965,7 @@ export default function BookLessonModal({
                             !isPast && capacity > 0 && !mixBlocked && !alreadyYours && !breakBlocked && !shamBlocked
                               ? isFull
                                 ? 'bg-red-500'
-                                : oneLeft
-                                  ? 'bg-orange-500'
-                                  : 'bg-green-500'
+                                : null
                               : null
                           const mixLabel =
                             mixBlocked && !isPast && capacity > 0 && !isFull && !alreadyYours
@@ -919,11 +995,7 @@ export default function BookLessonModal({
                                   ? 'Past'
                                   : capacity === 0
                                     ? '—'
-                                    : isFull
-                                      ? `${booked} lesson${booked > 1 ? 's' : ''}`
-                                      : booked > 0
-                                        ? `${booked} lesson${booked > 1 ? 's' : ''}`
-                                        : 'Book'
+                                    : `${booked} / ${capacity} slots`
                           const bookingUnavailable =
                             isPast ||
                             capacity === 0 ||
@@ -1054,7 +1126,11 @@ export default function BookLessonModal({
               disabled={submitting || selectedSlotKeys.length === 0}
               className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              {submitting ? 'Submitting...' : `Submit selected (${selectedSlotKeys.length})`}
+              {submitting
+                ? 'Submitting...'
+                : rescheduleSource
+                  ? 'Confirm reschedule'
+                  : `Submit selected (${selectedSlotKeys.length})`}
             </button>
             <button
               type="button"
@@ -1105,6 +1181,7 @@ export default function BookLessonModal({
           onClose={() => {
             setOverQuotaConfirmOpen(false)
             setOverQuotaState(null)
+            setPendingOverQuotaSlotKey(null)
           }}
           onConfirm={() => {
             setOverQuotaConfirmOpen(false)
@@ -1122,6 +1199,7 @@ export default function BookLessonModal({
           onClose={() => {
             setOverQuotaEditOpen(false)
             setOverQuotaState(null)
+            setPendingOverQuotaSlotKey(null)
           }}
           onConfirm={async (n) => {
             const sidRaw = resolveBookStudentId(studentId, student)
@@ -1145,22 +1223,45 @@ export default function BookLessonModal({
                 fresh.latestByMonth,
                 overridePaidLessons,
                 n,
-                selectedSlotKeys
+                pendingOverQuotaSlotKey && !selectedSlotKeys.includes(pendingOverQuotaSlotKey)
+                  ? [...selectedSlotKeys, pendingOverQuotaSlotKey]
+                  : selectedSlotKeys
               )
               if (pr.mode === 'none') {
                 setError('月何回を保存しましたが、予約に必要なデータがまだありません。')
                 return
               }
-              const over2 = checkOverQuotaForSelection(selectedSlotKeys, fresh.latestByMonth)
+              const selectedAfterUpdate =
+                pendingOverQuotaSlotKey && !selectedSlotKeys.includes(pendingOverQuotaSlotKey)
+                  ? [...selectedSlotKeys, pendingOverQuotaSlotKey]
+                  : selectedSlotKeys
+              const over2 = checkOverQuotaForSelection(selectedAfterUpdate, fresh.latestByMonth)
               if (over2) {
                 setOverQuotaState(over2)
                 setOverQuotaConfirmOpen(true)
                 return
               }
-              await submitBookingsWithPackResult(pr)
+              setPendingOverQuotaSlotKey(null)
+              setSelectedSlotKeys(selectedAfterUpdate)
+              await submitBookingsWithPackResult(pr, selectedAfterUpdate)
             } catch (e) {
               setError(e?.message || 'Failed to update monthly pack')
             }
+          }}
+        />
+      )}
+      {successModal && (
+        <ConfirmActionModal
+          title={successModal.title}
+          message={successModal.message}
+          confirmLabel="OK"
+          onClose={() => {
+            setSuccessModal(null)
+            onClose?.()
+          }}
+          onConfirm={() => {
+            setSuccessModal(null)
+            onClose?.()
           }}
         />
       )}

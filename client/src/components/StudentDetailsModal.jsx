@@ -54,6 +54,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [bookLessonModal, setBookLessonModal] = useState(false)
   const [preBookLessonModal, setPreBookLessonModal] = useState(false)
   const [overridePaidLessons, setOverridePaidLessons] = useState(null)
+  const [rescheduleSourceLesson, setRescheduleSourceLesson] = useState(null)
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   const [noteSearch, setNoteSearch] = useState('')
@@ -191,8 +192,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     return typeof paid === 'number' && paid > 0
   }
 
-  const openBookingFlow = () => {
+  const openBookingFlow = (opts = {}) => {
+    const source = opts?.rescheduleSource || null
     setGuideFocusKey(null)
+    setRescheduleSourceLesson(source)
+    if (source) {
+      setOverridePaidLessons(null)
+      setBookLessonModal(true)
+      return
+    }
     if (hasKnownPaidLessonsThisMonth()) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
@@ -535,8 +543,10 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         onClose={() => {
           setBookLessonModal(false)
           setOverridePaidLessons(null)
+          setRescheduleSourceLesson(null)
         }}
         onBooked={fetchData}
+        rescheduleSource={rescheduleSourceLesson}
       />
     )}
     {preBookLessonModal && !bookingExcluded && (

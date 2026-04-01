@@ -180,3 +180,60 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
   return second.ok ? second : first;
 }
 
+/**
+ * Update a Calendar booking event via GAS (title/color).
+ * @param {string} monthlyEventId
+ * @param {{ title?: string, colorId?: string, clearColor?: boolean }} updates
+ * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
+ */
+export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}) {
+  const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
+  const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
+  if (!baseUrl || !apiKey) {
+    return normalizeResult(null, 'BOOKING_GAS_URL (or CALENDAR_POLL_URL) / BOOKING_API_KEY is not configured');
+  }
+
+  const url = new URL(baseUrl);
+  url.searchParams.set('key', apiKey);
+  const payload = {
+    action: 'lesson_book_update',
+    eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
+    ...(updates?.title ? { title: String(updates.title) } : {}),
+    ...(updates?.colorId ? { colorId: String(updates.colorId) } : {}),
+    ...(updates?.clearColor ? { clearColor: true } : {}),
+    source: 'student-admin-server',
+    timestamp: new Date().toISOString(),
+  };
+  const timeoutMs = Math.min(
+    120000,
+    Math.max(5000, parseInt(process.env.BOOKING_SYNC_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS)
+  );
+
+  const requestOnce = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return normalizeResult(data, `GAS booking update failed (${res.status})`);
+      return normalizeResult(data);
+    } catch (err) {
+      const detail = formatFetchError(err);
+      console.error('[BookingSync] update fetch error:', detail, err?.cause || '');
+      return normalizeResult(null, detail);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const first = await requestOnce();
+  if (first.ok) return first;
+  const second = await requestOnce();
+  return second.ok ? second : first;
+}
+

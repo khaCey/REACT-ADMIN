@@ -162,8 +162,18 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
     for (const yyyyMm of allYyyyMm) {
       const scheduleResult = await query(
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
+                rt.to_event_id AS rescheduled_to_event_id,
+                to_char(mt.date, 'YYYY-MM-DD') AS rescheduled_to_date,
+                to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_to_time,
+                rf.from_event_id AS rescheduled_from_event_id,
+                to_char(mf.date, 'YYYY-MM-DD') AS rescheduled_from_date,
+                to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
+         LEFT JOIN reschedules rt ON rt.from_event_id = m.event_id AND rt.from_student_name = m.student_name
+         LEFT JOIN monthly_schedule mt ON mt.event_id = rt.to_event_id AND mt.student_name = rt.to_student_name
+         LEFT JOIN reschedules rf ON rf.to_event_id = m.event_id AND rf.to_student_name = m.student_name
+         LEFT JOIN monthly_schedule mf ON mf.event_id = rf.from_event_id AND mf.student_name = rf.from_student_name
          WHERE REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
          AND m.date IS NOT NULL
          AND to_char(m.date, 'YYYY-MM') = $2
@@ -186,6 +196,20 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           eventID: r.event_id,
           isGroup: (r.student_count || 0) > 1,
           lessonKind: r.lesson_kind || 'regular',
+          rescheduledTo: r.rescheduled_to_event_id
+            ? {
+                eventID: r.rescheduled_to_event_id,
+                date: r.rescheduled_to_date || null,
+                time: r.rescheduled_to_time || null,
+              }
+            : null,
+          rescheduledFrom: r.rescheduled_from_event_id
+            ? {
+                eventID: r.rescheduled_from_event_id,
+                date: r.rescheduled_from_date || null,
+                time: r.rescheduled_from_time || null,
+              }
+            : null,
         };
       });
 
@@ -201,10 +225,11 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       if (storedPack > 0) {
         paidLessons = storedPack;
       }
-      // Rows from DB only (before unscheduled placeholders). Cancelled rows do not consume pack slots.
-      const scheduledCount = lessons.filter((l) => (l.status || '').toLowerCase() !== 'cancelled').length;
-      const bookedLessonsCount = scheduledCount;
-      const missingCount = Math.max(0, paidLessons - scheduledCount);
+      // Rows from DB only (before unscheduled placeholders).
+      // Rescheduled-source lessons (`rescheduledTo` exists) do not consume monthly count.
+      const countedLessons = lessons.filter((l) => !l.rescheduledTo).length;
+      const bookedLessonsCount = countedLessons;
+      const missingCount = Math.max(0, paidLessons - countedLessons);
       for (let i = 0; i < missingCount; i++) {
         lessons.push({
           day: '--',

@@ -148,6 +148,8 @@ export const api = {
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/uncancel`, { method: 'PATCH' }),
   rescheduleScheduleEvent: (eventId, body) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/reschedule`, { method: 'PATCH', body: JSON.stringify(body) }),
+  rescheduleLesson: (body) =>
+    fetchApi('/schedule/reschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
   removeScheduleEvent: (eventId) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}`, { method: 'DELETE' }),
 

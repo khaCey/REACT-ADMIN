@@ -23,6 +23,7 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
   const style = STATUS_STYLES[status] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
+  const hasRescheduledTo = !!lesson?.rescheduledTo
 
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`
@@ -35,21 +36,21 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
     if (e.target === e.currentTarget) onClose()
   }
 
-  const handleCancel = () => {
-    onCancel?.(lesson, student)
-    onClose()
+  const handleCancel = async () => {
+    const ok = await onCancel?.(lesson, student)
+    if (ok !== false) onClose()
   }
-  const handleReschedule = () => {
-    onReschedule?.(lesson, student)
-    onClose()
+  const handleReschedule = async () => {
+    const ok = await onReschedule?.(lesson, student)
+    if (ok !== false) onClose()
   }
-  const handleUncancel = () => {
-    onUncancel?.(lesson, student)
-    onClose()
+  const handleUncancel = async () => {
+    const ok = await onUncancel?.(lesson, student)
+    if (ok !== false) onClose()
   }
-  const handleRemove = () => {
-    onRemove?.(lesson, student)
-    onClose()
+  const handleRemove = async () => {
+    const ok = await onRemove?.(lesson, student)
+    if (ok !== false) onClose()
   }
 
   return createPortal(
@@ -86,7 +87,13 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
           <div>
             <label className="block text-gray-600 mb-1">Notes</label>
             <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px]">
-              No additional notes available.
+              {lesson?.rescheduledTo && (
+                <div>Rescheduled to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
+              )}
+              {lesson?.rescheduledFrom && (
+                <div>Rescheduled from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
+              )}
+              {!lesson?.rescheduledTo && !lesson?.rescheduledFrom && 'No additional notes available.'}
             </div>
           </div>
         </div>
@@ -101,7 +108,7 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
                 Cancel
               </button>
             )}
-            {isCancelled && (
+            {isCancelled && !hasRescheduledTo && (
               <button
                 type="button"
                 onClick={handleUncancel}
