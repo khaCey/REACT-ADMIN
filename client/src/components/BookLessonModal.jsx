@@ -741,7 +741,7 @@ export default function BookLessonModal({
                                       : capacity === 0
                                         ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
                                         : mixBlocked
-                                          ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                                          ? 'bg-indigo-50 text-indigo-800 cursor-not-allowed'
                                           : breakBlocked
                                             ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
                                             : isFull
@@ -757,7 +757,9 @@ export default function BookLessonModal({
                                     {primaryLabel}
                                   </span>
                                 </div>
-                                <span className="booking-slot-meta">
+                                <span
+                                  className={`booking-slot-meta ${mixBlocked ? 'text-indigo-700/85' : ''}`}
+                                >
                                   {slotTypeLabel ?? '—'}
                                 </span>
                               </button>
