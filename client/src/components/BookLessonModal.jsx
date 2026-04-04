@@ -922,7 +922,7 @@ export default function BookLessonModal({
                   className="flex-shrink-0 grid bg-green-600 text-white shadow-md z-10"
                   style={{ gridTemplateColumns: `3.5rem repeat(${weekDates.length}, minmax(0, 1fr))` }}
                 >
-                  <div className="px-3 py-2.5 text-sm font-semibold text-center border-r border-white/20">
+                  <div className="px-3 py-2.5 text-sm font-semibold text-center">
                     Time
                   </div>
                   {weekDates.map((dateStr) => (
@@ -942,7 +942,7 @@ export default function BookLessonModal({
                   >
                     {TIME_SLOTS.map((timeStr) => (
                       <React.Fragment key={timeStr}>
-                        <div className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-t border-dashed border-gray-400/85 border-b border-r border-gray-100 min-h-0 min-w-0">
+                        <div className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-t border-dashed border-gray-400/85 border-b border-gray-100 min-h-0 min-w-0">
                           {timeStr}
                         </div>
                         {weekDates.map((dateStr) => {
@@ -1015,7 +1015,7 @@ export default function BookLessonModal({
                           return (
                             <div
                               key={key}
-                              className="isolate min-h-0 min-w-0 overflow-hidden flex flex-col gap-0.5 border-t border-dashed border-gray-400/85 border-b border-r border-gray-100 py-1 px-0.5"
+                              className="isolate min-h-0 min-w-0 overflow-hidden flex flex-col gap-0.5 border-t border-dashed border-gray-400/85 border-b border-gray-100 py-1 px-0.5"
                             >
                               <button
                                 type="button"
