@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { api } from '../api'
@@ -15,6 +15,9 @@ const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+/** First grid hour (inclusive) and first hour after the grid (exclusive), JST wall clock. */
+const BOOKING_GRID_FIRST_HOUR_JST = 10
+const BOOKING_GRID_END_HOUR_JST_EXCLUSIVE = 21
 
 /** JST: show current+next month cards when today is in the last N days of the calendar month (tune if needed). */
 const END_OF_MONTH_LOOKAHEAD_DAYS = 7
@@ -29,6 +32,35 @@ function getMondayJstStr() {
   const mondayOffset = day === 0 ? -6 : 1 - day
   const mon = new Date(Date.UTC(y, m, d + mondayOffset))
   return `${mon.getUTCFullYear()}-${String(mon.getUTCMonth() + 1).padStart(2, '0')}-${String(mon.getUTCDate()).padStart(2, '0')}`
+}
+
+/** Today in Asia/Tokyo as YYYY-MM-DD (matches slot keys / server JST helpers). */
+function getTodayJstDateStr() {
+  const jst = new Date(Date.now() + JST_OFFSET_MS)
+  const y = jst.getUTCFullYear()
+  const m = jst.getUTCMonth() + 1
+  const d = jst.getUTCDate()
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+/**
+ * Vertical offset (px) from top of `gridEl` for the current JST time within the booking grid.
+ * `gridEl` is a CSS grid whose children are: [time, day×7] repeated per hour row.
+ */
+function getBookingNowLineOffsetPx(gridEl) {
+  if (!gridEl) return null
+  const jst = new Date(Date.now() + JST_OFFSET_MS)
+  const hour = jst.getUTCHours()
+  const minute = jst.getUTCMinutes()
+  const second = jst.getUTCSeconds()
+  if (hour < BOOKING_GRID_FIRST_HOUR_JST || hour >= BOOKING_GRID_END_HOUR_JST_EXCLUSIVE) return null
+  const rowIndex = hour - BOOKING_GRID_FIRST_HOUR_JST
+  const colsPerRow = 1 + 7
+  const rowStart = rowIndex * colsPerRow
+  const timeCell = gridEl.children[rowStart]
+  if (!timeCell) return null
+  const frac = (minute + second / 60) / 60
+  return timeCell.offsetTop + frac * timeCell.offsetHeight
 }
 
 /** Add n days to YYYY-MM-DD, return YYYY-MM-DD. */
@@ -361,6 +393,9 @@ export default function BookLessonModal({
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
   const [weekCache, setWeekCache] = useState({})
+  const bookingGridRef = useRef(null)
+  /** Pixel offset from top of booking grid for dashed "now" line (JST); null when off-grid or not today. */
+  const [nowLineTopPx, setNowLineTopPx] = useState(null)
   /** Visible month card(s): booked/paid from latest-by-month (see selectVisibleLessonMonthSummaries). */
   const [lessonMonthSummaries, setLessonMonthSummaries] = useState(() =>
     preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
@@ -541,6 +576,42 @@ export default function BookLessonModal({
   }
 
   const weekDates = Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
+
+  const updateBookingNowLine = useCallback(() => {
+    const todayStr = getTodayJstDateStr()
+    const weekDatesLocal = Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
+    if (!weekDatesLocal.includes(todayStr)) {
+      setNowLineTopPx(null)
+      return
+    }
+    const grid = bookingGridRef.current
+    if (!grid) {
+      setNowLineTopPx(null)
+      return
+    }
+    requestAnimationFrame(() => {
+      const g = bookingGridRef.current
+      if (!g) {
+        setNowLineTopPx(null)
+        return
+      }
+      const top = getBookingNowLineOffsetPx(g)
+      setNowLineTopPx(typeof top === 'number' && !Number.isNaN(top) ? top : null)
+    })
+  }, [weekStartStr])
+
+  useLayoutEffect(() => {
+    updateBookingNowLine()
+    const grid = bookingGridRef.current
+    if (!grid) return undefined
+    const ro = new ResizeObserver(() => updateBookingNowLine())
+    ro.observe(grid)
+    const id = setInterval(updateBookingNowLine, 30_000)
+    return () => {
+      ro.disconnect()
+      clearInterval(id)
+    }
+  }, [updateBookingNowLine])
 
   const handleSlotClick = (dateStr, timeStr) => {
     if (resolveBookStudentId(studentId, student) == null) {
@@ -933,7 +1004,17 @@ export default function BookLessonModal({
                   ))}
                 </div>
                 <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pt-0.5">
+                  <div className="relative w-full min-w-0">
+                    {nowLineTopPx != null && (
+                      <div
+                        className="pointer-events-none absolute left-0 right-0 z-30 border-t border-dashed border-gray-500/90"
+                        style={{ top: nowLineTopPx }}
+                        title="Current time (Japan)"
+                        aria-hidden
+                      />
+                    )}
                   <div
+                    ref={bookingGridRef}
                     className="booking-week-grid grid w-full min-w-0"
                     style={{
                       gridTemplateColumns: `3.5rem repeat(${weekDates.length}, minmax(0, 1fr))`,
@@ -1114,6 +1195,7 @@ export default function BookLessonModal({
                         })}
                       </React.Fragment>
                     ))}
+                  </div>
                   </div>
                 </div>
             </div>
