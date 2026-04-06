@@ -1165,7 +1165,7 @@ export default function BookLessonModal({
       {overQuotaConfirmOpen && overQuotaState && (
         <ConfirmActionModal
           title="月の回数を超える予約"
-          message={`${overQuotaState.label}: 既存 ${overQuotaState.active} 件 + 今回 ${overQuotaState.adding} 件で、月の回数（${overQuotaState.paid}）を超えます。\n\n月の回数が超えています。ご希望の回数に変更してください。`}
+          message="月の回数が超えています。ご希望の回数に変更してください。"
           confirmLabel="回数を変更"
           onClose={() => {
             setOverQuotaConfirmOpen(false)
@@ -1183,7 +1183,6 @@ export default function BookLessonModal({
           key={overQuotaState.ym}
           overlayClassName="z-[10003]"
           initialPackTotal={overQuotaState.minPack}
-          description={`${overQuotaState.label} の月の回数を ${overQuotaState.minPack} 以上に設定します。保存すると既存レッスンのタイトル（i/N）をこの回数に合わせて更新し、続けて予約します。`}
           confirmLabel="Save"
           onClose={() => {
             setOverQuotaEditOpen(false)
