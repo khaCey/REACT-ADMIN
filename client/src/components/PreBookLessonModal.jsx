@@ -53,15 +53,18 @@ export default function PreBookLessonModal({
           {description ? <p className="mt-1.5 text-sm text-gray-600 font-normal">{description}</p> : null}
         </div>
         <div className="px-5 py-4">
-          <label className="block text-sm font-medium text-gray-700">月の回数</label>
+          <label htmlFor="prebook-pack-total" className="block text-sm font-medium text-gray-700">
+            ご希望の回数
+          </label>
           <input
+            id="prebook-pack-total"
             type="number"
             min="1"
             step="1"
             value={packTotal}
             onChange={(e) => setPackTotal(e.target.value)}
             className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/30"
-            placeholder="e.g. 4"
+            placeholder="例: 4"
           />
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         </div>
