@@ -49,11 +49,11 @@ export default function PreBookLessonModal({
     >
       <div className="w-full max-w-md rounded-xl bg-white shadow-xl ring-1 ring-black/5">
         <div className="border-b border-gray-200 px-5 py-3">
-          <h3 className="text-base font-semibold text-gray-900">月何回</h3>
+          <h3 className="text-base font-semibold text-gray-900">月の回数</h3>
           {description ? <p className="mt-1.5 text-sm text-gray-600 font-normal">{description}</p> : null}
         </div>
         <div className="px-5 py-4">
-          <label className="block text-sm font-medium text-gray-700">月何回</label>
+          <label className="block text-sm font-medium text-gray-700">月の回数</label>
           <input
             type="number"
             min="1"

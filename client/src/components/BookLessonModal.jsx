@@ -350,7 +350,7 @@ export default function BookLessonModal({
   const [error, setError] = useState(null)
   const [selectedSlotKeys, setSelectedSlotKeys] = useState([])
   const [packTotalPromptOpen, setPackTotalPromptOpen] = useState(false)
-  /** Set when user confirms 月何回 inside this modal (persists until modal closes). */
+  /** Set when user confirms 月の回数 inside this modal (persists until modal closes). */
   const [localPackOverride, setLocalPackOverride] = useState(null)
   /** After renumber / over-quota save, overrides parent preloaded latest-by-month until prop changes. */
   const [latestByMonthLocal, setLatestByMonthLocal] = useState(null)
@@ -1139,7 +1139,7 @@ export default function BookLessonModal({
       {packTotalPromptOpen && (
         <PreBookLessonModal
           overlayClassName="z-[10002]"
-          description="No monthly lesson total was found from payments for this flow. Enter 月何回 (lessons in the pack) so bookings can be labeled in the calendar."
+          description="No monthly lesson total was found from payments for this flow. Enter 月の回数 (lessons in the pack) so bookings can be labeled in the calendar."
           onClose={() => setPackTotalPromptOpen(false)}
           onConfirm={async (n) => {
             setLocalPackOverride(n)
@@ -1164,9 +1164,9 @@ export default function BookLessonModal({
       )}
       {overQuotaConfirmOpen && overQuotaState && (
         <ConfirmActionModal
-          title="月何回を超える予約"
-          message={`${overQuotaState.label}: 既存 ${overQuotaState.active} 件 + 今回 ${overQuotaState.adding} 件で、現在の月何回（${overQuotaState.paid}）を超えます。月何回を少なくとも ${overQuotaState.minPack} に上げてください。`}
-          confirmLabel="月何回を更新"
+          title="月の回数を超える予約"
+          message={`${overQuotaState.label}: 既存 ${overQuotaState.active} 件 + 今回 ${overQuotaState.adding} 件で、月の回数（${overQuotaState.paid}）を超えます。\n\n月の回数が超えています。ご希望の回数に変更してください。`}
+          confirmLabel="回数を変更"
           onClose={() => {
             setOverQuotaConfirmOpen(false)
             setOverQuotaState(null)
@@ -1183,7 +1183,7 @@ export default function BookLessonModal({
           key={overQuotaState.ym}
           overlayClassName="z-[10003]"
           initialPackTotal={overQuotaState.minPack}
-          description={`${overQuotaState.label} の月何回を ${overQuotaState.minPack} 以上に設定します。保存すると既存レッスンのタイトル（i/N）をこの回数に合わせて更新し、続けて予約します。`}
+          description={`${overQuotaState.label} の月の回数を ${overQuotaState.minPack} 以上に設定します。保存すると既存レッスンのタイトル（i/N）をこの回数に合わせて更新し、続けて予約します。`}
           confirmLabel="Save"
           onClose={() => {
             setOverQuotaEditOpen(false)
@@ -1218,7 +1218,7 @@ export default function BookLessonModal({
                 student
               )
               if (pr.mode === 'none') {
-                setError('月何回を保存しましたが、予約に必要なデータがまだありません。')
+                setError('月の回数を保存しましたが、予約に必要なデータがまだありません。')
                 return
               }
               const selectedAfterUpdate =

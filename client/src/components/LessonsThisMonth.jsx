@@ -287,7 +287,7 @@ export default function LessonsThisMonth({
         initialPackTotal={
           changeCountEntry.paidLessonsCount > 0 ? changeCountEntry.paidLessonsCount : 4
         }
-        description={`${changeCountEntry.label || changeCountMonthKey} の月何回（保存すると予約タイトルと未設定枠に反映されます）`}
+        description={`${changeCountEntry.label || changeCountMonthKey} の月の回数（保存すると予約タイトルと未設定枠に反映されます）`}
         confirmLabel="Save"
         onClose={() => {
           setChangeCountOpen(false)
@@ -300,7 +300,7 @@ export default function LessonsThisMonth({
               month: changeCountMonthKey,
               lessons: n,
             })
-            success('月何回を保存しました')
+            success('月の回数を保存しました')
             setChangeCountOpen(false)
             setChangeCountMonthKey(null)
             await refetch()
