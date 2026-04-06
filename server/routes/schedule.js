@@ -853,42 +853,49 @@ router.post('/book', async (req, res) => {
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStr.slice(0, 7);
-    const bookedCountResult = await query(
-      `SELECT COUNT(DISTINCT m.event_id) AS cnt
-       FROM monthly_schedule m
-       WHERE (m.status IS NULL OR m.status <> 'cancelled')
-         AND m.student_id = $1
-         AND to_char(m.date, 'YYYY-MM') = $2`,
-      [studentIdNum, monthKey]
-    );
-    const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
-    const nextLessonNumber = bookedThisMonth + 1;
+    const lessonKindForBooking = deriveLessonKindFromStudent(student);
 
-    const providedPackTotal = parseInt(pack_total, 10);
-    let totalLessons = Number.isFinite(providedPackTotal) && providedPackTotal > 0 ? providedPackTotal : 0;
-    if (!totalLessons) {
-      const paidCountResult = await query(
-        `SELECT COALESCE(SUM(CASE WHEN p.amount IS NULL THEN 0 ELSE p.amount END), 0) AS total_paid
-         FROM payments p
-         WHERE p.student_id = $1
-           AND p.month = $2`,
+    let title;
+    if (lessonKindForBooking === 'demo') {
+      title = `${studentName} D/L`;
+    } else {
+      const bookedCountResult = await query(
+        `SELECT COUNT(DISTINCT m.event_id) AS cnt
+         FROM monthly_schedule m
+         WHERE (m.status IS NULL OR m.status <> 'cancelled')
+           AND m.student_id = $1
+           AND to_char(m.date, 'YYYY-MM') = $2`,
         [studentIdNum, monthKey]
       );
-      totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
+      const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+      const nextLessonNumber = bookedThisMonth + 1;
+
+      const providedPackTotal = parseInt(pack_total, 10);
+      let totalLessons = Number.isFinite(providedPackTotal) && providedPackTotal > 0 ? providedPackTotal : 0;
+      if (!totalLessons) {
+        const paidCountResult = await query(
+          `SELECT COALESCE(SUM(CASE WHEN p.amount IS NULL THEN 0 ELSE p.amount END), 0) AS total_paid
+           FROM payments p
+           WHERE p.student_id = $1
+             AND p.month = $2`,
+          [studentIdNum, monthKey]
+        );
+        totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
+      }
+      if (!totalLessons) {
+        const packRow = await query(
+          'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
+          [studentIdNum, monthKey]
+        );
+        totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
+      }
+      if (!totalLessons) {
+        return res.status(400).json({
+          error: 'Missing lesson pack total. Enter total lessons before booking.',
+        });
+      }
+      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
     }
-    if (!totalLessons) {
-      const packRow = await query(
-        'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
-        [studentIdNum, monthKey]
-      );
-      totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
-    }
-    if (!totalLessons) {
-      return res.status(400).json({
-        error: 'Missing lesson pack total. Enter total lessons before booking.',
-      });
-    }
-    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
     if (!isBookingGasEnabled()) {
       return res.status(400).json({
         error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
@@ -907,14 +914,14 @@ router.post('/book', async (req, res) => {
       endIso: endDate.toISOString(),
       assignedTeacherName,
       title,
-      location: locationLabel,
+      location: lessonKindForBooking === 'demo' ? '' : locationLabel,
     });
     if (!gasRes.ok) {
       return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
     }
 
     // Immediate local upsert prevents stale break-rule checks before next poll/backfill catches up.
-    const lessonKind = deriveLessonKindFromStudent(student);
+    const lessonKind = lessonKindForBooking;
     await query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
@@ -1160,28 +1167,35 @@ router.post('/reschedule-linked', async (req, res) => {
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStrRaw.slice(0, 7);
-    let totalLessons = parsePackTotalFromTitle(source.title);
-    if (!totalLessons) {
-      const packRow = await query('SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2', [studentIdNum, monthKey]);
-      totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
-    }
-    if (!totalLessons) totalLessons = 1;
+    const lessonKindForBooking = deriveLessonKindFromStudent(student);
 
-    // Quota-neutral numbering: when moving within the same month, source lesson is effectively replaced.
-    const sourceMonth = (
-      await query(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
-    ).rows[0]?.ym;
-    const bookedCountResult = await query(
-      `SELECT COUNT(DISTINCT m.event_id) AS cnt
-       FROM monthly_schedule m
-       WHERE (m.status IS NULL OR m.status <> 'cancelled')
-         AND m.student_id = $1
-         AND to_char(m.date, 'YYYY-MM') = $2`,
-      [studentIdNum, monthKey]
-    );
-    const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
-    const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
-    const title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
+    let title;
+    if (lessonKindForBooking === 'demo') {
+      title = `${studentName} D/L`;
+    } else {
+      let totalLessons = parsePackTotalFromTitle(source.title);
+      if (!totalLessons) {
+        const packRow = await query('SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2', [studentIdNum, monthKey]);
+        totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
+      }
+      if (!totalLessons) totalLessons = 1;
+
+      // Quota-neutral numbering: when moving within the same month, source lesson is effectively replaced.
+      const sourceMonth = (
+        await query(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
+      ).rows[0]?.ym;
+      const bookedCountResult = await query(
+        `SELECT COUNT(DISTINCT m.event_id) AS cnt
+         FROM monthly_schedule m
+         WHERE (m.status IS NULL OR m.status <> 'cancelled')
+           AND m.student_id = $1
+           AND to_char(m.date, 'YYYY-MM') = $2`,
+        [studentIdNum, monthKey]
+      );
+      const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+      const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
+      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
+    }
 
     if (!isBookingGasEnabled()) {
       return res.status(400).json({
@@ -1200,7 +1214,7 @@ router.post('/reschedule-linked', async (req, res) => {
       endIso: endDate.toISOString(),
       assignedTeacherName: null,
       title,
-      location: locationLabel,
+      location: lessonKindForBooking === 'demo' ? '' : locationLabel,
     });
     if (!gasRes.ok) {
       return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
@@ -1208,7 +1222,7 @@ router.post('/reschedule-linked', async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
-    const lessonKind = deriveLessonKindFromStudent(student);
+    const lessonKind = lessonKindForBooking;
     await client.query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)

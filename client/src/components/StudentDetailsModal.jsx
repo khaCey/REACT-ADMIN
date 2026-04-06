@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
-import { isStudentExcludedFromBooking } from '../config/booking'
+import { isStudentExcludedFromBooking, studentIsDemoOrTrial } from '../config/booking'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import { useToast } from '../context/ToastContext'
 import PaymentModal from './PaymentModal'
@@ -197,6 +197,11 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     setGuideFocusKey(null)
     setRescheduleSourceLesson(source)
     if (source) {
+      setOverridePaidLessons(null)
+      setBookLessonModal(true)
+      return
+    }
+    if (student && studentIsDemoOrTrial(student)) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
       return

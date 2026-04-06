@@ -16,3 +16,10 @@ export function isStudentExcludedFromBooking(studentIdProp, student) {
   if (Number.isFinite(fromRecord) && STUDENT_IDS_EXCLUDED_FROM_BOOKING.has(fromRecord)) return true
   return false
 }
+
+/** Matches server deriveLessonKindFromStudent: demo/trial → single-lesson booking, D/L titles. */
+export function studentIsDemoOrTrial(student) {
+  if (!student) return false
+  const s = String(student.Status ?? student.status ?? '').toLowerCase()
+  return s.includes('demo') || s.includes('trial')
+}

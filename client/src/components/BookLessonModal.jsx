@@ -10,6 +10,7 @@ import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
+import { studentIsDemoOrTrial } from '../config/booking'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -196,7 +197,8 @@ function countSlotsInMonthForKeys(selectedKeys, ym) {
  * POST /book pack_total: override/local, else per selected calendar month from latest-by-month.
  * @returns {{ mode: 'none' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
  */
-function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPackOverride, selectedSlotKeys) {
+function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPackOverride, selectedSlotKeys, student) {
+  if (student && studentIsDemoOrTrial(student)) return { mode: 'single', value: 1 }
   const loc = Number(localPackOverride)
   if (Number.isFinite(loc) && loc > 0) return { mode: 'single', value: loc }
   const overrideTotal = Number(overridePaidLessons)
@@ -217,7 +219,8 @@ function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPack
   return { mode: 'perMonth', perMonth }
 }
 
-function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth) {
+function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth, student) {
+  if (student && studentIsDemoOrTrial(student)) return null
   const months = [...new Set(selectedSlotKeys.map((k) => slotMonthFromKey(k)).filter(Boolean))].sort()
   for (const ym of months) {
     const paid = paidPackForMonth(ym, latestByMonth)
@@ -541,6 +544,7 @@ export default function BookLessonModal({
   }
 
   const weekDates = Array.from({ length: 7 }, (_, i) => addDaysToDateStr(weekStartStr, i))
+  const effectiveLatest = latestByMonthLocal ?? preloadedLatestByMonth
 
   const handleSlotClick = (dateStr, timeStr) => {
     if (resolveBookStudentId(studentId, student) == null) {
@@ -566,7 +570,7 @@ export default function BookLessonModal({
       return
     }
     const nextSelected = [...selectedSlotKeys, key]
-    const over = checkOverQuotaForSelection(nextSelected, effectiveLatest)
+    const over = checkOverQuotaForSelection(nextSelected, effectiveLatest, student)
     if (over) {
       setOverQuotaState(over)
       setPendingOverQuotaSlotKey(key)
@@ -575,8 +579,6 @@ export default function BookLessonModal({
     }
     setSelectedSlotKeys(nextSelected)
   }
-
-  const effectiveLatest = latestByMonthLocal ?? preloadedLatestByMonth
 
   const handleSubmitSelected = async () => {
     const sidRaw = resolveBookStudentId(studentId, student)
@@ -642,13 +644,14 @@ export default function BookLessonModal({
       effectiveLatest,
       overridePaidLessons,
       localPackOverride,
-      selectedSlotKeys
+      selectedSlotKeys,
+      student
     )
     if (packResult.mode === 'none') {
       setPackTotalPromptOpen(true)
       return
     }
-    const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest)
+    const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest, student)
     if (over) {
       setOverQuotaState(over)
       setOverQuotaConfirmOpen(true)
@@ -1160,10 +1163,11 @@ export default function BookLessonModal({
               effectiveLatest,
               overridePaidLessons,
               n,
-              selectedSlotKeys
+              selectedSlotKeys,
+              student
             )
             if (pr.mode === 'none') return
-            const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest)
+            const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest, student)
             if (over) {
               setOverQuotaState(over)
               setOverQuotaConfirmOpen(true)
@@ -1225,7 +1229,8 @@ export default function BookLessonModal({
                 n,
                 pendingOverQuotaSlotKey && !selectedSlotKeys.includes(pendingOverQuotaSlotKey)
                   ? [...selectedSlotKeys, pendingOverQuotaSlotKey]
-                  : selectedSlotKeys
+                  : selectedSlotKeys,
+                student
               )
               if (pr.mode === 'none') {
                 setError('月何回を保存しましたが、予約に必要なデータがまだありません。')
@@ -1235,7 +1240,7 @@ export default function BookLessonModal({
                 pendingOverQuotaSlotKey && !selectedSlotKeys.includes(pendingOverQuotaSlotKey)
                   ? [...selectedSlotKeys, pendingOverQuotaSlotKey]
                   : selectedSlotKeys
-              const over2 = checkOverQuotaForSelection(selectedAfterUpdate, fresh.latestByMonth)
+              const over2 = checkOverQuotaForSelection(selectedAfterUpdate, fresh.latestByMonth, student)
               if (over2) {
                 setOverQuotaState(over2)
                 setOverQuotaConfirmOpen(true)
