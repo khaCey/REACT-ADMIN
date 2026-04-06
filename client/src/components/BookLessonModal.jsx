@@ -1164,8 +1164,8 @@ export default function BookLessonModal({
       )}
       {overQuotaConfirmOpen && overQuotaState && (
         <ConfirmActionModal
-          title="月の回数を超える予約"
-          message="月の回数が超えています。ご希望の回数に変更してください。"
+          title="月の回数が超えています"
+          message="ご希望の回数に変更してください。"
           confirmLabel="回数を変更"
           onClose={() => {
             setOverQuotaConfirmOpen(false)
