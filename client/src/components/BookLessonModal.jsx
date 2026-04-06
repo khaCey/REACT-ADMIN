@@ -962,14 +962,7 @@ export default function BookLessonModal({
                           const isSelected = selectedSlotKeys.includes(key)
                           const isPast = isSlotPastJst(dateStr, timeStr)
                           const isFull = capacity > 0 && booked >= capacity
-                          const oneLeft = capacity > 0 && booked === capacity - 1
                           const staffBreaks = staffBreakBySlot[key] || []
-                          const statusBead =
-                            !isPast && capacity > 0 && !mixBlocked && !alreadyYours && !breakBlocked && !shamBlocked
-                              ? isFull
-                                ? 'bg-red-500'
-                                : null
-                              : null
                           const mixLabel =
                             mixBlocked && !isPast && capacity > 0 && !isFull && !alreadyYours
                               ? studentIsChild(student)
@@ -1014,7 +1007,6 @@ export default function BookLessonModal({
                                   : null
                           const primaryLabel = isSelected ? 'Selected' : label
                           const showStrike = bookingUnavailable && !isSelected
-                          const showStatusBead = !isSelected && !!statusBead
                           return (
                             <div
                               key={key}
@@ -1045,9 +1037,6 @@ export default function BookLessonModal({
                                 }`}
                               >
                                 <div className="booking-slot-row-primary">
-                                  {showStatusBead && (
-                                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusBead}`} aria-hidden />
-                                  )}
                                   <span className={`booking-slot-primary ${showStrike ? 'line-through' : ''}`}>
                                     {primaryLabel}
                                   </span>
