@@ -945,7 +945,7 @@ export default function BookLessonModal({
                   >
                     {TIME_SLOTS.map((timeStr) => (
                       <React.Fragment key={timeStr}>
-                        <div className="px-3 py-1 flex items-center justify-center text-xs font-medium text-gray-700 bg-gray-50 border-t border-dashed border-gray-400/85 border-b border-gray-100 min-h-0 min-w-0">
+                        <div className="px-3 py-1 flex items-center justify-center text-xs font-medium text-black bg-gray-50 border-t border-dashed border-gray-400/85 border-b border-gray-100 min-h-0 min-w-0">
                           {timeStr}
                         </div>
                         {weekDates.map((dateStr) => {
@@ -1037,21 +1037,11 @@ export default function BookLessonModal({
                                 className={`booking-slot-btn flex-1 min-h-0 min-w-0 w-full px-2 rounded-sm transition-colors ${
                                   isSelected
                                     ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
-                                    : isPast
-                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                    : alreadyYours
-                                      ? 'bg-gray-100 text-violet-800 cursor-not-allowed'
-                                      : capacity === 0
-                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                        : isFull
-                                          ? 'bg-gray-100 text-amber-800 cursor-default'
-                                          : mixBlocked
-                                            ? 'bg-gray-100 text-indigo-800 cursor-not-allowed'
-                                            : shamBlocked
-                                              ? 'bg-gray-100 text-rose-900 cursor-not-allowed'
-                                              : breakBlocked
-                                                ? 'bg-gray-100 text-amber-900 cursor-not-allowed'
-                                                : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
+                                    : bookingUnavailable
+                                      ? isFull
+                                        ? 'bg-[#525557] text-white cursor-default'
+                                        : 'bg-[#525557] text-white cursor-not-allowed'
+                                      : 'bg-white hover:bg-green-50 text-green-700 hover:text-green-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
                                 <div className="booking-slot-row-primary">
@@ -1063,7 +1053,13 @@ export default function BookLessonModal({
                                   </span>
                                 </div>
                                 <span
-                                  className={`booking-slot-meta ${mixBlocked && !isFull ? 'text-indigo-700/85' : ''} ${shamBlocked && !isFull ? 'text-rose-800/90' : ''}`}
+                                  className={`booking-slot-meta ${
+                                    isSelected
+                                      ? 'text-green-800'
+                                      : bookingUnavailable
+                                        ? 'text-white/80'
+                                        : 'text-green-600'
+                                  }`}
                                 >
                                   {slotTypeLabel ?? '—'}
                                 </span>
