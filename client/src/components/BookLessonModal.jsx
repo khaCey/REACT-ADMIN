@@ -355,8 +355,7 @@ export default function BookLessonModal({
   /** After renumber / over-quota save, overrides parent preloaded latest-by-month until prop changes. */
   const [latestByMonthLocal, setLatestByMonthLocal] = useState(null)
   const [overQuotaState, setOverQuotaState] = useState(null)
-  const [overQuotaConfirmOpen, setOverQuotaConfirmOpen] = useState(false)
-  const [overQuotaEditOpen, setOverQuotaEditOpen] = useState(false)
+  const [overQuotaModalOpen, setOverQuotaModalOpen] = useState(false)
   /** Slot that triggered click-time over-quota warning (kept pending until pack is updated). */
   const [pendingOverQuotaSlotKey, setPendingOverQuotaSlotKey] = useState(null)
   const [successModal, setSuccessModal] = useState(null)
@@ -574,7 +573,7 @@ export default function BookLessonModal({
     if (over) {
       setOverQuotaState(over)
       setPendingOverQuotaSlotKey(key)
-      setOverQuotaConfirmOpen(true)
+      setOverQuotaModalOpen(true)
       return
     }
     setSelectedSlotKeys(nextSelected)
@@ -654,7 +653,7 @@ export default function BookLessonModal({
     const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest, student)
     if (over) {
       setOverQuotaState(over)
-      setOverQuotaConfirmOpen(true)
+      setOverQuotaModalOpen(true)
       return
     }
     await submitBookingsWithPackResult(packResult)
@@ -1155,37 +1154,23 @@ export default function BookLessonModal({
             const over = checkOverQuotaForSelection(selectedSlotKeys, effectiveLatest, student)
             if (over) {
               setOverQuotaState(over)
-              setOverQuotaConfirmOpen(true)
+              setOverQuotaModalOpen(true)
               return
             }
             await submitBookingsWithPackResult(pr)
           }}
         />
       )}
-      {overQuotaConfirmOpen && overQuotaState && (
-        <ConfirmActionModal
-          title="月の回数が超えています"
-          message="ご希望の回数に変更してください。"
-          confirmLabel="回数を変更"
-          onClose={() => {
-            setOverQuotaConfirmOpen(false)
-            setOverQuotaState(null)
-            setPendingOverQuotaSlotKey(null)
-          }}
-          onConfirm={() => {
-            setOverQuotaConfirmOpen(false)
-            setOverQuotaEditOpen(true)
-          }}
-        />
-      )}
-      {overQuotaEditOpen && overQuotaState && (
+      {overQuotaModalOpen && overQuotaState && (
         <PreBookLessonModal
           key={overQuotaState.ym}
           overlayClassName="z-[10003]"
+          title="月の回数が超えています"
+          description="ご希望の回数に変更してください。"
           initialPackTotal={overQuotaState.minPack}
-          confirmLabel="Save"
+          confirmLabel="回数を変更"
           onClose={() => {
-            setOverQuotaEditOpen(false)
+            setOverQuotaModalOpen(false)
             setOverQuotaState(null)
             setPendingOverQuotaSlotKey(null)
           }}
@@ -1204,8 +1189,6 @@ export default function BookLessonModal({
               const fresh = await api.getStudentLatestByMonth(student_id)
               setLatestByMonthLocal(fresh.latestByMonth ?? null)
               setLessonMonthSummaries(selectVisibleLessonMonthSummaries(fresh.latestByMonth))
-              setOverQuotaEditOpen(false)
-              setOverQuotaState(null)
               setLocalPackOverride(n)
               const pr = derivePackTotalForBooking(
                 fresh.latestByMonth,
@@ -1227,9 +1210,10 @@ export default function BookLessonModal({
               const over2 = checkOverQuotaForSelection(selectedAfterUpdate, fresh.latestByMonth, student)
               if (over2) {
                 setOverQuotaState(over2)
-                setOverQuotaConfirmOpen(true)
                 return
               }
+              setOverQuotaModalOpen(false)
+              setOverQuotaState(null)
               setPendingOverQuotaSlotKey(null)
               setSelectedSlotKeys(selectedAfterUpdate)
               await submitBookingsWithPackResult(pr, selectedAfterUpdate)
