@@ -1040,17 +1040,17 @@ export default function BookLessonModal({
                                     : isPast
                                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                     : alreadyYours
-                                      ? 'bg-violet-50 text-violet-800 cursor-not-allowed'
+                                      ? 'bg-gray-100 text-violet-800 cursor-not-allowed'
                                       : capacity === 0
-                                        ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                         : isFull
-                                          ? 'bg-amber-50 text-amber-800 cursor-default'
+                                          ? 'bg-gray-100 text-amber-800 cursor-default'
                                           : mixBlocked
-                                            ? 'bg-indigo-50 text-indigo-800 cursor-not-allowed'
+                                            ? 'bg-gray-100 text-indigo-800 cursor-not-allowed'
                                             : shamBlocked
-                                              ? 'bg-rose-50 text-rose-900 cursor-not-allowed'
+                                              ? 'bg-gray-100 text-rose-900 cursor-not-allowed'
                                               : breakBlocked
-                                                ? 'bg-amber-50/90 text-amber-900 cursor-not-allowed'
+                                                ? 'bg-gray-100 text-amber-900 cursor-not-allowed'
                                                 : 'bg-white hover:bg-green-50 text-gray-800 hover:ring-2 hover:ring-green-500 hover:ring-inset cursor-pointer'
                                 }`}
                               >
