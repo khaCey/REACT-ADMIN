@@ -995,7 +995,7 @@ export default function BookLessonModal({
                                 : shamLabel
                                   ? shamLabel
                                 : isPast
-                                  ? 'Past'
+                                  ? 'Finished'
                                   : capacity === 0
                                     ? '—'
                                     : `${booked} / ${capacity} slots`
