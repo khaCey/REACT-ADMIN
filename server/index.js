@@ -18,7 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 import express from 'express';
 import cors from 'cors';
-import { query } from './db/index.js';
+import { query, runMigrations } from './db/index.js';
 import { upsertMonthlySchedule } from './lib/calendarSync.js';
 import { fetchMonthlyScheduleFromSheet } from './lib/googleSheets.js';
 import studentsRouter from './routes/students.js';
@@ -162,6 +162,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
     for (const yyyyMm of allYyyyMm) {
       const scheduleResult = await query(
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
+                m.calendar_sync_status, m.calendar_sync_error,
                 rt.to_event_id AS rescheduled_to_event_id,
                 to_char(mt.date, 'YYYY-MM-DD') AS rescheduled_to_date,
                 to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_to_time,
@@ -194,6 +195,8 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           time,
           status: (r.status || 'scheduled').toLowerCase(),
           eventID: r.event_id,
+          calendarSyncStatus: (r.calendar_sync_status || 'synced').toLowerCase(),
+          calendarSyncError: r.calendar_sync_error || null,
           isGroup: (r.student_count || 0) > 1,
           lessonKind: r.lesson_kind || 'regular',
           rescheduledTo: r.rescheduled_to_event_id
@@ -977,23 +980,30 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'API route not found', path: req.originalUrl });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API running at http://localhost:${PORT} (network: http://0.0.0.0:${PORT})`);
-  registerWatch().catch(() => {});
+runMigrations()
+  .then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`API running at http://localhost:${PORT} (network: http://0.0.0.0:${PORT})`);
+      registerWatch().catch(() => {});
 
-  const cronExpr = process.env.BACKUP_SCHEDULE_CRON || '0 12 * * *';
-  const tz = process.env.BACKUP_SCHEDULE_TZ || 'Asia/Tokyo';
-  cron.schedule(
-    cronExpr,
-    () => {
-      runBackup({ source: 'scheduled' })
-        .then((r) => {
-          console.log('[backup] scheduled backup ok:', r.fileName);
-          return cleanupBackupsOlderThan(30);
-        })
-        .then((deleted) => { if (deleted > 0) console.log('[backup] cleaned up', deleted, 'backup(s) older than 30 days'); })
-        .catch((err) => console.error('[backup] scheduled backup failed:', err.message));
-    },
-    { timezone: tz }
-  );
-});
+      const cronExpr = process.env.BACKUP_SCHEDULE_CRON || '0 12 * * *';
+      const tz = process.env.BACKUP_SCHEDULE_TZ || 'Asia/Tokyo';
+      cron.schedule(
+        cronExpr,
+        () => {
+          runBackup({ source: 'scheduled' })
+            .then((r) => {
+              console.log('[backup] scheduled backup ok:', r.fileName);
+              return cleanupBackupsOlderThan(30);
+            })
+            .then((deleted) => { if (deleted > 0) console.log('[backup] cleaned up', deleted, 'backup(s) older than 30 days'); })
+            .catch((err) => console.error('[backup] scheduled backup failed:', err.message));
+        },
+        { timezone: tz }
+      );
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to run DB migrations:', err);
+    process.exit(1);
+  });

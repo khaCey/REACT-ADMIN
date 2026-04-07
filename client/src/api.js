@@ -1,10 +1,11 @@
+import { clearStoredSession, getStoredToken } from './utils/authSession';
+
 const API_BASE = '/api';
-const TOKEN_KEY = 'staff_token';
 
 async function fetchApi(path, options = {}) {
   await new Promise((r) => setTimeout(r, 500)); // 0.5s delay for CRUD
   const url = `${API_BASE}${path}`;
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = getStoredToken();
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url, {
@@ -13,6 +14,7 @@ async function fetchApi(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401) clearStoredSession();
     const msg = err.error || res.statusText;
     const pathHint = err.path ? ` (${err.path})` : '';
     throw new Error(msg + pathHint);
@@ -142,6 +144,8 @@ export const api = {
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
   renumberMonthLessonTitles: (body) =>
     fetchApi('/schedule/renumber-month-titles', { method: 'POST', body: JSON.stringify(body) }),
+  syncScheduleEvent: (eventId) =>
+    fetchApi('/schedule/sync', { method: 'POST', body: JSON.stringify({ event_id: eventId }) }),
   cancelScheduleEvent: (eventId) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/cancel`, { method: 'PATCH' }),
   uncancelScheduleEvent: (eventId) =>

@@ -56,7 +56,7 @@ function deriveLessonKind(student) {
  
 /**
  * Create a Calendar event via GAS.
- * @param {{ student: StudentForBooking, startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null }} args
+ * @param {{ student: StudentForBooking, startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function createBookedLessonEventInGas(args) {
@@ -70,12 +70,14 @@ export async function createBookedLessonEventInGas(args) {
   url.searchParams.set('key', apiKey);
  
   const student = args?.student;
-  const lessonKind = deriveLessonKind(student);
+  const lessonKind = String(args?.lessonKind || '').trim().toLowerCase() || deriveLessonKind(student);
   const teacher = (args?.assignedTeacherName || '').trim();
+  const bookingKey = String(args?.bookingKey || '').trim();
   const descLines = [
     'Source: Student Admin booking',
     student?.id != null ? `StudentId: ${student.id}` : null,
     teacher ? `#teacher${teacher}` : null,
+    bookingKey ? `BookingSyncKey: ${bookingKey}` : null,
   ].filter(Boolean);
  
   const payload = {
@@ -86,6 +88,7 @@ export async function createBookedLessonEventInGas(args) {
     end: args?.endIso,
     description: descLines.join('\n'),
     location: args?.location || '',
+    bookingKey,
     source: 'student-admin-server',
     timestamp: new Date().toISOString(),
   };

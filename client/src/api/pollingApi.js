@@ -6,7 +6,7 @@
  * Production (e.g. PM2): same values come from server root .env (CALENDAR_POLL_*) via /api/config/calendar-poll after login.
  */
 
-const TOKEN_KEY = 'staff_token'
+import { getStoredToken } from '../utils/authSession'
 
 const viteBase = () => (import.meta.env.VITE_CALENDAR_POLL_URL || '').trim()
 const viteKey = () => (import.meta.env.VITE_CALENDAR_POLL_API_KEY || '').trim()
@@ -27,7 +27,7 @@ export function clearPollingRuntimeConfig() {
 export async function ensurePollingConfig() {
   if (viteBase() && viteKey()) return true
   if (runtimeUrl && runtimeApiKey) return true
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getStoredToken()
   if (!token) return false
   if (!runtimeLoadPromise) {
     runtimeLoadPromise = (async () => {

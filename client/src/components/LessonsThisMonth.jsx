@@ -34,11 +34,13 @@ function addOneMonthYyyyMm(yyyyMm) {
 }
 
 const CARD_STYLES = {
-  scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60' },
-  cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60' },
-  rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60' },
-  demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60' },
-  unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60' },
+  scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
+  cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60', label: 'Cancelled' },
+  rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
+  demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60', label: 'Demo' },
+  unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Unscheduled' },
+  sync_pending: { accent: 'bg-amber-500', bg: 'bg-amber-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Syncing' },
+  sync_failed: { accent: 'bg-red-600', bg: 'bg-red-100', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
 }
 
 const CARD_SIZES = {
@@ -50,8 +52,20 @@ const CARD_SIZES = {
 
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const rawStatus = String(lesson.status || '').toLowerCase()
-  // Keep rescheduled source lessons orange in this list view.
-  const displayStatus = lesson.rescheduledTo ? 'rescheduled' : rawStatus
+  const syncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
+  // Keep unscheduled and cancelled explicit; then show rescheduled source, then calendar sync state.
+  const displayStatus =
+    rawStatus === 'unscheduled'
+      ? 'unscheduled'
+      : rawStatus === 'cancelled'
+        ? 'cancelled'
+        : lesson.rescheduledTo
+          ? 'rescheduled'
+          : syncStatus === 'failed'
+            ? 'sync_failed'
+            : syncStatus === 'pending'
+              ? 'sync_pending'
+              : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -60,8 +74,8 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const dow = date && !isNaN(date.getTime()) ? DOW[date.getDay()] : ''
   const dayStr = isUnscheduled ? '--' : (lesson.day && lesson.day !== '--' ? `${parseInt(lesson.day)}日` : '--')
   const timeStr = isUnscheduled ? '--' : (lesson.time ? lesson.time.replace(':', '：') : '--')
-  const title = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)
   const styles = CARD_STYLES[displayStatus] || CARD_STYLES.cancelled
+  const title = styles.label || (displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1))
   const sz = CARD_SIZES[size] || CARD_SIZES.normal
 
   return (
@@ -82,7 +96,6 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
         <span className={`lr-status inline-flex items-center ${sz.status} text-gray-500 mt-0.5 truncate gap-1`}>
           <span className={`mr-0.5 ${sz.dot} rounded-full shrink-0 ${styles.dot}`} />
           {title}
-          {lesson.isGroup && <span className="badge bg-purple-600 text-white text-[0.55rem] px-1 py-0 shrink-0">Group</span>}
         </span>
       </span>
     </button>
@@ -194,6 +207,23 @@ export default function LessonsThisMonth({
     }
     setActionError(null)
     setPendingRemoveLesson(lesson)
+  }
+  const handleSyncWithCalendar = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return
+    setActionError(null)
+    try {
+      await api.syncScheduleEvent(lesson.eventID)
+      success('Lesson synced with Calendar')
+      try {
+        await refetch()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Synced, but refresh failed')
+      }
+      return true
+    } catch (e) {
+      setActionError(e.message)
+      return false
+    }
   }
 
   const confirmRemoveLesson = async () => {
@@ -381,6 +411,7 @@ export default function LessonsThisMonth({
           onCancel={handleCancel}
           onUncancel={handleUncancel}
           onReschedule={handleReschedule}
+          onSyncWithCalendar={handleSyncWithCalendar}
           onRemove={handleRemove}
         />
       )}

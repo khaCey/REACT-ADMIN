@@ -10,6 +10,15 @@ import { requireAuth, requireAdminOrOperator } from '../middleware/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'student-admin-secret-change-in-production';
 const DEFAULT_STAFF_PASSWORD = 'staff123';
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function getSessionExpiryUtcDate() {
+  const jstNow = new Date(Date.now() + JST_OFFSET_MS);
+  const y = jstNow.getUTCFullYear();
+  const m = jstNow.getUTCMonth();
+  const d = jstNow.getUTCDate();
+  return new Date(Date.UTC(y, m, d, 14, 59, 59, 999));
+}
 
 /** GET /api/auth/staff-list - staff names for login dropdown (no auth required) */
 router.get('/staff-list', async (req, res) => {
@@ -67,11 +76,22 @@ router.post('/login', async (req, res) => {
       'INSERT INTO staff_shifts (staff_id, started_at) VALUES ($1, NOW())',
       [staff.id]
     );
+    const expiresAt = getSessionExpiryUtcDate();
     const token = jwt.sign(
-      { id: staff.id, name: staff.name, is_admin: !!staff.is_admin, is_operator: !!staff.is_operator },
+      {
+        id: staff.id,
+        name: staff.name,
+        is_admin: !!staff.is_admin,
+        is_operator: !!staff.is_operator,
+        exp: Math.floor(expiresAt.getTime() / 1000),
+      },
       JWT_SECRET
     );
-    res.json({ token, staff: { id: staff.id, name: staff.name, is_admin: !!staff.is_admin, is_operator: !!staff.is_operator } });
+    res.json({
+      token,
+      expiresAt: expiresAt.toISOString(),
+      staff: { id: staff.id, name: staff.name, is_admin: !!staff.is_admin, is_operator: !!staff.is_operator },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

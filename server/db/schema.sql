@@ -86,6 +86,15 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NOT NULL DEFAULT 'regular';
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES students(id);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_mode VARCHAR(20) NOT NULL DEFAULT 'unknown';
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_status VARCHAR(20) NOT NULL DEFAULT 'synced';
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_error TEXT;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_key VARCHAR(100);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_attempted_at TIMESTAMPTZ;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_synced_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
+  ON monthly_schedule(calendar_sync_key)
+  WHERE calendar_sync_key IS NOT NULL;
 
 -- Linked reschedules: source lesson -> destination lesson
 CREATE TABLE IF NOT EXISTS reschedules (

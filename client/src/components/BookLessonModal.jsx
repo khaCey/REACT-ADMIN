@@ -672,7 +672,6 @@ export default function BookLessonModal({
     try {
       const selected = [...(slotKeysOverride ?? selectedSlotKeys)].sort()
       const failed = []
-      const touchedMonths = new Set()
       let successCount = 0
 
       for (const key of selected) {
@@ -694,16 +693,14 @@ export default function BookLessonModal({
             location: 'Cafe',
           })
           successCount += 1
-          touchedMonths.add(String(date).slice(0, 7))
         } catch (e) {
           failed.push(`${date} ${time}: ${e?.message || 'Failed to book'}`)
         }
       }
 
       if (successCount > 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} booked (added to calendar)`)
+        success(`${successCount} lesson${successCount > 1 ? 's' : ''} saved. Calendar sync is running in the background.`)
         onBooked?.()
-        await Promise.all([...touchedMonths].map((month) => api.backfillFromCalendar({ month }).catch(() => null)))
       }
       if (failed.length > 0) {
         setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
@@ -731,8 +728,8 @@ export default function BookLessonModal({
       }
       if (successCount > 0 && failed.length === 0) {
         setSuccessModal({
-          title: 'Booking completed',
-          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} booked successfully.`,
+          title: 'Booking saved',
+          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} saved. Google Calendar sync will finish in the background.`,
         })
       }
     } catch (e) {

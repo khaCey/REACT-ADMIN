@@ -16,6 +16,7 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
   const result = await query(
     `DELETE FROM monthly_schedule
      WHERE student_name = $1
+       AND COALESCE(calendar_sync_status, 'synced') = 'synced'
        AND (event_id = $2 OR starts_with(event_id, $2 || '_'))`,
     [sn, rid]
   );
@@ -195,7 +196,9 @@ async function reconcileMonthsToSnapshot(months, incomingKeys) {
   for (const ym of months) {
     const existing = await query(
       `SELECT event_id, student_name FROM monthly_schedule
-       WHERE date IS NOT NULL AND to_char(date, 'YYYY-MM') = $1`,
+       WHERE date IS NOT NULL
+         AND to_char(date, 'YYYY-MM') = $1
+         AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
       [ym]
     );
     for (const r of existing.rows || []) {
@@ -252,11 +255,14 @@ export async function upsertMonthlySchedule(data, options = {}) {
       );
     }
     await query(
-      `INSERT INTO monthly_schedule (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO monthly_schedule
+        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+         calendar_sync_status, calendar_sync_error, calendar_synced_at)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW())
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id`,
+         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
+         calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at`,
       [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId]
     );
     upserted++;

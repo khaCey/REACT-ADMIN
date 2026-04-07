@@ -3,11 +3,16 @@
  */
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { clearPollingRuntimeConfig } from '../api/pollingApi'
+import {
+  clearStoredSession,
+  getStoredToken,
+  getStoredTokenExpiry,
+  isStoredSessionExpired,
+  SESSION_EVENT,
+  setStoredSession,
+} from '../utils/authSession'
 
 const AuthContext = createContext(null)
-
-const TOKEN_KEY = 'staff_token'
-const STAFF_KEY = 'staff_name'
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
@@ -17,10 +22,20 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [staff, setStaff] = useState(null)
   const [loading, setLoading] = useState(true)
+  const clearSession = useCallback(() => {
+    clearStoredSession()
+    clearPollingRuntimeConfig()
+    setStaff(null)
+  }, [])
 
-  const getToken = () => localStorage.getItem(TOKEN_KEY)
+  const getToken = () => getStoredToken()
 
   const fetchMe = useCallback(async () => {
+    if (isStoredSessionExpired()) {
+      clearSession()
+      setLoading(false)
+      return
+    }
     const token = getToken()
     if (!token) {
       setStaff(null)
@@ -35,21 +50,44 @@ export function AuthProvider({ children }) {
         const data = await res.json()
         setStaff(data.staff)
       } else {
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.removeItem(STAFF_KEY)
-        clearPollingRuntimeConfig()
-        setStaff(null)
+        clearSession()
       }
     } catch {
       setStaff(null)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [clearSession])
 
   useEffect(() => {
     fetchMe()
   }, [fetchMe])
+
+  useEffect(() => {
+    const onSessionChanged = () => {
+      const token = getToken()
+      if (!token) {
+        setStaff(null)
+        setLoading(false)
+      }
+    }
+    window.addEventListener(SESSION_EVENT, onSessionChanged)
+    return () => window.removeEventListener(SESSION_EVENT, onSessionChanged)
+  }, [])
+
+  useEffect(() => {
+    const expiresAt = getStoredTokenExpiry()
+    if (!staff || !expiresAt) return
+    const remainingMs = Date.parse(expiresAt) - Date.now()
+    if (remainingMs <= 0) {
+      clearSession()
+      return
+    }
+    const timer = window.setTimeout(() => {
+      clearSession()
+    }, remainingMs)
+    return () => window.clearTimeout(timer)
+  }, [staff, clearSession])
 
   const login = useCallback(async (name) => {
     const res = await fetch('/api/auth/login', {
@@ -59,14 +97,17 @@ export function AuthProvider({ children }) {
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || 'Login failed')
-    localStorage.setItem(TOKEN_KEY, data.token)
-    localStorage.setItem(STAFF_KEY, data.staff?.name || '')
+    setStoredSession({
+      token: data.token,
+      staffName: data.staff?.name || '',
+      expiresAt: data.expiresAt || null,
+    })
     setStaff(data.staff)
   }, [])
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async ({ skipServer = false } = {}) => {
     const token = getToken()
-    if (token) {
+    if (token && !skipServer) {
       try {
         await fetch('/api/auth/logout', {
           method: 'POST',
@@ -76,11 +117,8 @@ export function AuthProvider({ children }) {
         // ignore network errors; still clear local session
       }
     }
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(STAFF_KEY)
-    clearPollingRuntimeConfig()
-    setStaff(null)
-  }, [])
+    clearSession()
+  }, [clearSession])
 
   const value = { staff, loading, login, logout, fetchMe, getToken }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

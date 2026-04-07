@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { pool, query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
 import {
@@ -42,6 +43,10 @@ const GRID_TIME_SLOTS = [
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
+const LOCAL_BOOKING_EVENT_ID_PREFIX = 'local-booking-';
+const CALENDAR_SYNC_STATUS_PENDING = 'pending';
+const CALENDAR_SYNC_STATUS_SYNCED = 'synced';
+const CALENDAR_SYNC_STATUS_FAILED = 'failed';
 
 function isOwnerCoursePayment(payment) {
   return String(payment || '').toLowerCase().includes('owner');
@@ -64,6 +69,164 @@ function deriveLessonKindFromStudent(student) {
   const status = String(student?.status || '').toLowerCase();
   if (status.includes('demo') || status.includes('trial')) return 'demo';
   return 'regular';
+}
+
+function normalizeCalendarSyncStatus(val) {
+  const v = String(val || '').trim().toLowerCase();
+  return v || CALENDAR_SYNC_STATUS_SYNCED;
+}
+
+function buildLocalBookingEventId() {
+  return `${LOCAL_BOOKING_EVENT_ID_PREFIX}${randomUUID()}`;
+}
+
+function buildCalendarSyncKey() {
+  return `booking-sync-${randomUUID()}`;
+}
+
+function lessonModeToLocationLabel(lessonMode) {
+  return String(lessonMode || '').trim().toLowerCase() === 'online' ? 'Online' : 'Cafe';
+}
+
+function shouldSyncCalendarForRows(rows) {
+  return (rows || []).some(
+    (r) =>
+      normalizeCalendarSyncStatus(r?.calendar_sync_status) === CALENDAR_SYNC_STATUS_SYNCED &&
+      !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
+  );
+}
+
+async function syncBookedLessonEventToCalendar(localEventId) {
+  const result = await query(
+    `SELECT m.event_id, m.student_name, m.student_id, m.title, m.start, m."end", m.status,
+            m.teacher_name, m.lesson_kind, m.lesson_mode, m.calendar_sync_status,
+            m.calendar_sync_error, m.calendar_sync_key,
+            s.name AS canonical_student_name, s.status AS student_status,
+            s.payment AS student_payment, s.is_child AS student_is_child
+       FROM monthly_schedule m
+       LEFT JOIN students s ON s.id = m.student_id
+      WHERE m.event_id = $1
+      LIMIT 1`,
+    [localEventId]
+  );
+  const row = result.rows[0];
+  if (!row) return { ok: false, error: 'Pending lesson not found' };
+
+  const studentName = String(row.canonical_student_name || row.student_name || '').trim();
+  const bookingKey =
+    String(row.calendar_sync_key || '').trim() || `${String(row.event_id || '').trim() || buildCalendarSyncKey()}`;
+  if (String(row.status || '').toLowerCase() === 'cancelled') {
+    await query(
+      `UPDATE monthly_schedule
+          SET calendar_sync_status = $3,
+              calendar_sync_error = $4,
+              calendar_sync_attempted_at = NOW()
+        WHERE event_id = $1 AND student_name = $2`,
+      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, 'Cancelled before calendar sync']
+    );
+    return { ok: false, error: 'Cancelled before calendar sync' };
+  }
+
+  await query(
+    `UPDATE monthly_schedule
+        SET calendar_sync_status = $3,
+            calendar_sync_error = NULL,
+            calendar_sync_attempted_at = NOW(),
+            calendar_sync_key = COALESCE(calendar_sync_key, $4)
+      WHERE event_id = $1 AND student_name = $2`,
+    [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_PENDING, bookingKey]
+  );
+
+  const gasRes = await createBookedLessonEventInGas({
+    student: {
+      id: row.student_id,
+      name: studentName,
+      status: row.student_status,
+      payment: row.student_payment,
+      is_child: !!row.student_is_child,
+    },
+    startIso: row.start ? new Date(row.start).toISOString() : null,
+    endIso: row.end ? new Date(row.end).toISOString() : null,
+    assignedTeacherName: row.teacher_name,
+    title: row.title || '',
+    location: String(row.lesson_kind || '').trim() === 'demo' ? '' : lessonModeToLocationLabel(row.lesson_mode),
+    lessonKind: row.lesson_kind,
+    bookingKey,
+  });
+  if (!gasRes.ok || !gasRes.eventId) {
+    await query(
+      `UPDATE monthly_schedule
+          SET calendar_sync_status = $3,
+              calendar_sync_error = $4,
+              calendar_sync_attempted_at = NOW()
+        WHERE event_id = $1 AND student_name = $2`,
+      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, gasRes.error || 'Failed to sync with calendar']
+    );
+    return { ok: false, error: gasRes.error || 'Failed to sync with calendar' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updateResult = await client.query(
+      `UPDATE monthly_schedule
+          SET event_id = $1,
+              calendar_sync_status = $4,
+              calendar_sync_error = NULL,
+              calendar_sync_attempted_at = NOW(),
+              calendar_synced_at = NOW(),
+              calendar_sync_key = COALESCE(calendar_sync_key, $5)
+        WHERE event_id = $2 AND student_name = $3
+          AND COALESCE(status, 'scheduled') <> 'cancelled'`,
+      [gasRes.eventId, row.event_id, row.student_name, CALENDAR_SYNC_STATUS_SYNCED, bookingKey]
+    );
+    if ((updateResult.rowCount || 0) === 0) {
+      await client.query('ROLLBACK');
+      try {
+        await deleteBookedLessonEventInGas(gasRes.eventId);
+      } catch {}
+      await query(
+        `UPDATE monthly_schedule
+            SET calendar_sync_status = $3,
+                calendar_sync_error = $4,
+                calendar_sync_attempted_at = NOW()
+          WHERE event_id = $1 AND student_name = $2`,
+        [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, 'Lesson changed before calendar sync completed']
+      );
+      return { ok: false, error: 'Lesson changed before calendar sync completed' };
+    }
+    await client.query(
+      `UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2 AND from_student_name = $3`,
+      [gasRes.eventId, row.event_id, row.student_name]
+    );
+    await client.query(
+      `UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2 AND to_student_name = $3`,
+      [gasRes.eventId, row.event_id, row.student_name]
+    );
+    await client.query('COMMIT');
+    return { ok: true, eventId: gasRes.eventId, calendarId: gasRes.calendarId, actionTaken: gasRes.actionTaken };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    await query(
+      `UPDATE monthly_schedule
+          SET calendar_sync_status = $3,
+              calendar_sync_error = $4,
+              calendar_sync_attempted_at = NOW()
+        WHERE event_id = $1 AND student_name = $2`,
+      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, err.message || 'Failed to update sync result']
+    );
+    return { ok: false, error: err.message || 'Failed to update sync result' };
+  } finally {
+    client.release();
+  }
+}
+
+function queueBookedLessonEventSync(localEventId) {
+  setTimeout(() => {
+    syncBookedLessonEventToCalendar(localEventId).catch((err) => {
+      console.error('[schedule/book background sync] failed:', err?.message || err);
+    });
+  }, 0);
 }
 
 function parsePackTotalFromTitle(title) {
@@ -896,37 +1059,15 @@ router.post('/book', async (req, res) => {
       }
       title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
     }
-    if (!isBookingGasEnabled()) {
-      return res.status(400).json({
-        error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
-      });
-    }
-
-    const gasRes = await createBookedLessonEventInGas({
-      student: {
-        id: student.id,
-        name: studentName,
-        status: student.status,
-        payment: student.payment,
-        is_child: !!student.is_child,
-      },
-      startIso: startDate.toISOString(),
-      endIso: endDate.toISOString(),
-      assignedTeacherName,
-      title,
-      location: lessonKindForBooking === 'demo' ? '' : locationLabel,
-    });
-    if (!gasRes.ok) {
-      return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
-    }
-
-    // Immediate local upsert prevents stale break-rule checks before next poll/backfill catches up.
     const lessonKind = lessonKindForBooking;
+    const localEventId = buildLocalBookingEventId();
+    const calendarSyncKey = buildCalendarSyncKey();
     await query(
       `INSERT INTO monthly_schedule
-        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at)
        VALUES
-        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, 'unknown', $10)
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL)
        ON CONFLICT (event_id, student_name)
        DO UPDATE SET
          title = EXCLUDED.title,
@@ -938,9 +1079,14 @@ router.post('/book', async (req, res) => {
          teacher_name = EXCLUDED.teacher_name,
          lesson_kind = EXCLUDED.lesson_kind,
          lesson_mode = EXCLUDED.lesson_mode,
-         student_id = EXCLUDED.student_id`,
+         student_id = EXCLUDED.student_id,
+         calendar_sync_status = EXCLUDED.calendar_sync_status,
+         calendar_sync_error = EXCLUDED.calendar_sync_error,
+         calendar_sync_key = EXCLUDED.calendar_sync_key,
+         calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
+         calendar_synced_at = EXCLUDED.calendar_synced_at`,
       [
-        gasRes.eventId,
+        localEventId,
         title,
         dateStr,
         startDate.toISOString(),
@@ -949,19 +1095,24 @@ router.post('/book', async (req, res) => {
         !!student.is_child,
         assignedTeacherName,
         lessonKind,
+        lessonKind === 'demo' ? 'unknown' : String(locationLabel || '').trim().toLowerCase() === 'online' ? 'online' : 'cafe',
         studentIdNum,
+        CALENDAR_SYNC_STATUS_PENDING,
+        calendarSyncKey,
       ]
     );
 
     res.status(201).json({
       ok: true,
-      event_id: gasRes.eventId,
-      calendar_id: gasRes.calendarId,
+      event_id: localEventId,
+      calendar_id: null,
       teacher_name: assignedTeacherName,
       date: dateStr,
       start: startDate.toISOString(),
       end: endDate.toISOString(),
+      calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
     });
+    queueBookedLessonEventSync(localEventId);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -978,6 +1129,36 @@ function getEventIdFromPath(path, suffix) {
   }
 }
 
+router.post('/sync', async (req, res) => {
+  try {
+    const eventId = String(req.body?.event_id || '').trim();
+    if (!eventId) return res.status(400).json({ error: 'event_id is required' });
+    const rows = (await query('SELECT event_id, status, calendar_sync_status FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    }
+    if (normalizeCalendarSyncStatus(rows[0]?.calendar_sync_status) === CALENDAR_SYNC_STATUS_SYNCED) {
+      return res.status(400).json({ error: 'Lesson is already synced with Google Calendar', event_id: eventId });
+    }
+    if (String(rows[0]?.status || '').toLowerCase() === 'cancelled') {
+      return res.status(400).json({ error: 'Cancelled lessons cannot be synced', event_id: eventId });
+    }
+    const syncRes = await syncBookedLessonEventToCalendar(eventId);
+    if (!syncRes.ok) {
+      return res.status(502).json({ error: syncRes.error || 'Failed to sync lesson with Google Calendar', event_id: eventId });
+    }
+    return res.json({
+      ok: true,
+      event_id: syncRes.eventId || eventId,
+      calendar_id: syncRes.calendarId || null,
+      action_taken: syncRes.actionTaken || 'created',
+      calendar_sync_status: CALENDAR_SYNC_STATUS_SYNCED,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 /** Cancel a scheduled lesson (set status to cancelled). eventId can contain @ and dots (e.g. email_date). */
 router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
   try {
@@ -986,7 +1167,7 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled()) {
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       // Google Calendar Graphite = colorId "8".
       await updateBookedLessonEventInGas(eventId, { colorId: '8' });
     }
@@ -1020,7 +1201,7 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled()) {
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       // Clear event color so calendar uses default color again.
       await updateBookedLessonEventInGas(eventId, { clearColor: true });
     }
@@ -1283,7 +1464,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled()) {
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       const del = await deleteBookedLessonEventInGas(eventId);
       if (!del.ok) {
         return res.status(502).json({
