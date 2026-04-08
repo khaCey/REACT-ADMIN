@@ -75,6 +75,17 @@ If you use in-app lesson booking (`POST /api/schedule/book`), the server must cr
 
 **Verify:** book a lesson in the UI, then refresh the page and confirm the booking still exists (and appears after the next poll sync).
 
+**Event color (Basil green for normal lessons):** The server sends **`colorId`** on `lesson_book_create` (`10` = Basil/green for regular and owner lessons; `5` = Banana for demo/trial). Your GAS must apply it after creating the event, or events keep the **calendar default color** (often purple/lavender):
+
+```javascript
+// After you create the CalendarEvent (createEvent or similar):
+if (payload.colorId) {
+  event.setColor(String(payload.colorId));
+}
+```
+
+Redeploy GAS after adding this. Existing events are unchanged until edited.
+
 ---
 
 ## 3. Rotating the poll API key (`key` query param)

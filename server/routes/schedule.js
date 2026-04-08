@@ -19,6 +19,7 @@ import {
   pickTeacherForBooking,
 } from '../lib/teacherBreakRules.js';
 import {
+  bookingEventColorId,
   createBookedLessonEventInGas,
   deleteBookedLessonEventInGas,
   updateBookedLessonEventInGas,
@@ -1245,8 +1246,8 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
-      // Clear event color so calendar uses default color again.
-      await updateBookedLessonEventInGas(eventId, { clearColor: true });
+      const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
+      await updateBookedLessonEventInGas(eventId, { colorId: bookingEventColorId(lk) });
     }
     await query(
       `UPDATE monthly_schedule SET status = 'scheduled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
