@@ -360,6 +360,8 @@ export default function BookLessonModal({
   const [pendingOverQuotaSlotKey, setPendingOverQuotaSlotKey] = useState(null)
   const [successModal, setSuccessModal] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  /** Hide the main calendar shell as soon as Submit runs; confirmation shows after the request. */
+  const [hideBookingCalendar, setHideBookingCalendar] = useState(false)
   const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
   const [weekCache, setWeekCache] = useState({})
@@ -597,6 +599,7 @@ export default function BookLessonModal({
       const [date, time] = selectedSlotKeys[0].split('T')
       setSubmitting(true)
       setError(null)
+      setHideBookingCalendar(true)
       try {
         await api.rescheduleLesson({
           source_event_id: rescheduleSource.eventID,
@@ -634,6 +637,7 @@ export default function BookLessonModal({
         })
       } catch (e) {
         setError(e?.message || 'Failed to reschedule lesson')
+        setHideBookingCalendar(false)
       } finally {
         setSubmitting(false)
       }
@@ -669,6 +673,7 @@ export default function BookLessonModal({
     const student_id = Number.isFinite(numericId) ? numericId : sidRaw
     setError(null)
     setSubmitting(true)
+    setHideBookingCalendar(true)
     try {
       const selected = [...(slotKeysOverride ?? selectedSlotKeys)].sort()
       const failed = []
@@ -699,11 +704,12 @@ export default function BookLessonModal({
       }
 
       if (successCount > 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} saved. Calendar sync is running in the background.`)
+        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
         onBooked?.()
       }
       if (failed.length > 0) {
         setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
+        setHideBookingCalendar(false)
       } else {
         setSelectedSlotKeys([])
       }
@@ -728,12 +734,13 @@ export default function BookLessonModal({
       }
       if (successCount > 0 && failed.length === 0) {
         setSuccessModal({
-          title: 'Booking saved',
-          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} saved. Google Calendar sync will finish in the background.`,
+          title: 'Booking Confirmed',
+          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} confirmed.`,
         })
       }
     } catch (e) {
       setError(e.message)
+      setHideBookingCalendar(false)
     } finally {
       setSubmitting(false)
     }
@@ -1131,7 +1138,7 @@ export default function BookLessonModal({
 
   return createPortal(
     <>
-      {modal}
+      {!hideBookingCalendar && modal}
       {packTotalPromptOpen && (
         <PreBookLessonModal
           overlayClassName="z-[10002]"
