@@ -75,16 +75,20 @@ If you use in-app lesson booking (`POST /api/schedule/book`), the server must cr
 
 **Verify:** book a lesson in the UI, then refresh the page and confirm the booking still exists (and appears after the next poll sync).
 
-**Event color (Basil green for normal lessons):** The server sends **`colorId`** on `lesson_book_create` (`10` = Basil/green for regular and owner lessons; `5` = Banana for demo/trial). Your GAS must apply it after creating the event, or events keep the **calendar default color** (often purple/lavender):
+**Event color (Basil green for normal lessons):** The server sends **`colorId`** on `lesson_book_create` (`10` = Basil/green for regular and owner lessons; `5` = Banana for demo/trial). Your GAS must apply it **after** you have an `event` (new or updated), or events keep the **calendar default color** (often purple/lavender).
+
+In `doPost`, inside the `lesson_book_create` branch, add this **immediately after** the `if (event) { ... } else { event = cal.createEvent(...) }` block and **before** `cacheMonthlyEventsForBothMonths()`:
 
 ```javascript
-// After you create the CalendarEvent (createEvent or similar):
-if (payload.colorId) {
-  event.setColor(String(payload.colorId));
+var colorIdCreate = String(body.colorId || '').trim();
+if (colorIdCreate) {
+  try { event.setColor(colorIdCreate); } catch (colorErrCreate) {}
 }
 ```
 
 Redeploy GAS after adding this. Existing events are unchanged until edited.
+
+**Note:** In `lesson_book_update`, `clearColor` is implemented as `setColor('1')`. Color id **`1` is Lavender** in Google Calendar, not “no color”—that can look purple. Prefer sending an explicit **`colorId`** from the server (e.g. `10` for Basil) instead of clearing when you want green.
 
 ---
 
