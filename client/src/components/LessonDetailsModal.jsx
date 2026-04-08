@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Loader2 } from 'lucide-react'
 
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
@@ -7,11 +8,15 @@ const STATUS_STYLES = {
   rescheduled: { color: 'bg-amber-500', text: 'Rescheduled' },
   demo: { color: 'bg-orange-500', text: 'Demo' },
   unscheduled: { color: 'bg-red-500', text: 'Unscheduled' },
-  sync_pending: { color: 'bg-amber-500', text: 'Syncing with Calendar' },
+  sync_pending: { color: 'bg-red-500', text: 'Syncing with Calendar' },
   sync_failed: { color: 'bg-red-600', text: 'Calendar sync failed' },
 }
 
 export default function LessonDetailsModal({ lesson, student, onClose, onCancel, onUncancel, onReschedule, onSyncWithCalendar, onRemove }) {
+  const [syncing, setSyncing] = useState(false)
+  useEffect(() => {
+    setSyncing(false)
+  }, [lesson?.eventID])
   useEffect(() => {
     if (!lesson) return
     const onKey = (e) => e.key === 'Escape' && onClose()
@@ -71,8 +76,14 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
     if (ok !== false) onClose()
   }
   const handleSyncWithCalendar = async () => {
-    const ok = await onSyncWithCalendar?.(lesson, student)
-    if (ok !== false) onClose()
+    if (syncing) return
+    setSyncing(true)
+    try {
+      const ok = await onSyncWithCalendar?.(lesson, student)
+      if (ok !== false) onClose()
+    } finally {
+      setSyncing(false)
+    }
   }
 
   return createPortal(
@@ -155,9 +166,12 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
               <button
                 type="button"
                 onClick={handleSyncWithCalendar}
-                className="rounded-md border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 cursor-pointer"
+                disabled={syncing}
+                aria-busy={syncing}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-white"
               >
-                Sync with Calendar
+                {syncing && <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+                {syncing ? 'Syncing…' : 'Sync with Calendar'}
               </button>
             )}
             <button
