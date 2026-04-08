@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
+  reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },
   rescheduled: { color: 'bg-amber-500', text: 'Rescheduled' },
   demo: { color: 'bg-orange-500', text: 'Demo' },
   unscheduled: { color: 'bg-red-500', text: 'Unscheduled' },
@@ -12,7 +13,17 @@ const STATUS_STYLES = {
   sync_failed: { color: 'bg-red-600', text: 'Calendar sync failed' },
 }
 
-export default function LessonDetailsModal({ lesson, student, onClose, onCancel, onUncancel, onReschedule, onSyncWithCalendar, onRemove }) {
+export default function LessonDetailsModal({
+  lesson,
+  student,
+  onClose,
+  onCancel,
+  onUncancel,
+  onOpenRescheduleChoice,
+  onSelectRescheduleDate,
+  onSyncWithCalendar,
+  onRemove,
+}) {
   const [syncing, setSyncing] = useState(false)
   useEffect(() => {
     setSyncing(false)
@@ -28,25 +39,35 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
 
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
+  const isAwaitingRescheduleDate = status === 'cancelled' && !!lesson.awaitingRescheduleDate
+
   const displayStatus =
     status === 'unscheduled'
       ? 'unscheduled'
-      : status === 'cancelled'
-        ? 'cancelled'
-        : lesson?.rescheduledTo
-          ? 'rescheduled'
-          : calendarSyncStatus === 'failed'
-            ? 'sync_failed'
-            : calendarSyncStatus === 'pending'
-              ? 'sync_pending'
-              : status
+      : isAwaitingRescheduleDate
+        ? 'reschedule_date_tbd'
+        : status === 'cancelled'
+          ? 'cancelled'
+          : lesson?.rescheduledTo
+            ? 'rescheduled'
+            : calendarSyncStatus === 'failed'
+              ? 'sync_failed'
+              : calendarSyncStatus === 'pending'
+                ? 'sync_pending'
+                : status
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
   const hasRescheduledTo = !!lesson?.rescheduledTo
   const canSyncWithCalendar = !isUnscheduled && !isCancelled && calendarSyncStatus !== 'synced'
-  const canReschedule = !isUnscheduled && calendarSyncStatus === 'synced'
-  const hasExtraNotes = !!lesson?.rescheduledTo || !!lesson?.rescheduledFrom || !!lesson?.calendarSyncError
+  const canReschedule =
+    !isUnscheduled && !isCancelled && calendarSyncStatus === 'synced'
+  const canSelectRescheduleDate = isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
+  const hasExtraNotes =
+    !!lesson?.rescheduledTo ||
+    !!lesson?.rescheduledFrom ||
+    !!lesson?.calendarSyncError ||
+    isAwaitingRescheduleDate
 
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`
@@ -63,9 +84,11 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
     const ok = await onCancel?.(lesson, student)
     if (ok !== false) onClose()
   }
-  const handleReschedule = async () => {
-    const ok = await onReschedule?.(lesson, student)
-    if (ok !== false) onClose()
+  const handleOpenRescheduleChoice = () => {
+    onOpenRescheduleChoice?.(lesson, student)
+  }
+  const handleSelectRescheduleDate = () => {
+    onSelectRescheduleDate?.(lesson, student)
   }
   const handleUncancel = async () => {
     const ok = await onUncancel?.(lesson, student)
@@ -129,6 +152,9 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
               {lesson?.calendarSyncError && (
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
               )}
+              {isAwaitingRescheduleDate && (
+                <div className="text-amber-900">Awaiting a new date (cancelled in Google Calendar).</div>
+              )}
               {!hasExtraNotes && 'No additional notes available.'}
             </div>
           </div>
@@ -156,10 +182,19 @@ export default function LessonDetailsModal({ lesson, student, onClose, onCancel,
             {canReschedule && (
               <button
                 type="button"
-                onClick={handleReschedule}
+                onClick={handleOpenRescheduleChoice}
                 className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer"
               >
                 Reschedule
+              </button>
+            )}
+            {canSelectRescheduleDate && (
+              <button
+                type="button"
+                onClick={handleSelectRescheduleDate}
+                className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer"
+              >
+                Select date…
               </button>
             )}
             {canSyncWithCalendar && (

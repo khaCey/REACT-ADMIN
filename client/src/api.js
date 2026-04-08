@@ -148,6 +148,9 @@ export const api = {
     fetchApi('/schedule/sync', { method: 'POST', body: JSON.stringify({ event_id: eventId }) }),
   cancelScheduleEvent: (eventId) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/cancel`, { method: 'PATCH' }),
+  /** Cancel in calendar (graphite) but mark as awaiting new date (orange in app). */
+  rescheduleAwaitingDate: (eventId) =>
+    fetchApi(`/schedule/${encodeURIComponent(eventId)}/reschedule-awaiting-date`, { method: 'POST' }),
   uncancelScheduleEvent: (eventId) =>
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/uncancel`, { method: 'PATCH' }),
   rescheduleScheduleEvent: (eventId, body) =>

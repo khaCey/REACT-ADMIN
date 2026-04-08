@@ -1159,6 +1159,46 @@ router.post('/sync', async (req, res) => {
   }
 });
 
+/**
+ * Mark lesson as cancelled in calendar (graphite) but flag as awaiting a new date (orange in app vs plain cancel).
+ */
+router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, async (req, res) => {
+  try {
+    const eventId =
+      getEventIdFromPath(req.path, 'reschedule-awaiting-date') ||
+      decodeURIComponent((req.params[0] || req.params[1] || '').trim());
+    const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    if (oldRows.length === 0) {
+      return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    }
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
+      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
+    }
+    await query(
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = TRUE WHERE event_id = $1`,
+      [eventId]
+    );
+    const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    for (let i = 0; i < oldRows.length; i++) {
+      const oldRow = oldRows[i];
+      const newRow = newRows.find((r) => r.student_name === oldRow.student_name) || oldRow;
+      await logChange(
+        {
+          entityType: 'monthly_schedule',
+          entityKey: `${eventId}_${oldRow.student_name}`,
+          action: 'update',
+          oldData: oldRow,
+          newData: newRow,
+        },
+        req
+      );
+    }
+    res.json({ ok: true, event_id: eventId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** Cancel a scheduled lesson (set status to cancelled). eventId can contain @ and dots (e.g. email_date). */
 router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
   try {
@@ -1171,7 +1211,10 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
       // Google Calendar Graphite = colorId "8".
       await updateBookedLessonEventInGas(eventId, { colorId: '8' });
     }
-    await query(`UPDATE monthly_schedule SET status = 'cancelled' WHERE event_id = $1`, [eventId]);
+    await query(
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
+      [eventId]
+    );
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     for (let i = 0; i < oldRows.length; i++) {
       const oldRow = oldRows[i];
@@ -1205,7 +1248,10 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
       // Clear event color so calendar uses default color again.
       await updateBookedLessonEventInGas(eventId, { clearColor: true });
     }
-    await query(`UPDATE monthly_schedule SET status = 'scheduled' WHERE event_id = $1`, [eventId]);
+    await query(
+      `UPDATE monthly_schedule SET status = 'scheduled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
+      [eventId]
+    );
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     for (let i = 0; i < oldRows.length; i++) {
       const oldRow = oldRows[i];
@@ -1316,7 +1362,7 @@ router.post('/reschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title
+        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date
          FROM monthly_schedule
          WHERE event_id = $1`,
         [sourceEventId]
@@ -1335,7 +1381,9 @@ router.post('/reschedule-linked', async (req, res) => {
     if (!source) {
       return res.status(404).json({ error: 'Source lesson not found for student' });
     }
-    if (String(source.status || '').toLowerCase() === 'cancelled') {
+    const sourceCancelled = String(source.status || '').toLowerCase() === 'cancelled';
+    const awaitingDate = !!source.awaiting_reschedule_date;
+    if (sourceCancelled && !awaitingDate) {
       return res.status(400).json({ error: 'Source lesson is already cancelled' });
     }
     const sourceStudentName = String(source.student_name || source_student_name || '').trim();
@@ -1426,7 +1474,10 @@ router.post('/reschedule-linked', async (req, res) => {
     if (isBookingGasEnabled()) {
       await updateBookedLessonEventInGas(sourceEventId, { colorId: '8' });
     }
-    await client.query(`UPDATE monthly_schedule SET status = 'cancelled' WHERE event_id = $1 AND student_name = $2`, [sourceEventId, sourceStudentName]);
+    await client.query(
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1 AND student_name = $2`,
+      [sourceEventId, sourceStudentName]
+    );
     await client.query(
       `INSERT INTO reschedules (from_event_id, from_student_name, to_event_id, to_student_name, created_by_staff_id)
        VALUES ($1, $2, $3, $4, $5)

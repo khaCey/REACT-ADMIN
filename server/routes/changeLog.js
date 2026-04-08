@@ -218,7 +218,8 @@ async function applyUpdate(entity_type, data) {
       `UPDATE monthly_schedule SET title = $3, date = $4::date, start = $5::timestamptz, "end" = $6::timestamptz,
         status = $7, is_kids_lesson = $8, teacher_name = $9, lesson_kind = $10, student_id = $11, lesson_mode = $12,
         calendar_sync_status = $13, calendar_sync_error = $14, calendar_sync_key = $15,
-        calendar_sync_attempted_at = $16::timestamptz, calendar_synced_at = $17::timestamptz
+        calendar_sync_attempted_at = $16::timestamptz, calendar_synced_at = $17::timestamptz,
+        awaiting_reschedule_date = COALESCE($18::boolean, FALSE)
        WHERE event_id = $1 AND student_name = $2`,
       [
         o.event_id,
@@ -238,6 +239,7 @@ async function applyUpdate(entity_type, data) {
         o.calendar_sync_key ?? null,
         o.calendar_sync_attempted_at ?? null,
         o.calendar_synced_at ?? null,
+        o.awaiting_reschedule_date ?? false,
       ]
     );
   }
@@ -314,14 +316,15 @@ async function applyCreate(entity_type, data) {
     await query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id, lesson_mode,
-         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $17::timestamptz)
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at, awaiting_reschedule_date)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $17::timestamptz, COALESCE($18::boolean, FALSE))
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind,
          student_id = EXCLUDED.student_id, lesson_mode = EXCLUDED.lesson_mode, calendar_sync_status = EXCLUDED.calendar_sync_status,
          calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_sync_key = EXCLUDED.calendar_sync_key,
-         calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at, calendar_synced_at = EXCLUDED.calendar_synced_at`,
+         calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at, calendar_synced_at = EXCLUDED.calendar_synced_at,
+         awaiting_reschedule_date = EXCLUDED.awaiting_reschedule_date`,
       [
         o.event_id,
         o.title ?? '',
@@ -340,6 +343,7 @@ async function applyCreate(entity_type, data) {
         o.calendar_sync_key ?? null,
         o.calendar_sync_attempted_at ?? null,
         o.calendar_synced_at ?? null,
+        o.awaiting_reschedule_date ?? false,
       ]
     );
   }

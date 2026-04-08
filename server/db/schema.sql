@@ -91,6 +91,7 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_error TEXT;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_key VARCHAR(100);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_attempted_at TIMESTAMPTZ;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_synced_at TIMESTAMPTZ;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS awaiting_reschedule_date BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   ON monthly_schedule(calendar_sync_key)

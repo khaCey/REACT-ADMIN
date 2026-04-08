@@ -5,6 +5,7 @@ import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import LessonDetailsModal from './LessonDetailsModal'
 import ConfirmActionModal from './ConfirmActionModal'
 import PreBookLessonModal from './PreBookLessonModal'
+import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
@@ -36,10 +37,17 @@ function addOneMonthYyyyMm(yyyyMm) {
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60', label: 'Cancelled' },
+  reschedule_date_tbd: {
+    accent: 'bg-orange-500',
+    bg: 'bg-orange-50',
+    dot: 'bg-orange-500',
+    hoverRing: 'hover:ring-orange-500/60',
+    label: 'Date TBD',
+  },
   rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
   demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60', label: 'Demo' },
   unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Unscheduled' },
-  sync_pending: { accent: 'bg-amber-500', bg: 'bg-amber-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Syncing' },
+  sync_pending: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Syncing' },
   sync_failed: { accent: 'bg-red-600', bg: 'bg-red-100', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
 }
 
@@ -57,9 +65,11 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const displayStatus =
     rawStatus === 'unscheduled'
       ? 'unscheduled'
-      : rawStatus === 'cancelled'
-        ? 'cancelled'
-        : lesson.rescheduledTo
+      : rawStatus === 'cancelled' && lesson.awaitingRescheduleDate
+        ? 'reschedule_date_tbd'
+        : rawStatus === 'cancelled'
+          ? 'cancelled'
+          : lesson.rescheduledTo
           ? 'rescheduled'
           : syncStatus === 'failed'
             ? 'sync_failed'
@@ -151,6 +161,7 @@ export default function LessonsThisMonth({
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
+  const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [removing, setRemoving] = useState(false)
   const [actionError, setActionError] = useState(null)
@@ -191,7 +202,7 @@ export default function LessonsThisMonth({
       return false
     }
   }
-  const handleReschedule = (lesson) => {
+  const openBookingReschedule = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
     if (typeof onBookLesson !== 'function') {
@@ -199,6 +210,16 @@ export default function LessonsThisMonth({
       return
     }
     onBookLesson({ rescheduleSource: lesson })
+  }
+  const handleOpenRescheduleChoice = (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return
+    setActionError(null)
+    setRescheduleChoiceLesson(lesson)
+  }
+  const handleSelectRescheduleDate = (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return
+    setSelectedLesson(null)
+    openBookingReschedule(lesson)
   }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
@@ -410,9 +431,34 @@ export default function LessonsThisMonth({
           onClose={() => { setSelectedLesson(null); setActionError(null) }}
           onCancel={handleCancel}
           onUncancel={handleUncancel}
-          onReschedule={handleReschedule}
+          onOpenRescheduleChoice={handleOpenRescheduleChoice}
+          onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
           onRemove={handleRemove}
+        />
+      )}
+      {rescheduleChoiceLesson && (
+        <RescheduleChoiceModal
+          onClose={() => setRescheduleChoiceLesson(null)}
+          onSelectNow={() => {
+            const l = rescheduleChoiceLesson
+            setRescheduleChoiceLesson(null)
+            setSelectedLesson(null)
+            openBookingReschedule(l)
+          }}
+          onSelectLater={async () => {
+            const l = rescheduleChoiceLesson
+            setActionError(null)
+            try {
+              await api.rescheduleAwaitingDate(l.eventID)
+              success('Lesson marked as awaiting a new date')
+              setRescheduleChoiceLesson(null)
+              setSelectedLesson(null)
+              await refetch()
+            } catch (e) {
+              setActionError(e?.message || 'Request failed')
+            }
+          }}
         />
       )}
       {pendingRemoveLesson && (

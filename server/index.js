@@ -162,6 +162,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
     for (const yyyyMm of allYyyyMm) {
       const scheduleResult = await query(
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
+                m.awaiting_reschedule_date,
                 m.calendar_sync_status, m.calendar_sync_error,
                 rt.to_event_id AS rescheduled_to_event_id,
                 to_char(mt.date, 'YYYY-MM-DD') AS rescheduled_to_date,
@@ -195,6 +196,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           time,
           status: (r.status || 'scheduled').toLowerCase(),
           eventID: r.event_id,
+          awaitingRescheduleDate: !!r.awaiting_reschedule_date,
           calendarSyncStatus: (r.calendar_sync_status || 'synced').toLowerCase(),
           calendarSyncError: r.calendar_sync_error || null,
           isGroup: (r.student_count || 0) > 1,
