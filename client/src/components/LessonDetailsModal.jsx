@@ -268,7 +268,7 @@ export default function LessonDetailsModal({
     {cancelConfirmOpen && (
       <ConfirmActionModal
         title="Cancel lesson"
-        message="Cancel this lesson? It will be marked on Google Calendar (graphite)."
+        message="Cancel this lesson?"
         confirmLabel="Cancel lesson"
         cancelLabel="Back"
         destructive
@@ -283,7 +283,7 @@ export default function LessonDetailsModal({
     {uncancelConfirmOpen && (
       <ConfirmActionModal
         title="Restore lesson"
-        message="Restore this lesson? It will show as scheduled on Google Calendar again."
+        message="Restore this lesson?"
         confirmLabel="Uncancel"
         cancelLabel="Back"
         confirming={uncancelling}
