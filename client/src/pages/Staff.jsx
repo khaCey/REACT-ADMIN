@@ -807,7 +807,7 @@ export default function Staff() {
                     const timelineHeight = hourLabels.length * TEACHER_CALENDAR_ROW_HEIGHT
                     return (
                       <>
-                        <div className="flex flex-wrap gap-2 mb-3 px-1">
+                        <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
                           {englishTeachers.map((name) => (
                             <span
                               key={name}
