@@ -5,7 +5,7 @@ import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
-import { GOOGLE_CALENDAR_EVENT_COLORS } from '../constants/googleCalendarColors'
+import StaffScheduleColorPicker from './StaffScheduleColorPicker'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -181,22 +181,17 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Schedule color (Google Calendar)</label>
-            <p className="text-xs text-gray-500 mb-1">
-              Used on Staff shift grid and English teacher week calendar. Matches Calendar event color names/IDs.
+            <label className="block text-sm font-medium text-slate-700 mb-1" id="edit-staff-schedule-color-label">
+              Schedule color (Google Calendar)
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Click a block — same palette as Google Calendar events. Used on the shift grid and English teacher week view.
             </p>
-            <select
-              value={String(calendar_color_id ?? '')}
-              onChange={(e) => setCalendarColorId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-            >
-              <option value="">Auto (rotate palette if unset)</option>
-              {GOOGLE_CALENDAR_EVENT_COLORS.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.id} — {c.label}
-                </option>
-              ))}
-            </select>
+            <StaffScheduleColorPicker
+              value={calendar_color_id}
+              onChange={setCalendarColorId}
+              idPrefix={`edit-staff-${staff.id}-color`}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>

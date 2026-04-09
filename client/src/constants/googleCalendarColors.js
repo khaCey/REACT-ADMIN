@@ -5,17 +5,17 @@
  */
 
 export const GOOGLE_CALENDAR_EVENT_COLORS = [
-  { id: '1', label: 'Lavender', chipClass: 'bg-[#a4bdfc] border-[#6b8fd4] text-[#1d1d1d]' },
-  { id: '2', label: 'Sage', chipClass: 'bg-[#7ae7bf] border-[#3cb878] text-[#1d1d1d]' },
-  { id: '3', label: 'Grape', chipClass: 'bg-[#dbadff] border-[#a855e8] text-[#1d1d1d]' },
-  { id: '4', label: 'Flamingo', chipClass: 'bg-[#ff887c] border-[#ea4335] text-[#1d1d1d]' },
-  { id: '5', label: 'Banana', chipClass: 'bg-[#fbd75b] border-[#f0b400] text-[#1d1d1d]' },
-  { id: '6', label: 'Tangerine', chipClass: 'bg-[#ffb878] border-[#fa903e] text-[#1d1d1d]' },
-  { id: '7', label: 'Peacock', chipClass: 'bg-[#46d6ff] border-[#12a5d8] text-[#1d1d1d]' },
-  { id: '8', label: 'Graphite', chipClass: 'bg-[#e1e1e1] border-[#9e9e9e] text-[#1d1d1d]' },
-  { id: '9', label: 'Blueberry', chipClass: 'bg-[#5484ed] border-[#3367d6] text-white' },
-  { id: '10', label: 'Basil', chipClass: 'bg-[#51b749] border-[#0f9d58] text-white' },
-  { id: '11', label: 'Tomato', chipClass: 'bg-[#dc2127] border-[#b3141b] text-white' },
+  { id: '1', label: 'Lavender', swatchHex: '#a4bdfc', chipClass: 'bg-[#a4bdfc] border-[#6b8fd4] text-[#1d1d1d]' },
+  { id: '2', label: 'Sage', swatchHex: '#7ae7bf', chipClass: 'bg-[#7ae7bf] border-[#3cb878] text-[#1d1d1d]' },
+  { id: '3', label: 'Grape', swatchHex: '#dbadff', chipClass: 'bg-[#dbadff] border-[#a855e8] text-[#1d1d1d]' },
+  { id: '4', label: 'Flamingo', swatchHex: '#ff887c', chipClass: 'bg-[#ff887c] border-[#ea4335] text-[#1d1d1d]' },
+  { id: '5', label: 'Banana', swatchHex: '#fbd75b', chipClass: 'bg-[#fbd75b] border-[#f0b400] text-[#1d1d1d]' },
+  { id: '6', label: 'Tangerine', swatchHex: '#ffb878', chipClass: 'bg-[#ffb878] border-[#fa903e] text-[#1d1d1d]' },
+  { id: '7', label: 'Peacock', swatchHex: '#46d6ff', chipClass: 'bg-[#46d6ff] border-[#12a5d8] text-[#1d1d1d]' },
+  { id: '8', label: 'Graphite', swatchHex: '#e1e1e1', chipClass: 'bg-[#e1e1e1] border-[#9e9e9e] text-[#1d1d1d]' },
+  { id: '9', label: 'Blueberry', swatchHex: '#5484ed', chipClass: 'bg-[#5484ed] border-[#3367d6] text-white' },
+  { id: '10', label: 'Basil', swatchHex: '#51b749', chipClass: 'bg-[#51b749] border-[#0f9d58] text-white' },
+  { id: '11', label: 'Tomato', swatchHex: '#dc2127', chipClass: 'bg-[#dc2127] border-[#b3141b] text-white' },
 ]
 
 const BY_ID = Object.fromEntries(GOOGLE_CALENDAR_EVENT_COLORS.map((c) => [c.id, c]))
