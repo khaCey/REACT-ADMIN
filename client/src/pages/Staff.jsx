@@ -105,6 +105,24 @@ const TEACHER_CARD_COLORS = [
   'bg-slate-100 border-slate-300 text-slate-800',
 ]
 
+/** Match schedule/API teacher_name to Staff list despite extra spaces or casing. */
+function teacherNameMatchKey(name) {
+  return String(name ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+/** Map normalized key → display name from sorted English teachers (stable colors in legend + blocks). */
+function canonicalTeacherNameMap(englishTeachers) {
+  const map = new Map()
+  for (const name of englishTeachers) {
+    const k = teacherNameMatchKey(name)
+    if (k && !map.has(k)) map.set(k, name)
+  }
+  return map
+}
+
 /** Parse "HH:MM" or "HH:MM:SS" to minutes from TEACHER_CALENDAR_START_HOUR (10). Clamp to [0, TEACHER_CALENDAR_TOTAL_MINUTES]. */
 function minutesFromTimelineStart(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return 0
@@ -726,15 +744,16 @@ export default function Staff() {
                     const staff = Array.isArray(staffList) ? staffList : []
                     const englishTeachers = staff
                       .filter((s) => s && s.staff_type === 'english_teacher')
-                      .map((s) => s.name)
+                      .map((s) => String(s.name || '').trim())
                       .filter(Boolean)
-                      .sort()
-                    const englishTeacherSet = new Set(englishTeachers)
+                      .sort((a, b) => a.localeCompare(b))
+                    const canonicalTeacher = canonicalTeacherNameMap(englishTeachers)
                     const byDate = {}
                     for (const ev of events) {
                       if (!ev || typeof ev !== 'object') continue
-                      const t = (ev.teacher_name != null && String(ev.teacher_name)) || '—'
-                      if (!englishTeacherSet.has(t)) continue
+                      const raw = ev.teacher_name != null ? String(ev.teacher_name) : ''
+                      const t = canonicalTeacher.get(teacherNameMatchKey(raw))
+                      if (!t) continue
                       const d = ev.date != null ? String(ev.date).slice(0, 10) : ''
                       if (!d) continue
                       if (!byDate[d]) byDate[d] = []
