@@ -200,7 +200,7 @@ export default function Staff() {
   })
 
   const loadStaff = useCallback(() => {
-    api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
+    return api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
   }, [])
 
   const loadShiftLog = useCallback(() => {
@@ -956,14 +956,13 @@ export default function Staff() {
         <EditStaffModal
           staff={selectedStaff}
           onClose={() => setSelectedStaff(null)}
-          onSaved={(updated) => {
+          onSaved={async (updated) => {
             if (updated) {
               setStaffList((prev) =>
                 prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
               )
-            } else {
-              loadStaff()
             }
+            await loadStaff()
           }}
           onDeleted={(id) => {
             setStaffList((prev) => prev.filter((s) => s.id !== id))

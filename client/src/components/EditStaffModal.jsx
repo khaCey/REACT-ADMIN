@@ -18,10 +18,20 @@ const ROLE_OPTIONS = [
   { value: 'admin', label: 'Admin' },
 ]
 
+/** Keep controlled <select> in sync with API (string ids "1"–"11"). */
+function normalizeColorIdForSelect(raw) {
+  if (raw == null || raw === '') return ''
+  const s = String(raw).trim()
+  if (s === '') return ''
+  return s
+}
+
 export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   const { success } = useToast()
   const [calendar_id, setCalendarId] = useState(staff?.calendar_id ?? '')
-  const [calendar_color_id, setCalendarColorId] = useState(staff?.calendar_color_id ?? '')
+  const [calendar_color_id, setCalendarColorId] = useState(() =>
+    normalizeColorIdForSelect(staff?.calendar_color_id)
+  )
   const [staff_type, setStaffType] = useState(staff?.staff_type ?? 'japanese_staff')
   const [role, setRole] = useState(() =>
     staff?.is_admin ? 'admin' : staff?.is_operator ? 'operator' : 'staff'
@@ -36,7 +46,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   useEffect(() => {
     if (staff) {
       setCalendarId(staff.calendar_id ?? '')
-      setCalendarColorId(staff.calendar_color_id ?? '')
+      setCalendarColorId(normalizeColorIdForSelect(staff.calendar_color_id))
       setStaffType(staff.staff_type ?? 'japanese_staff')
       setRole(staff.is_admin ? 'admin' : staff.is_operator ? 'operator' : 'staff')
       setActive(staff.active !== false)
@@ -49,9 +59,10 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     setError('')
     setSubmitting(true)
     try {
+      const colorTrim = String(calendar_color_id ?? '').trim()
       const payload = {
-        calendar_id: calendar_id.trim() || null,
-        calendar_color_id: calendar_color_id === '' ? null : calendar_color_id,
+        calendar_id: String(calendar_id ?? '').trim() || null,
+        calendar_color_id: colorTrim === '' ? null : colorTrim,
         staff_type: staff_type,
         active,
       }
@@ -60,6 +71,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
         payload.is_operator = role === 'admin' || role === 'operator'
       }
       const res = await api.updateStaff(staff.id, payload)
+      success('Staff saved')
       await onSaved?.(res?.staff)
       onClose()
     } catch (err) {
@@ -174,7 +186,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
               Used on Staff shift grid and English teacher week calendar. Matches Calendar event color names/IDs.
             </p>
             <select
-              value={calendar_color_id}
+              value={String(calendar_color_id ?? '')}
               onChange={(e) => setCalendarColorId(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
             >
