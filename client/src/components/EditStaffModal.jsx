@@ -5,6 +5,7 @@ import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
+import { GOOGLE_CALENDAR_EVENT_COLORS } from '../constants/googleCalendarColors'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -20,6 +21,7 @@ const ROLE_OPTIONS = [
 export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   const { success } = useToast()
   const [calendar_id, setCalendarId] = useState(staff?.calendar_id ?? '')
+  const [calendar_color_id, setCalendarColorId] = useState(staff?.calendar_color_id ?? '')
   const [staff_type, setStaffType] = useState(staff?.staff_type ?? 'japanese_staff')
   const [role, setRole] = useState(() =>
     staff?.is_admin ? 'admin' : staff?.is_operator ? 'operator' : 'staff'
@@ -34,6 +36,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   useEffect(() => {
     if (staff) {
       setCalendarId(staff.calendar_id ?? '')
+      setCalendarColorId(staff.calendar_color_id ?? '')
       setStaffType(staff.staff_type ?? 'japanese_staff')
       setRole(staff.is_admin ? 'admin' : staff.is_operator ? 'operator' : 'staff')
       setActive(staff.active !== false)
@@ -48,6 +51,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     try {
       const payload = {
         calendar_id: calendar_id.trim() || null,
+        calendar_color_id: calendar_color_id === '' ? null : calendar_color_id,
         staff_type: staff_type,
         active,
       }
@@ -163,6 +167,24 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
                 </button>
               )}
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Schedule color (Google Calendar)</label>
+            <p className="text-xs text-gray-500 mb-1">
+              Used on Staff shift grid and English teacher week calendar. Matches Calendar event color names/IDs.
+            </p>
+            <select
+              value={calendar_color_id}
+              onChange={(e) => setCalendarColorId(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+            >
+              <option value="">Auto (rotate palette if unset)</option>
+              {GOOGLE_CALENDAR_EVENT_COLORS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.id} — {c.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>

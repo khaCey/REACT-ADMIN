@@ -11,7 +11,7 @@ const router = Router();
 router.get('/', requireAuth, requireAdminOrOperator, async (req, res) => {
   try {
     const result = await query(
-      'SELECT id, name, is_admin, is_operator, calendar_id, staff_type, active FROM staff ORDER BY name ASC'
+      'SELECT id, name, is_admin, is_operator, calendar_id, staff_type, active, calendar_color_id FROM staff ORDER BY name ASC'
     );
     res.json({
       staff: result.rows.map((r) => ({
@@ -22,6 +22,7 @@ router.get('/', requireAuth, requireAdminOrOperator, async (req, res) => {
         calendar_id: r.calendar_id ?? '',
         staff_type: r.staff_type ?? 'japanese_staff',
         active: r.active !== false,
+        calendar_color_id: r.calendar_color_id != null && String(r.calendar_color_id).trim() !== '' ? String(r.calendar_color_id).trim() : '',
       })),
     });
   } catch (err) {
@@ -36,7 +37,7 @@ router.patch('/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ error: 'Invalid staff id' });
     }
-    const { calendar_id, is_operator, is_admin, staff_type, active } = req.body || {};
+    const { calendar_id, is_operator, is_admin, staff_type, active, calendar_color_id } = req.body || {};
     const isAdmin = !!req.staff.is_admin || String(req.staff.name || '').trim().toLowerCase() === 'khacey';
 
     const updates = [];
@@ -74,13 +75,21 @@ router.patch('/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
       idx++;
     }
 
+    const validColorIds = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']);
+    if (calendar_color_id !== undefined) {
+      const raw = calendar_color_id == null ? '' : String(calendar_color_id).trim();
+      updates.push(`calendar_color_id = $${idx}`);
+      values.push(raw === '' || !validColorIds.has(raw) ? null : raw);
+      idx++;
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
     values.push(id);
     const result = await query(
-      `UPDATE staff SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id, name, is_admin, is_operator, calendar_id, staff_type, active`,
+      `UPDATE staff SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id, name, is_admin, is_operator, calendar_id, staff_type, active, calendar_color_id`,
       values
     );
     if (result.rows.length === 0) {
@@ -96,6 +105,10 @@ router.patch('/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
         calendar_id: r.calendar_id ?? '',
         staff_type: r.staff_type ?? 'japanese_staff',
         active: r.active !== false,
+        calendar_color_id:
+          r.calendar_color_id != null && String(r.calendar_color_id).trim() !== ''
+            ? String(r.calendar_color_id).trim()
+            : '',
       },
     });
   } catch (err) {

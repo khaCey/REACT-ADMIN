@@ -8,6 +8,11 @@ import EditStaffModal from '../components/EditStaffModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
+import {
+  googleCalendarColorLabel,
+  staffScheduleCellTintClass,
+  staffScheduleColorChipClass,
+} from '../constants/googleCalendarColors'
 
 function formatShiftTime(iso) {
   if (!iso) return null
@@ -93,17 +98,6 @@ const TEACHER_CALENDAR_START_HOUR = 10
 const TEACHER_CALENDAR_END_HOUR = 21
 const TEACHER_CALENDAR_TOTAL_MINUTES = (TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR) * 60
 const TEACHER_CALENDAR_ROW_HEIGHT = 24
-/** Card colours per teacher (one calendar, different colour per staff). */
-const TEACHER_CARD_COLORS = [
-  'bg-blue-100 border-blue-300 text-blue-900',
-  'bg-amber-100 border-amber-300 text-amber-900',
-  'bg-emerald-100 border-emerald-300 text-emerald-900',
-  'bg-violet-100 border-violet-300 text-violet-900',
-  'bg-rose-100 border-rose-300 text-rose-900',
-  'bg-cyan-100 border-cyan-300 text-cyan-900',
-  'bg-orange-100 border-orange-300 text-orange-900',
-  'bg-slate-100 border-slate-300 text-slate-800',
-]
 
 /** Match schedule/API teacher_name to Staff list despite extra spaces or casing. */
 function teacherNameMatchKey(name) {
@@ -387,6 +381,7 @@ export default function Staff() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Name</th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Color</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Calendar ID</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Type</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Role</th>
@@ -401,6 +396,20 @@ export default function Staff() {
                       className="hover:bg-gray-100 cursor-pointer"
                     >
                       <td className="px-4 py-2 font-medium text-gray-900">{s.name}</td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${staffScheduleColorChipClass(s, s.id)}`}
+                          title={
+                            s.calendar_color_id
+                              ? `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
+                              : 'Auto (set in Edit Staff)'
+                          }
+                        >
+                          {s.calendar_color_id
+                            ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
+                            : 'Auto'}
+                        </span>
+                      </td>
                       <td className="px-4 py-2 text-sm text-gray-600 truncate max-w-[200px]">
                         {s.calendar_id || '—'}
                       </td>
@@ -432,6 +441,9 @@ export default function Staff() {
 
           <section className="mb-8">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift management (week view)</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Cell tint follows each staff member&apos;s Google Calendar color (set in Edit Staff). Unassigned slots stay white.
+            </p>
             <div className="flex items-center gap-2 mb-3">
               <button
                 type="button"
@@ -506,6 +518,16 @@ export default function Staff() {
                           const slot = shiftType ? slotByKey(date, shiftType) : null
                           const isAdjusting =
                             adjustSlot && adjustSlot.date === date && adjustSlot.shift_type === shiftType
+                          const assignedStaff = slot?.staff_name
+                            ? calendarStaffOptions.find((x) => x.name === slot.staff_name)
+                            : null
+                          const staffOptIdx = assignedStaff
+                            ? calendarStaffOptions.findIndex((x) => x.id === assignedStaff.id)
+                            : 0
+                          const shiftCellTint =
+                            assignedStaff != null
+                              ? staffScheduleCellTintClass(assignedStaff, staffOptIdx >= 0 ? staffOptIdx : 0)
+                              : 'bg-white border-gray-100'
 
                           if (!shiftType) {
                             return (
@@ -517,7 +539,7 @@ export default function Staff() {
 
                           return (
                             <td key={date} className="px-2 py-2 min-w-[140px] align-top">
-                              <div className="space-y-1">
+                              <div className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint}`}>
                                 <select
                                   value={slot?.staff_name ?? ''}
                                   onChange={(e) => {
@@ -575,6 +597,7 @@ export default function Staff() {
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Teacher calendar</h3>
             <p className="text-sm text-gray-600 mb-3">
               Time blocks from teacher_schedules for this week (English teachers only; from Google Calendar fetch or shift assignment).
+              Legend colors use each teacher&apos;s Schedule color from Edit Staff (Google Calendar palette).
             </p>
             <div className="flex items-center gap-2 mb-4">
               <button
@@ -774,7 +797,8 @@ export default function Staff() {
                     }
                     const teacherColorIndex = {}
                     englishTeachers.forEach((name, idx) => {
-                      teacherColorIndex[name] = TEACHER_CARD_COLORS[idx % TEACHER_CARD_COLORS.length]
+                      const st = staffList.find((s) => s.name === name)
+                      teacherColorIndex[name] = staffScheduleColorChipClass(st || {}, idx)
                     })
                     const hourLabels = Array.from(
                       { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
