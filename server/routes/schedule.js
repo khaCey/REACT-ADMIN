@@ -1429,7 +1429,7 @@ router.post('/reschedule-linked', async (req, res) => {
 
     const fromDisplay = formatOrdinalCalendarDay(source.src_date_str);
     const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
-    const suffixRescheduledFrom = fromDisplay ? ` · Rescheduled from ${fromDisplay}` : '';
+    const suffixRescheduledFrom = fromDisplay ? ` · Moved from ${fromDisplay}` : '';
 
     let title;
     if (lessonKindForBooking === 'demo') {
@@ -1459,8 +1459,10 @@ router.post('/reschedule-linked', async (req, res) => {
       title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}${suffixRescheduledFrom}`;
     }
 
-    const baseOldTitle = String(source.title || '').replace(/\s*·\s*Rescheduled to\b.*$/i, '').trim();
-    const oldTitleUpdated = `${baseOldTitle} · Rescheduled to ${toDisplay}`;
+    const baseOldTitle = String(source.title || '')
+      .replace(/\s*·\s*(?:Rescheduled to|Moved to)\b.*$/i, '')
+      .trim();
+    const oldTitleUpdated = `${baseOldTitle} · Moved to ${toDisplay}`;
 
     const localEventId = buildLocalBookingEventId();
     const calendarSyncKey = buildCalendarSyncKey();

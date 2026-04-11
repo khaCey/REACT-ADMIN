@@ -176,10 +176,10 @@ export default function LessonDetailsModal({
             <label className="block text-gray-600 mb-1">Notes</label>
             <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px]">
               {lesson?.rescheduledTo && (
-                <div>Rescheduled to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
+                <div>Moved to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
               )}
               {lesson?.rescheduledFrom && (
-                <div>Rescheduled from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
+                <div>Moved from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
               )}
               {lesson?.calendarSyncError && (
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
