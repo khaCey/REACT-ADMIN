@@ -61,21 +61,23 @@ const CARD_SIZES = {
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const rawStatus = String(lesson.status || '').toLowerCase()
   const syncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
-  // Keep unscheduled and cancelled explicit; then show rescheduled source, then calendar sync state.
+  // Rescheduled linkage before generic cancelled (source row is cancelled but has rescheduledTo).
   const displayStatus =
     rawStatus === 'unscheduled'
       ? 'unscheduled'
       : rawStatus === 'cancelled' && lesson.awaitingRescheduleDate
         ? 'reschedule_date_tbd'
-        : rawStatus === 'cancelled'
-          ? 'cancelled'
-          : lesson.rescheduledTo
+        : lesson.rescheduledTo
           ? 'rescheduled'
-          : syncStatus === 'failed'
-            ? 'sync_failed'
-            : syncStatus === 'pending'
-              ? 'sync_pending'
-              : rawStatus
+          : rawStatus === 'cancelled'
+            ? 'cancelled'
+            : lesson.rescheduledFrom
+              ? 'rescheduled'
+              : syncStatus === 'failed'
+                ? 'sync_failed'
+                : syncStatus === 'pending'
+                  ? 'sync_pending'
+                  : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0

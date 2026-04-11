@@ -1363,7 +1363,9 @@ router.post('/reschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date
+        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
+                to_char(date, 'YYYY-MM-DD') AS src_date_str,
+                to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_start_time_jst
          FROM monthly_schedule
          WHERE event_id = $1`,
         [sourceEventId]
@@ -1399,9 +1401,18 @@ router.post('/reschedule-linked', async (req, res) => {
     const monthKey = dateStrRaw.slice(0, 7);
     const lessonKindForBooking = deriveLessonKindFromStudent(student);
 
+    const fromDisplay = (() => {
+      const d = source.src_date_str ? String(source.src_date_str).trim() : '';
+      const t = source.src_start_time_jst ? String(source.src_start_time_jst).trim().slice(0, 5) : '';
+      if (!d) return '';
+      return t ? `${d} ${t}` : d;
+    })();
+    const toDisplay = `${dateStrRaw} ${timeStrRaw}`;
+    const suffixRescheduledFrom = fromDisplay ? ` · Rescheduled from ${fromDisplay}` : '';
+
     let title;
     if (lessonKindForBooking === 'demo') {
-      title = `${studentName} D/L`;
+      title = `${studentName} D/L${suffixRescheduledFrom}`;
     } else {
       let totalLessons = parsePackTotalFromTitle(source.title);
       if (!totalLessons) {
@@ -1424,8 +1435,11 @@ router.post('/reschedule-linked', async (req, res) => {
       );
       const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
       const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
-      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
+      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}${suffixRescheduledFrom}`;
     }
+
+    const baseOldTitle = String(source.title || '').replace(/\s*·\s*Rescheduled to\b.*$/i, '').trim();
+    const oldTitleUpdated = `${baseOldTitle} · Rescheduled to ${toDisplay}`;
 
     if (!isBookingGasEnabled()) {
       return res.status(400).json({
@@ -1473,11 +1487,11 @@ router.post('/reschedule-linked', async (req, res) => {
       [gasRes.eventId, title, dateStrRaw, startDate.toISOString(), endDate.toISOString(), studentName, !!student.is_child, null, lessonKind, studentIdNum]
     );
     if (isBookingGasEnabled()) {
-      await updateBookedLessonEventInGas(sourceEventId, { colorId: '8' });
+      await updateBookedLessonEventInGas(sourceEventId, { colorId: '8', title: oldTitleUpdated });
     }
     await client.query(
-      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1 AND student_name = $2`,
-      [sourceEventId, sourceStudentName]
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE, title = $3 WHERE event_id = $1 AND student_name = $2`,
+      [sourceEventId, sourceStudentName, oldTitleUpdated]
     );
     await client.query(
       `INSERT INTO reschedules (from_event_id, from_student_name, to_event_id, to_student_name, created_by_staff_id)
