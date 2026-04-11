@@ -61,13 +61,11 @@ export default function LessonDetailsModal({
           ? 'rescheduled'
           : status === 'cancelled'
             ? 'cancelled'
-            : lesson?.rescheduledFrom
-              ? 'rescheduled'
-              : calendarSyncStatus === 'failed'
-                ? 'sync_failed'
-                : calendarSyncStatus === 'pending'
-                  ? 'sync_pending'
-                  : status
+            : calendarSyncStatus === 'failed'
+              ? 'sync_failed'
+              : calendarSyncStatus === 'pending'
+                ? 'sync_pending'
+                : status
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'

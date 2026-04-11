@@ -71,13 +71,11 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
           ? 'rescheduled'
           : rawStatus === 'cancelled'
             ? 'cancelled'
-            : lesson.rescheduledFrom
-              ? 'rescheduled'
-              : syncStatus === 'failed'
-                ? 'sync_failed'
-                : syncStatus === 'pending'
-                  ? 'sync_pending'
-                  : rawStatus
+            : syncStatus === 'failed'
+              ? 'sync_failed'
+              : syncStatus === 'pending'
+                ? 'sync_pending'
+                : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
