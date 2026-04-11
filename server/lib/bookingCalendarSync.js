@@ -67,20 +67,6 @@ export function bookingEventColorId(lessonKind) {
 }
 
 /**
- * GAS update when marking a lesson cancelled (or equivalent) on Google Calendar.
- * Regular: Graphite (8). Demo/owner: clear custom color so the calendar default applies.
- * @param {string|null|undefined} lessonKind
- * @returns {{ colorId: string } | { clearColor: true }}
- */
-export function gasUpdateForCancelledLessonColor(lessonKind) {
-  const k = String(lessonKind || '').trim().toLowerCase();
-  if (k === 'demo' || k === 'owner') {
-    return { clearColor: true };
-  }
-  return { colorId: '8' };
-}
-
-/**
  * Create a Calendar event via GAS.
  * @param {{ student: StudentForBooking, startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
@@ -96,7 +82,10 @@ export async function createBookedLessonEventInGas(args) {
   url.searchParams.set('key', apiKey);
  
   const student = args?.student;
-  const lessonKind = String(args?.lessonKind || '').trim().toLowerCase() || deriveLessonKind(student);
+  // Prefer student payment/status so demo/owner never get a manual palette color when DB lesson_kind is stale.
+  const lessonKind = student
+    ? deriveLessonKind(student)
+    : String(args?.lessonKind || '').trim().toLowerCase() || 'regular';
   const teacher = (args?.assignedTeacherName || '').trim();
   const bookingKey = String(args?.bookingKey || '').trim();
   const descLines = [

@@ -20,7 +20,6 @@ import {
 } from '../lib/teacherBreakRules.js';
 import {
   bookingEventColorId,
-  gasUpdateForCancelledLessonColor,
   createBookedLessonEventInGas,
   deleteBookedLessonEventInGas,
   updateBookedLessonEventInGas,
@@ -1200,8 +1199,7 @@ router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, async (req, res) => {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
-      const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
-      await updateBookedLessonEventInGas(eventId, gasUpdateForCancelledLessonColor(lk));
+      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
     }
     await query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = TRUE WHERE event_id = $1`,
@@ -1237,8 +1235,8 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
-      const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
-      await updateBookedLessonEventInGas(eventId, gasUpdateForCancelledLessonColor(lk));
+      // Google Calendar Graphite = colorId "8".
+      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
     }
     await query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
@@ -1396,7 +1394,7 @@ router.post('/reschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date, lesson_kind,
+        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
@@ -1550,10 +1548,8 @@ router.post('/reschedule-linked', async (req, res) => {
 
     queueBookedLessonEventSync(localEventId);
     if (isBookingGasEnabled()) {
-      const sourceLk = String(source.lesson_kind || lessonKind || 'regular').toLowerCase();
-      const colorPart = gasUpdateForCancelledLessonColor(sourceLk);
       setTimeout(() => {
-        updateBookedLessonEventInGas(sourceEventId, { title: oldTitleUpdated, ...colorPart }).catch((err) => {
+        updateBookedLessonEventInGas(sourceEventId, { colorId: '8', title: oldTitleUpdated }).catch((err) => {
           console.error('[reschedule-linked] source calendar update failed:', err?.message || err);
         });
       }, 0);
