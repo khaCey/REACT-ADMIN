@@ -42,6 +42,29 @@ const GRID_TIME_SLOTS = [
   '20:00',
 ];
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function dayOrdinalSuffix(n) {
+  const k = n % 100;
+  const j = n % 10;
+  if (k >= 11 && k <= 13) return 'th';
+  if (j === 1) return 'st';
+  if (j === 2) return 'nd';
+  if (j === 3) return 'rd';
+  return 'th';
+}
+
+/** YYYY-MM-DD -> "Apr 8th" (short month + ordinal day; no time). */
+function formatOrdinalCalendarDay(yyyyMmDd) {
+  const s = String(yyyyMmDd || '').trim();
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '';
+  const monthIdx = parseInt(match[2], 10) - 1;
+  const dayNum = parseInt(match[3], 10);
+  if (!Number.isFinite(monthIdx) || monthIdx < 0 || monthIdx > 11 || !Number.isFinite(dayNum)) return '';
+  return `${MONTH_ABBR[monthIdx]} ${dayNum}${dayOrdinalSuffix(dayNum)}`;
+}
+
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
 const LOCAL_BOOKING_EVENT_ID_PREFIX = 'local-booking-';
@@ -1364,8 +1387,7 @@ router.post('/reschedule-linked', async (req, res) => {
     const candidateRows = (
       await query(
         `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
-                to_char(date, 'YYYY-MM-DD') AS src_date_str,
-                to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_start_time_jst
+                to_char(date, 'YYYY-MM-DD') AS src_date_str
          FROM monthly_schedule
          WHERE event_id = $1`,
         [sourceEventId]
@@ -1401,13 +1423,8 @@ router.post('/reschedule-linked', async (req, res) => {
     const monthKey = dateStrRaw.slice(0, 7);
     const lessonKindForBooking = deriveLessonKindFromStudent(student);
 
-    const fromDisplay = (() => {
-      const d = source.src_date_str ? String(source.src_date_str).trim() : '';
-      const t = source.src_start_time_jst ? String(source.src_start_time_jst).trim().slice(0, 5) : '';
-      if (!d) return '';
-      return t ? `${d} ${t}` : d;
-    })();
-    const toDisplay = `${dateStrRaw} ${timeStrRaw}`;
+    const fromDisplay = formatOrdinalCalendarDay(source.src_date_str);
+    const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
     const suffixRescheduledFrom = fromDisplay ? ` · Rescheduled from ${fromDisplay}` : '';
 
     let title;

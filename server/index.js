@@ -172,10 +172,14 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                 to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
-         LEFT JOIN reschedules rt ON rt.from_event_id = m.event_id AND rt.from_student_name = m.student_name
-         LEFT JOIN monthly_schedule mt ON mt.event_id = rt.to_event_id AND mt.student_name = rt.to_student_name
-         LEFT JOIN reschedules rf ON rf.to_event_id = m.event_id AND rf.to_student_name = m.student_name
-         LEFT JOIN monthly_schedule mf ON mf.event_id = rf.from_event_id AND mf.student_name = rf.from_student_name
+         LEFT JOIN reschedules rt ON rt.from_event_id = m.event_id
+           AND REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+         LEFT JOIN monthly_schedule mt ON mt.event_id = rt.to_event_id
+           AND REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
+         LEFT JOIN reschedules rf ON rf.to_event_id = m.event_id
+           AND REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+         LEFT JOIN monthly_schedule mf ON mf.event_id = rf.from_event_id
+           AND REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
          WHERE REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
          AND m.date IS NOT NULL
          AND to_char(m.date, 'YYYY-MM') = $2
