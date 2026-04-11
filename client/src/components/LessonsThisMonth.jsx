@@ -61,7 +61,9 @@ const CARD_SIZES = {
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const rawStatus = String(lesson.status || '').toLowerCase()
   const syncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
+  const isDemoLesson = String(lesson.lessonKind || '').toLowerCase() === 'demo'
   // Rescheduled linkage before generic cancelled (source row is cancelled but has rescheduledTo).
+  // Demo: calendar color 5/9 maps to status "rescheduled" in GAS; prefer Demo badge unless real reschedule link.
   const displayStatus =
     rawStatus === 'unscheduled'
       ? 'unscheduled'
@@ -75,7 +77,9 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
               ? 'sync_failed'
               : syncStatus === 'pending'
                 ? 'sync_pending'
-                : rawStatus
+                : isDemoLesson
+                  ? 'demo'
+                  : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0

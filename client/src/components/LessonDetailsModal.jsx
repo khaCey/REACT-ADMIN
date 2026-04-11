@@ -51,6 +51,7 @@ export default function LessonDetailsModal({
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
   const isAwaitingRescheduleDate = status === 'cancelled' && !!lesson.awaitingRescheduleDate
+  const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   const displayStatus =
     status === 'unscheduled'
@@ -65,7 +66,9 @@ export default function LessonDetailsModal({
               ? 'sync_failed'
               : calendarSyncStatus === 'pending'
                 ? 'sync_pending'
-                : status
+                : isDemoLesson
+                  ? 'demo'
+                  : status
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
