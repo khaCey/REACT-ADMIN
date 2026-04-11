@@ -1350,7 +1350,7 @@ router.patch(/^\/(.+)\/reschedule\/?$/, async (req, res) => {
   }
 });
 
-/** Linked reschedule: create a new booking, cancel source, and store reschedule linkage. */
+/** Linked reschedule: insert destination as local pending (like POST /book), cancel source, link rows; calendar sync is queued. */
 router.post('/reschedule-linked', async (req, res) => {
   let client;
   try {
@@ -1455,37 +1455,24 @@ router.post('/reschedule-linked', async (req, res) => {
     const baseOldTitle = String(source.title || '').replace(/\s*·\s*Rescheduled to\b.*$/i, '').trim();
     const oldTitleUpdated = `${baseOldTitle} · Rescheduled to ${toDisplay}`;
 
-    if (!isBookingGasEnabled()) {
-      return res.status(400).json({
-        error: 'Booking calendar is not configured. Set BOOKING_GAS_URL (or CALENDAR_POLL_URL) and BOOKING_API_KEY.',
-      });
-    }
-    const gasRes = await createBookedLessonEventInGas({
-      student: {
-        id: student.id,
-        name: studentName,
-        status: student.status,
-        payment: student.payment,
-        is_child: !!student.is_child,
-      },
-      startIso: startDate.toISOString(),
-      endIso: endDate.toISOString(),
-      assignedTeacherName: null,
-      title,
-      location: lessonKindForBooking === 'demo' ? '' : locationLabel,
-    });
-    if (!gasRes.ok) {
-      return res.status(502).json({ error: gasRes.error || 'Failed to create booking in Google Calendar' });
-    }
+    const localEventId = buildLocalBookingEventId();
+    const calendarSyncKey = buildCalendarSyncKey();
+    const lessonKind = lessonKindForBooking;
+    const lessonModeVal =
+      lessonKind === 'demo'
+        ? 'unknown'
+        : String(locationLabel || '').trim().toLowerCase() === 'online'
+          ? 'online'
+          : 'cafe';
 
     client = await pool.connect();
     await client.query('BEGIN');
-    const lessonKind = lessonKindForBooking;
     await client.query(
       `INSERT INTO monthly_schedule
-        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
+        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at)
        VALUES
-        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, 'unknown', $10)
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL)
        ON CONFLICT (event_id, student_name)
        DO UPDATE SET
          title = EXCLUDED.title,
@@ -1497,12 +1484,28 @@ router.post('/reschedule-linked', async (req, res) => {
          teacher_name = EXCLUDED.teacher_name,
          lesson_kind = EXCLUDED.lesson_kind,
          lesson_mode = EXCLUDED.lesson_mode,
-         student_id = EXCLUDED.student_id`,
-      [gasRes.eventId, title, dateStrRaw, startDate.toISOString(), endDate.toISOString(), studentName, !!student.is_child, null, lessonKind, studentIdNum]
+         student_id = EXCLUDED.student_id,
+         calendar_sync_status = EXCLUDED.calendar_sync_status,
+         calendar_sync_error = EXCLUDED.calendar_sync_error,
+         calendar_sync_key = EXCLUDED.calendar_sync_key,
+         calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
+         calendar_synced_at = EXCLUDED.calendar_synced_at`,
+      [
+        localEventId,
+        title,
+        dateStrRaw,
+        startDate.toISOString(),
+        endDate.toISOString(),
+        studentName,
+        !!student.is_child,
+        null,
+        lessonKind,
+        lessonModeVal,
+        studentIdNum,
+        CALENDAR_SYNC_STATUS_PENDING,
+        calendarSyncKey,
+      ]
     );
-    if (isBookingGasEnabled()) {
-      await updateBookedLessonEventInGas(sourceEventId, { colorId: '8', title: oldTitleUpdated });
-    }
     await client.query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE, title = $3 WHERE event_id = $1 AND student_name = $2`,
       [sourceEventId, sourceStudentName, oldTitleUpdated]
@@ -1512,17 +1515,27 @@ router.post('/reschedule-linked', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (from_event_id, from_student_name)
        DO UPDATE SET to_event_id = EXCLUDED.to_event_id, to_student_name = EXCLUDED.to_student_name, created_by_staff_id = EXCLUDED.created_by_staff_id, created_at = NOW()`,
-      [sourceEventId, sourceStudentName, gasRes.eventId, studentName, req.staff?.id ?? null]
+      [sourceEventId, sourceStudentName, localEventId, studentName, req.staff?.id ?? null]
     );
     await client.query('COMMIT');
+
+    queueBookedLessonEventSync(localEventId);
+    if (isBookingGasEnabled()) {
+      setTimeout(() => {
+        updateBookedLessonEventInGas(sourceEventId, { colorId: '8', title: oldTitleUpdated }).catch((err) => {
+          console.error('[reschedule-linked] source calendar update failed:', err?.message || err);
+        });
+      }, 0);
+    }
 
     res.status(201).json({
       ok: true,
       source_event_id: sourceEventId,
-      new_event_id: gasRes.eventId,
+      new_event_id: localEventId,
       date: dateStrRaw,
       start: startDate.toISOString(),
       end: endDate.toISOString(),
+      calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
     });
   } catch (err) {
     if (client) {
