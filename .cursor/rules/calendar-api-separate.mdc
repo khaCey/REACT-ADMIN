@@ -16,3 +16,7 @@ alwaysApply: true
 4. **Remind the user** to deploy from the Apps Script editor or `clasp push` if they use clasp—deployment is still from their GAS project.
 
 If the folder is not present locally, edits may need to be pasted into script.google.com instead.
+
+## Secrets
+
+- Do **not** commit `BOOKING_API_KEY`, poll keys, webhook URLs, or credentials inside `Calendar API/` files. Use **Apps Script → Project settings → Script properties** (and `migratePropertiesFromConfig_()` / `getBookingApiKey_()` patterns already in `Code.js`). Keep `Config.js` in Git with **empty strings** for secrets; configure locally or in Script properties only.
