@@ -65,7 +65,21 @@ export function bookingEventColorId(lessonKind) {
   if (k === 'demo' || k === 'owner') return null;
   return '10';
 }
- 
+
+/**
+ * GAS update when marking a lesson cancelled (or equivalent) on Google Calendar.
+ * Regular: Graphite (8). Demo/owner: clear custom color so the calendar default applies.
+ * @param {string|null|undefined} lessonKind
+ * @returns {{ colorId: string } | { clearColor: true }}
+ */
+export function gasUpdateForCancelledLessonColor(lessonKind) {
+  const k = String(lessonKind || '').trim().toLowerCase();
+  if (k === 'demo' || k === 'owner') {
+    return { clearColor: true };
+  }
+  return { colorId: '8' };
+}
+
 /**
  * Create a Calendar event via GAS.
  * @param {{ student: StudentForBooking, startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
