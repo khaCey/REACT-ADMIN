@@ -92,6 +92,11 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_key VARCHAR(
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_attempted_at TIMESTAMPTZ;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_synced_at TIMESTAMPTZ;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS awaiting_reschedule_date BOOLEAN NOT NULL DEFAULT FALSE;
+-- Persisted reschedule hints for UI (survives calendar poll); JOINs still preferred when present.
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_date DATE;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_time VARCHAR(16);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_date DATE;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_time VARCHAR(16);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   ON monthly_schedule(calendar_sync_key)

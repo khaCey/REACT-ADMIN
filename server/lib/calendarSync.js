@@ -257,13 +257,19 @@ export async function upsertMonthlySchedule(data, options = {}) {
     await query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
-         calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), FALSE)
+         calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date,
+         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), FALSE,
+         NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
          calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
-         awaiting_reschedule_date = monthly_schedule.awaiting_reschedule_date`,
+         awaiting_reschedule_date = monthly_schedule.awaiting_reschedule_date,
+         reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
+         reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
+         reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
+         reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
       [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId]
     );
     upserted++;

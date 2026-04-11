@@ -316,15 +316,21 @@ async function applyCreate(entity_type, data) {
     await query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id, lesson_mode,
-         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at, awaiting_reschedule_date)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $17::timestamptz, COALESCE($18::boolean, FALSE))
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at, awaiting_reschedule_date,
+         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $17::timestamptz, COALESCE($18::boolean, FALSE),
+         NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind,
          student_id = EXCLUDED.student_id, lesson_mode = EXCLUDED.lesson_mode, calendar_sync_status = EXCLUDED.calendar_sync_status,
          calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_sync_key = EXCLUDED.calendar_sync_key,
          calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at, calendar_synced_at = EXCLUDED.calendar_synced_at,
-         awaiting_reschedule_date = EXCLUDED.awaiting_reschedule_date`,
+         awaiting_reschedule_date = EXCLUDED.awaiting_reschedule_date,
+         reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
+         reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
+         reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
+         reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
       [
         o.event_id,
         o.title ?? '',

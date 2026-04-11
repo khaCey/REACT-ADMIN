@@ -158,6 +158,12 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
 
     const normalizeName = (s) => (s || '').replace(/\s+/g, ' ').trim();
     const normalizedVariants = nameVariants.map(normalizeName).filter(Boolean);
+    /** DATE or string → YYYY-MM-DD for API / Notes */
+    const snapDateToYmd = (v) => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'string') return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+      return null;
+    };
 
     for (const yyyyMm of allYyyyMm) {
       const studentIdForJoin = Number(id) || id;
@@ -165,6 +171,8 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
                 m.awaiting_reschedule_date,
                 m.calendar_sync_status, m.calendar_sync_error,
+                m.reschedule_snapshot_to_date, m.reschedule_snapshot_to_time,
+                m.reschedule_snapshot_from_date, m.reschedule_snapshot_from_time,
                 rt.to_event_id AS rescheduled_to_event_id,
                 COALESCE(
                   to_char(mt.date, 'YYYY-MM-DD'),
@@ -245,20 +253,20 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           calendarSyncError: r.calendar_sync_error || null,
           isGroup: (r.student_count || 0) > 1,
           lessonKind: r.lesson_kind || 'regular',
-          rescheduledTo: r.rescheduled_to_event_id
-            ? {
-                eventID: r.rescheduled_to_event_id,
-                date: r.rescheduled_to_date || null,
-                time: r.rescheduled_to_time || null,
-              }
-            : null,
-          rescheduledFrom: r.rescheduled_from_event_id
-            ? {
-                eventID: r.rescheduled_from_event_id,
-                date: r.rescheduled_from_date || null,
-                time: r.rescheduled_from_time || null,
-              }
-            : null,
+          rescheduledTo: (() => {
+            const id = r.rescheduled_to_event_id || null;
+            const date = r.rescheduled_to_date || snapDateToYmd(r.reschedule_snapshot_to_date) || null;
+            const time = r.rescheduled_to_time || r.reschedule_snapshot_to_time || null;
+            if (!id && !date && !time) return null;
+            return { eventID: id, date, time };
+          })(),
+          rescheduledFrom: (() => {
+            const id = r.rescheduled_from_event_id || null;
+            const date = r.rescheduled_from_date || snapDateToYmd(r.reschedule_snapshot_from_date) || null;
+            const time = r.rescheduled_from_time || r.reschedule_snapshot_from_time || null;
+            if (!id && !date && !time) return null;
+            return { eventID: id, date, time };
+          })(),
         };
       });
 

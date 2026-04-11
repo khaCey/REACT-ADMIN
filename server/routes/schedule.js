@@ -1086,9 +1086,11 @@ router.post('/book', async (req, res) => {
     await query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
-         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at)
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
+         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
        VALUES
-        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL)
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
+         NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name)
        DO UPDATE SET
          title = EXCLUDED.title,
@@ -1105,7 +1107,11 @@ router.post('/book', async (req, res) => {
          calendar_sync_error = EXCLUDED.calendar_sync_error,
          calendar_sync_key = EXCLUDED.calendar_sync_key,
          calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
-         calendar_synced_at = EXCLUDED.calendar_synced_at`,
+         calendar_synced_at = EXCLUDED.calendar_synced_at,
+         reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
+         reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
+         reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
+         reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
       [
         localEventId,
         title,
@@ -1384,7 +1390,8 @@ router.post('/reschedule-linked', async (req, res) => {
     const candidateRows = (
       await query(
         `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
-                to_char(date, 'YYYY-MM-DD') AS src_date_str
+                to_char(date, 'YYYY-MM-DD') AS src_date_str,
+                to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
          WHERE event_id = $1`,
         [sourceEventId]
@@ -1467,12 +1474,17 @@ router.post('/reschedule-linked', async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
+    const srcDateStr = String(source.src_date_str || '').trim();
+    const srcDateForSnap = /^\d{4}-\d{2}-\d{2}$/.test(srcDateStr) ? srcDateStr : null;
+    const srcTimeJst = String(source.src_time_jst || '').trim() || null;
     await client.query(
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
-         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at)
+         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
+         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
        VALUES
-        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL)
+        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
+         NULL, NULL, $14::date, $15)
        ON CONFLICT (event_id, student_name)
        DO UPDATE SET
          title = EXCLUDED.title,
@@ -1489,7 +1501,11 @@ router.post('/reschedule-linked', async (req, res) => {
          calendar_sync_error = EXCLUDED.calendar_sync_error,
          calendar_sync_key = EXCLUDED.calendar_sync_key,
          calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
-         calendar_synced_at = EXCLUDED.calendar_synced_at`,
+         calendar_synced_at = EXCLUDED.calendar_synced_at,
+         reschedule_snapshot_to_date = COALESCE(monthly_schedule.reschedule_snapshot_to_date, EXCLUDED.reschedule_snapshot_to_date),
+         reschedule_snapshot_to_time = COALESCE(monthly_schedule.reschedule_snapshot_to_time, EXCLUDED.reschedule_snapshot_to_time),
+         reschedule_snapshot_from_date = COALESCE(monthly_schedule.reschedule_snapshot_from_date, EXCLUDED.reschedule_snapshot_from_date),
+         reschedule_snapshot_from_time = COALESCE(monthly_schedule.reschedule_snapshot_from_time, EXCLUDED.reschedule_snapshot_from_time)`,
       [
         localEventId,
         title,
@@ -1504,11 +1520,15 @@ router.post('/reschedule-linked', async (req, res) => {
         studentIdNum,
         CALENDAR_SYNC_STATUS_PENDING,
         calendarSyncKey,
+        srcDateForSnap,
+        srcTimeJst,
       ]
     );
     await client.query(
-      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE, title = $3 WHERE event_id = $1 AND student_name = $2`,
-      [sourceEventId, sourceStudentName, oldTitleUpdated]
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE, title = $3,
+         reschedule_snapshot_to_date = $4::date, reschedule_snapshot_to_time = $5
+       WHERE event_id = $1 AND student_name = $2`,
+      [sourceEventId, sourceStudentName, oldTitleUpdated, dateStrRaw, timeStrRaw]
     );
     await client.query(
       `INSERT INTO reschedules (from_event_id, from_student_name, to_event_id, to_student_name, created_by_staff_id)
