@@ -42,8 +42,6 @@ const GRID_TIME_SLOTS = [
   '20:00',
 ];
 
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 function dayOrdinalSuffix(n) {
   const k = n % 100;
   const j = n % 10;
@@ -54,15 +52,14 @@ function dayOrdinalSuffix(n) {
   return 'th';
 }
 
-/** YYYY-MM-DD -> "Apr 8th" (short month + ordinal day; no time). */
+/** YYYY-MM-DD -> "8th" (ordinal day only; no month, no time). */
 function formatOrdinalCalendarDay(yyyyMmDd) {
   const s = String(yyyyMmDd || '').trim();
   const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return '';
-  const monthIdx = parseInt(match[2], 10) - 1;
   const dayNum = parseInt(match[3], 10);
-  if (!Number.isFinite(monthIdx) || monthIdx < 0 || monthIdx > 11 || !Number.isFinite(dayNum)) return '';
-  return `${MONTH_ABBR[monthIdx]} ${dayNum}${dayOrdinalSuffix(dayNum)}`;
+  if (!Number.isFinite(dayNum) || dayNum < 1 || dayNum > 31) return '';
+  return `${dayNum}${dayOrdinalSuffix(dayNum)}`;
 }
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
