@@ -56,12 +56,13 @@ function deriveLessonKind(student) {
 
 /**
  * Google Calendar event colorId for `CalendarEvent.setColor` (same numbering as Calendar API).
- * 10 = Basil (green) for normal/owner lessons; 5 = Banana for demo/trial so they stay distinct.
+ * Returns `null` for demo and owner so GAS does not call setColor — event keeps the calendar default.
+ * Regular lessons use Basil (10).
  * @see https://developers.google.com/calendar/api/v3/reference/colors
  */
 export function bookingEventColorId(lessonKind) {
   const k = String(lessonKind || '').trim().toLowerCase();
-  if (k === 'demo') return '5';
+  if (k === 'demo' || k === 'owner') return null;
   return '10';
 }
  
@@ -91,10 +92,11 @@ export async function createBookedLessonEventInGas(args) {
     bookingKey ? `BookingSyncKey: ${bookingKey}` : null,
   ].filter(Boolean);
  
+  const explicitColorId = bookingEventColorId(lessonKind);
   const payload = {
     action: 'lesson_book_create',
     lessonKind,
-    colorId: bookingEventColorId(lessonKind),
+    ...(explicitColorId ? { colorId: explicitColorId } : {}),
     title: args?.title || '',
     start: args?.startIso,
     end: args?.endIso,

@@ -1,5 +1,5 @@
 // Paste into doPost → lesson_book_create, after event is created/updated, before cacheMonthlyEventsForBothMonths()
-// Server sends body.colorId: "10" (Basil green) for regular/owner, "5" (Banana) for demo.
+// Server sends body.colorId only for regular lessons ("10" = Basil). Demo/owner omit colorId — keep calendar default.
 
 var colorIdCreate = String(body.colorId || '').trim();
 if (colorIdCreate) {

@@ -1273,7 +1273,12 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
-      await updateBookedLessonEventInGas(eventId, { colorId: bookingEventColorId(lk) });
+      const cid = bookingEventColorId(lk);
+      if (cid) {
+        await updateBookedLessonEventInGas(eventId, { colorId: cid });
+      } else {
+        await updateBookedLessonEventInGas(eventId, { clearColor: true });
+      }
     }
     await query(
       `UPDATE monthly_schedule SET status = 'scheduled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
