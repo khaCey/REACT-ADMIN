@@ -160,6 +160,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
     const normalizedVariants = nameVariants.map(normalizeName).filter(Boolean);
 
     for (const yyyyMm of allYyyyMm) {
+      const studentIdForJoin = Number(id) || id;
       const scheduleResult = await query(
         `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
                 m.awaiting_reschedule_date,
@@ -172,19 +173,40 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                 to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
+         INNER JOIN students canst ON canst.id = $3::integer
          LEFT JOIN reschedules rt ON rt.from_event_id = m.event_id
-           AND REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+           AND (
+             REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+             OR (m.student_id = canst.id AND REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g'))
+           )
          LEFT JOIN monthly_schedule mt ON mt.event_id = rt.to_event_id
-           AND REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
+           AND (
+             REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
+             OR EXISTS (
+               SELECT 1 FROM students st
+               WHERE st.id = mt.student_id
+                 AND REGEXP_REPLACE(TRIM(st.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
+             )
+           )
          LEFT JOIN reschedules rf ON rf.to_event_id = m.event_id
-           AND REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+           AND (
+             REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+             OR (m.student_id = canst.id AND REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g'))
+           )
          LEFT JOIN monthly_schedule mf ON mf.event_id = rf.from_event_id
-           AND REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
-         WHERE REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
+           AND (
+             REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
+             OR EXISTS (
+               SELECT 1 FROM students st
+               WHERE st.id = mf.student_id
+                 AND REGEXP_REPLACE(TRIM(st.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
+             )
+           )
+         WHERE (m.student_id = $3::integer OR REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
          AND m.date IS NOT NULL
          AND to_char(m.date, 'YYYY-MM') = $2
          ORDER BY m.start ASC`,
-        [normalizedVariants, yyyyMm]
+        [normalizedVariants, yyyyMm, studentIdForJoin]
       );
 
       const lessons = scheduleResult.rows.map((r) => {
