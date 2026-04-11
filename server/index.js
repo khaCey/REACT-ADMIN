@@ -166,41 +166,59 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                 m.awaiting_reschedule_date,
                 m.calendar_sync_status, m.calendar_sync_error,
                 rt.to_event_id AS rescheduled_to_event_id,
-                to_char(mt.date, 'YYYY-MM-DD') AS rescheduled_to_date,
-                to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_to_time,
+                COALESCE(
+                  to_char(mt.date, 'YYYY-MM-DD'),
+                  (SELECT to_char(x.date, 'YYYY-MM-DD') FROM monthly_schedule x
+                   WHERE rt.to_event_id IS NOT NULL AND x.event_id = rt.to_event_id
+                     AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
+                   LIMIT 1)
+                ) AS rescheduled_to_date,
+                COALESCE(
+                  to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
+                  (SELECT to_char(x.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule x
+                   WHERE rt.to_event_id IS NOT NULL AND x.event_id = rt.to_event_id
+                     AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
+                   LIMIT 1)
+                ) AS rescheduled_to_time,
                 rf.from_event_id AS rescheduled_from_event_id,
-                to_char(mf.date, 'YYYY-MM-DD') AS rescheduled_from_date,
-                to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS rescheduled_from_time,
+                COALESCE(
+                  to_char(mf.date, 'YYYY-MM-DD'),
+                  (SELECT to_char(y.date, 'YYYY-MM-DD') FROM monthly_schedule y
+                   WHERE rf.from_event_id IS NOT NULL AND y.event_id = rf.from_event_id
+                     AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
+                   LIMIT 1)
+                ) AS rescheduled_from_date,
+                COALESCE(
+                  to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
+                  (SELECT to_char(y.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule y
+                   WHERE rf.from_event_id IS NOT NULL AND y.event_id = rf.from_event_id
+                     AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
+                   LIMIT 1)
+                ) AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
          INNER JOIN students canst ON canst.id = $3::integer
          LEFT JOIN reschedules rt ON rt.from_event_id = m.event_id
            AND (
-             REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
-             OR (m.student_id = canst.id AND REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g'))
+             REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
+             OR REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
          LEFT JOIN monthly_schedule mt ON mt.event_id = rt.to_event_id
            AND (
-             REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
-             OR EXISTS (
-               SELECT 1 FROM students st
-               WHERE st.id = mt.student_id
-                 AND REGEXP_REPLACE(TRIM(st.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rt.to_student_name), '\\s+', ' ', 'g')
-             )
+             mt.student_id = $3::integer
+             OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
+             OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
          LEFT JOIN reschedules rf ON rf.to_event_id = m.event_id
            AND (
-             REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
-             OR (m.student_id = canst.id AND REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g'))
+             REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
+             OR REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
          LEFT JOIN monthly_schedule mf ON mf.event_id = rf.from_event_id
            AND (
-             REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
-             OR EXISTS (
-               SELECT 1 FROM students st
-               WHERE st.id = mf.student_id
-                 AND REGEXP_REPLACE(TRIM(st.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(rf.from_student_name), '\\s+', ' ', 'g')
-             )
+             mf.student_id = $3::integer
+             OR REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
+             OR REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
          WHERE (m.student_id = $3::integer OR REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
          AND m.date IS NOT NULL
