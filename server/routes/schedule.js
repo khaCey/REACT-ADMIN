@@ -1199,7 +1199,10 @@ router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, async (req, res) => {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
-      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
+      await updateBookedLessonEventInGas(eventId, {
+        colorId: '8',
+        mergeStudentAdminDescription: { awaiting_reschedule_date: true },
+      });
     }
     await query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = TRUE WHERE event_id = $1`,
@@ -1236,7 +1239,10 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       // Google Calendar Graphite = colorId "8".
-      await updateBookedLessonEventInGas(eventId, { colorId: '8' });
+      await updateBookedLessonEventInGas(eventId, {
+        colorId: '8',
+        mergeStudentAdminDescription: { awaiting_reschedule_date: false },
+      });
     }
     await query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
@@ -1274,10 +1280,11 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
       const cid = bookingEventColorId(lk);
+      const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
       if (cid) {
-        await updateBookedLessonEventInGas(eventId, { colorId: cid });
+        await updateBookedLessonEventInGas(eventId, { colorId: cid, ...merge });
       } else {
-        await updateBookedLessonEventInGas(eventId, { clearColor: true });
+        await updateBookedLessonEventInGas(eventId, { clearColor: true, ...merge });
       }
     }
     await query(
@@ -1549,7 +1556,11 @@ router.post('/reschedule-linked', async (req, res) => {
     queueBookedLessonEventSync(localEventId);
     if (isBookingGasEnabled()) {
       setTimeout(() => {
-        updateBookedLessonEventInGas(sourceEventId, { colorId: '8', title: oldTitleUpdated }).catch((err) => {
+        updateBookedLessonEventInGas(sourceEventId, {
+          colorId: '8',
+          title: oldTitleUpdated,
+          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
+        }).catch((err) => {
           console.error('[reschedule-linked] source calendar update failed:', err?.message || err);
         });
       }, 0);

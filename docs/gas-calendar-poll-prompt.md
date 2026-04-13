@@ -79,7 +79,8 @@ Return JSON:
 | `start` | recommended | Start time; ISO string or `YYYY-MM-DD HH:mm` JST-style (server parses both patterns). |
 | `end` | recommended | End time; same formats. |
 | `title` | optional | Event title. |
-| `status` | optional | e.g. `scheduled`; drives DB `status`. |
+| `status` | optional | `scheduled`, `cancelled`, `reserved`, `rescheduled`, `demo` (see GAS MonthlyCache color/title rules); drives DB `status`. Invalid values → `scheduled`. |
+| `awaitingRescheduleDate` | optional | Boolean (or `awaiting_reschedule_date` snake_case). When the calendar event description contains the Student Admin block `---student-admin---` with `awaiting_reschedule_date=1` or `=0`, GAS should emit `true` / `false`. Omit the field when unknown (Node preserves existing DB `awaiting_reschedule_date` on upsert). |
 | `teacherName` | optional | |
 | `isKidsLesson` | optional | boolean or flag per your convention. |
 | `lessonKind` | optional | `regular` / `demo` / `owner` (invalid → `regular`). |
@@ -87,6 +88,15 @@ Return JSON:
 | `location` | optional | Helps infer `lessonMode`. |
 
 Times are interpreted as **Japan-facing** where ambiguous; the Node app stores **UTC** in PostgreSQL.
+
+**Calendar description (Student Admin):** Booking sync may append a block so Graphite cancel vs “awaiting new date” is distinguishable after poll sync:
+
+```text
+---student-admin---
+awaiting_reschedule_date=1
+```
+
+(`=0` clears the flag.) The MonthlySchedule sheet column `AwaitingRescheduleDate` and poll JSON `awaitingRescheduleDate` should reflect this.
 
 ---
 

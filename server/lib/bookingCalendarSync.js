@@ -201,9 +201,9 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
 }
 
 /**
- * Update a Calendar booking event via GAS (title/color).
+ * Update a Calendar booking event via GAS (title/color/description markers).
  * @param {string} monthlyEventId
- * @param {{ title?: string, colorId?: string, clearColor?: boolean }} updates
+ * @param {{ title?: string, colorId?: string, clearColor?: boolean, mergeStudentAdminDescription?: { awaiting_reschedule_date?: boolean } }} updates
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}) {
@@ -215,12 +215,14 @@ export async function updateBookedLessonEventInGas(monthlyEventId, updates = {})
 
   const url = new URL(baseUrl);
   url.searchParams.set('key', apiKey);
+  const merge = updates?.mergeStudentAdminDescription;
   const payload = {
     action: 'lesson_book_update',
     eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
     ...(updates?.title ? { title: String(updates.title) } : {}),
     ...(updates?.colorId ? { colorId: String(updates.colorId) } : {}),
     ...(updates?.clearColor ? { clearColor: true } : {}),
+    ...(merge && typeof merge === 'object' ? { mergeStudentAdminDescription: merge } : {}),
     source: 'student-admin-server',
     timestamp: new Date().toISOString(),
   };

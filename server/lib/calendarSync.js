@@ -14,10 +14,16 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
   const rid = (rawEventId || '').trim();
   if (!sn || !rid) return 0;
   const result = await query(
-    `DELETE FROM monthly_schedule
-     WHERE student_name = $1
-       AND COALESCE(calendar_sync_status, 'synced') = 'synced'
-       AND (event_id = $2 OR starts_with(event_id, $2 || '_'))`,
+    `DELETE FROM monthly_schedule ms
+     WHERE ms.student_name = $1
+       AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
+       AND (ms.event_id = $2 OR starts_with(ms.event_id, $2 || '_'))
+       AND NOT EXISTS (
+         SELECT 1 FROM reschedules rs
+         WHERE rs.from_event_id = ms.event_id
+           AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g')
+       )`,
     [sn, rid]
   );
   return result.rowCount ?? 0;
@@ -51,6 +57,39 @@ function normalizeLessonMode(val, title, location) {
   const byLocation = parseLessonModeFromText(location);
   if (byLocation !== 'unknown') return byLocation;
   return parseLessonModeFromText(title);
+}
+
+/** GAS poll statuses (see Calendar API MonthlyCache / docs). Unknown values fall back to scheduled. */
+const SCHEDULE_STATUS_VALID = {
+  scheduled: true,
+  cancelled: true,
+  reserved: true,
+  rescheduled: true,
+  demo: true,
+  unscheduled: true,
+};
+
+function normalizeScheduleStatus(raw) {
+  const s = String(raw || 'scheduled')
+    .trim()
+    .toLowerCase() || 'scheduled';
+  return SCHEDULE_STATUS_VALID[s] ? s : 'scheduled';
+}
+
+/**
+ * @param {Record<string, unknown>} r - poll row
+ * @returns {boolean|null} null = poll did not specify (preserve DB on upsert)
+ */
+function parseAwaitingReschedulePollMerge(r) {
+  const hasCamel = Object.prototype.hasOwnProperty.call(r, 'awaitingRescheduleDate');
+  const hasSnake = Object.prototype.hasOwnProperty.call(r, 'awaiting_reschedule_date');
+  if (!hasCamel && !hasSnake) return null;
+  const v = hasCamel ? r.awaitingRescheduleDate : r.awaiting_reschedule_date;
+  if (v === true || v === 1 || v === '1') return true;
+  if (v === false || v === 0 || v === '0') return false;
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'true') return true;
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'false') return false;
+  return null;
 }
 
 /** Normalize name for matching: trim and collapse internal spaces */
@@ -155,7 +194,7 @@ async function buildMonthlyScheduleRows(data) {
     }
     if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
 
-    const status = (r.status || 'scheduled').toString().trim() || 'scheduled';
+    const status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
     const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
       r.isKidsLesson === true || r.is_kids_lesson === true;
     const title = (r.title || '').toString().trim();
@@ -179,7 +218,22 @@ async function buildMonthlyScheduleRows(data) {
     }
 
     const studentId = nameToId.get(normalizeName(studentName)) ?? null;
-    rows.push({ eventId, title, date: resolvedDate || date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId });
+    const awaitingReschedulePollMerge = parseAwaitingReschedulePollMerge(r);
+    rows.push({
+      eventId,
+      title,
+      date: resolvedDate || date,
+      startTs,
+      endTs,
+      status,
+      studentName,
+      isKids,
+      teacherName,
+      lessonKind,
+      lessonMode,
+      studentId,
+      awaitingReschedulePollMerge,
+    });
   }
 
   const incomingKeys = new Set(rows.map((row) => `${row.eventId}\t${row.studentName}`));
@@ -195,15 +249,27 @@ async function reconcileMonthsToSnapshot(months, incomingKeys) {
   let deleted = 0;
   for (const ym of months) {
     const existing = await query(
-      `SELECT event_id, student_name FROM monthly_schedule
-       WHERE date IS NOT NULL
-         AND to_char(date, 'YYYY-MM') = $1
-         AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      `SELECT ms.event_id, ms.student_name
+       FROM monthly_schedule ms
+       WHERE ms.date IS NOT NULL
+         AND to_char(ms.date, 'YYYY-MM') = $1
+         AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'`,
       [ym]
     );
     for (const r of existing.rows || []) {
       const k = `${r.event_id}\t${r.student_name}`;
       if (!incomingKeys.has(k)) {
+        const block = await query(
+          `SELECT 1 FROM reschedules rs
+           WHERE rs.from_event_id = $1
+             AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+               = REGEXP_REPLACE(TRIM($2::text), '\\s+', ' ', 'g')
+           LIMIT 1`,
+          [r.event_id, r.student_name]
+        );
+        if ((block.rows || []).length > 0) {
+          continue;
+        }
         await query('DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
           r.event_id,
           r.student_name,
@@ -245,7 +311,21 @@ export async function upsertMonthlySchedule(data, options = {}) {
   }
 
   let upserted = 0;
-  for (const { eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId } of rows) {
+  for (const {
+    eventId,
+    title,
+    date,
+    startTs,
+    endTs,
+    status,
+    studentName,
+    isKids,
+    teacherName,
+    lessonKind,
+    lessonMode,
+    studentId,
+    awaitingReschedulePollMerge,
+  } of rows) {
     // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
     if (date && /_\d{2}-\d{2}-\d{2}$/.test(eventId)) {
       const oldFormatId = eventId.replace(/_\d{2}-\d{2}-\d{2}$/, '');
@@ -259,18 +339,21 @@ export async function upsertMonthlySchedule(data, options = {}) {
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
          calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date,
          reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), FALSE,
+       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), COALESCE($13::boolean, FALSE),
          NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
          calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
-         awaiting_reschedule_date = monthly_schedule.awaiting_reschedule_date,
+         awaiting_reschedule_date = CASE
+           WHEN $13::boolean IS NULL THEN monthly_schedule.awaiting_reschedule_date
+           ELSE $13::boolean
+         END,
          reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
          reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
          reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
          reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
-      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId]
+      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId, awaitingReschedulePollMerge]
     );
     upserted++;
   }
