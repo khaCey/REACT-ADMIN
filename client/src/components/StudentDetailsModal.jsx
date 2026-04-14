@@ -70,12 +70,16 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (bookingExcluded) setBookLessonModal(false)
   }, [bookingExcluded])
 
-  const fetchData = useCallback(() => {
-    if (studentId == null) return
-    setLoading(true)
-    setError(null)
-    setBookingLatestByMonth(null)
-    Promise.all([
+  /** @param {{ silent?: boolean }} [opts] - silent: refresh data without full-modal loading (avoids white flash while modal is open). */
+  const fetchData = useCallback((opts = {}) => {
+    const silent = !!opts.silent
+    if (studentId == null) return Promise.resolve()
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+      setBookingLatestByMonth(null)
+    }
+    return Promise.all([
       api.getStudent(studentId),
       api.getPayments(),
       api.getNotes(studentId),
@@ -88,7 +92,9 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         setBookingLatestByMonth(latestRes?.latestByMonth ?? null)
       })
       .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
   }, [studentId])
 
   useEffect(() => {
@@ -170,7 +176,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       const res = await api.syncStudentGoogleContact(studentId)
       const action = res?.actionTaken === 'created' ? 'created' : res?.actionTaken === 'updated' ? 'updated' : 'synced'
       success(`Google Contact ${action}`)
-      fetchData()
+      fetchData({ silent: true })
     } catch (e) {
       setError(e.message || 'Google Contact sync failed')
     } finally {
@@ -295,7 +301,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   studentId={studentId}
                   student={student}
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
-                  onMonthLessonsUpdated={fetchData}
+                  onMonthLessonsUpdated={() => fetchData({ silent: true })}
                   onLoadingChange={setLessonsLoading}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
@@ -506,7 +512,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         student={student}
         mode={paymentModal.mode}
         payment={paymentModal.payment}
-        onSave={fetchData}
+        onSave={() => fetchData({ silent: true })}
         onClose={() => setPaymentModal(null)}
       />
     )}
@@ -515,7 +521,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         studentId={studentId}
         mode={noteModal.mode}
         note={noteModal.note}
-        onSave={fetchData}
+        onSave={() => fetchData({ silent: true })}
         onClose={() => setNoteModal(null)}
       />
     )}
@@ -550,7 +556,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
         }}
-        onBooked={fetchData}
+        onBooked={() => fetchData({ silent: true })}
         rescheduleSource={rescheduleSourceLesson}
       />
     )}
@@ -574,7 +580,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setOverridePaidLessons(x)
           setPreBookLessonModal(false)
           setBookLessonModal(true)
-          await fetchData()
+          await fetchData({ silent: true })
         }}
       />
     )}
