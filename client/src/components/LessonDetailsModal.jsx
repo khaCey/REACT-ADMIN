@@ -141,8 +141,8 @@ export default function LessonDetailsModal({
     }
   }
   const handleRemove = async () => {
-    const ok = await onRemove?.(lesson, student)
-    if (ok !== false) onClose()
+    onClose()
+    await onRemove?.(lesson, student)
   }
   const handleSyncWithCalendar = async () => {
     if (syncing) return
