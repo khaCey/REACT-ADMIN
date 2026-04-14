@@ -328,6 +328,7 @@ function useLatestByMonth(studentId, refreshTrigger, scheduleRefreshKey = 0) {
 
   return {
     data,
+    setData,
     loading,
     error,
     activeMonth,
@@ -359,7 +360,7 @@ export default function LessonsThisMonth({
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
-  const { data, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
+  const { data, setData, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
     studentId,
     lastSynced,
     scheduleRefreshKey
