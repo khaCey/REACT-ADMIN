@@ -158,6 +158,11 @@ function useLatestByMonth(studentId, refreshTrigger, scheduleRefreshKey = 0) {
     fetchData({ silent: false })
   }, [studentId, refreshTrigger, fetchData])
 
+  useEffect(() => {
+    if (studentId == null || !scheduleRefreshKey) return
+    fetchData({ silent: true })
+  }, [scheduleRefreshKey, studentId, fetchData])
+
   return {
     data,
     loading,
