@@ -47,6 +47,7 @@ const CARD_STYLES = {
   rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
   demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60', label: 'Demo' },
   unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Unscheduled' },
+  deleting: { accent: 'bg-slate-700', bg: 'bg-slate-100', dot: 'bg-slate-700', hoverRing: 'hover:ring-slate-600/60', label: 'Deleting...' },
   sync_pending: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Syncing' },
   sync_failed: { accent: 'bg-red-600', bg: 'bg-red-100', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
 }
@@ -57,27 +58,189 @@ const CARD_SIZES = {
   large: { date: 'text-[0.8rem]', dow: 'text-[0.7rem]', time: 'text-[0.75rem]', status: 'text-[0.7rem]', dot: 'h-2 w-2', pad: 'px-2 py-1.5', accent: 'w-1.5' },
 }
 
+function getLessonDisplayStatus(lesson) {
+  const transientStatus = String(lesson?.transientStatus || '').toLowerCase()
+  const rawStatus = String(lesson?.status || '').toLowerCase()
+  const syncStatus = String(lesson?.calendarSyncStatus || 'synced').toLowerCase()
+  const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
+
+  if (transientStatus === 'deleting') return 'deleting'
+  if (transientStatus === 'sync_failed') return 'sync_failed'
+  if (transientStatus === 'rescheduled') return 'rescheduled'
+  if (transientStatus === 'sync_pending') return 'sync_pending'
+  if (rawStatus === 'unscheduled') return 'unscheduled'
+  if (rawStatus === 'cancelled' && lesson?.awaitingRescheduleDate) return 'reschedule_date_tbd'
+  if (lesson?.optimisticRescheduledTo || lesson?.rescheduledTo) return 'rescheduled'
+  if (rawStatus === 'cancelled') return 'cancelled'
+  if (syncStatus === 'failed') return 'sync_failed'
+  if (syncStatus === 'pending') return 'sync_pending'
+  if (isDemoLesson) return 'demo'
+  return rawStatus || 'scheduled'
+}
+
+function sortLessonsForDisplay(lessons) {
+  return [...(lessons || [])].sort((a, b) => {
+    const aUnscheduled = String(a?.status || '').toLowerCase() === 'unscheduled'
+    const bUnscheduled = String(b?.status || '').toLowerCase() === 'unscheduled'
+    if (aUnscheduled && !bUnscheduled) return 1
+    if (!aUnscheduled && bUnscheduled) return -1
+    const aDay = aUnscheduled ? 999 : parseInt(a?.day, 10) || 999
+    const bDay = bUnscheduled ? 999 : parseInt(b?.day, 10) || 999
+    if (aDay !== bDay) return aDay - bDay
+    const aTime = String(a?.time || '99:99')
+    const bTime = String(b?.time || '99:99')
+    return aTime.localeCompare(bTime)
+  })
+}
+
+function buildDefaultMonthEntry(monthKey) {
+  const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/)
+  const year = m ? parseInt(m[1], 10) : new Date().getFullYear()
+  const monthIndex = m ? parseInt(m[2], 10) - 1 : new Date().getMonth()
+  return {
+    Payment: '未',
+    lessons: [],
+    missingCount: 0,
+    paidLessonsCount: 0,
+    bookedLessonsCount: 0,
+    year,
+    monthIndex,
+    label: monthKey,
+  }
+}
+
+function ensureMonthEntry(data, monthKey) {
+  return data?.[monthKey] || buildDefaultMonthEntry(monthKey)
+}
+
+function findLessonMonthKey(monthDataObj, eventID) {
+  if (!monthDataObj || !eventID) return null
+  for (const key of Object.keys(monthDataObj)) {
+    if ((monthDataObj[key]?.lessons || []).some((l) => l.eventID === eventID)) return key
+  }
+  return null
+}
+
+function buildOptimisticUnscheduled(monthKey, seed = Date.now()) {
+  return {
+    day: '--',
+    time: '--',
+    status: 'unscheduled',
+    eventID: `unscheduled-optimistic-${monthKey}-${seed}`,
+    isGroup: false,
+    lessonKind: 'regular',
+  }
+}
+
+function withPatchedMonth(data, monthKey, patcher) {
+  const next = { ...(data || {}) }
+  const entry = ensureMonthEntry(next, monthKey)
+  next[monthKey] = patcher({
+    ...entry,
+    lessons: sortLessonsForDisplay(entry.lessons || []),
+  })
+  return next
+}
+
+function applyLessonPatch(data, eventID, patcher) {
+  if (!data || !eventID) return data
+  const monthKey = findLessonMonthKey(data, eventID)
+  if (!monthKey) return data
+  return withPatchedMonth(data, monthKey, (entry) => ({
+    ...entry,
+    lessons: sortLessonsForDisplay(
+      (entry.lessons || []).map((lesson) =>
+        lesson.eventID === eventID ? patcher(lesson) : lesson
+      )
+    ),
+  }))
+}
+
+function insertLessonIntoMonth(data, monthKey, lesson, opts = {}) {
+  const replacePlaceholder = opts.replacePlaceholder !== false
+  return withPatchedMonth(data, monthKey, (entry) => {
+    let lessons = [...(entry.lessons || [])].filter((l) => l.eventID !== lesson.eventID)
+    if (replacePlaceholder) {
+      const unscheduledIdx = lessons.findIndex((l) => String(l.status || '').toLowerCase() === 'unscheduled')
+      if (unscheduledIdx >= 0) lessons.splice(unscheduledIdx, 1)
+    }
+    lessons.push(lesson)
+    return {
+      ...entry,
+      lessons: sortLessonsForDisplay(lessons),
+    }
+  })
+}
+
+function replaceLessonWithUnscheduled(data, eventID) {
+  if (!data || !eventID) return data
+  const monthKey = findLessonMonthKey(data, eventID)
+  if (!monthKey) return data
+  return withPatchedMonth(data, monthKey, (entry) => {
+    const lessons = (entry.lessons || []).filter((l) => l.eventID !== eventID)
+    lessons.push(buildOptimisticUnscheduled(monthKey))
+    return {
+      ...entry,
+      lessons: sortLessonsForDisplay(lessons),
+    }
+  })
+}
+
+function applyOptimisticMutationToMonthData(prevData, mutation) {
+  if (!prevData || !mutation) return prevData
+  switch (mutation.type) {
+    case 'book_start':
+      return insertLessonIntoMonth(prevData, mutation.monthKey, mutation.lesson, { replacePlaceholder: true })
+    case 'book_failed':
+      return applyLessonPatch(prevData, mutation.eventID, (lesson) => ({
+        ...lesson,
+        transientStatus: 'sync_failed',
+        calendarSyncStatus: 'failed',
+        calendarSyncError: mutation.error || lesson.calendarSyncError || 'Failed to book',
+      }))
+    case 'reschedule_start': {
+      let next = applyLessonPatch(prevData, mutation.sourceEventID, (lesson) => ({
+        ...lesson,
+        transientStatus: 'rescheduled',
+        optimisticRescheduledTo: {
+          date: mutation.targetDate || null,
+          time: mutation.targetTime || null,
+        },
+        calendarSyncError: null,
+      }))
+      next = insertLessonIntoMonth(next, mutation.targetMonthKey, mutation.targetLesson, { replacePlaceholder: true })
+      return next
+    }
+    case 'reschedule_failed': {
+      let next = applyLessonPatch(prevData, mutation.sourceEventID, (lesson) => ({
+        ...lesson,
+        transientStatus: undefined,
+        optimisticRescheduledTo: undefined,
+      }))
+      next = applyLessonPatch(next, mutation.targetEventID, (lesson) => ({
+        ...lesson,
+        transientStatus: 'sync_failed',
+        calendarSyncStatus: 'failed',
+        calendarSyncError: mutation.error || lesson.calendarSyncError || 'Failed to reschedule lesson',
+      }))
+      return next
+    }
+    case 'patch_lesson':
+      return applyLessonPatch(prevData, mutation.eventID, (lesson) => ({
+        ...lesson,
+        ...(mutation.patch || {}),
+      }))
+    case 'replace_with_unscheduled':
+      return replaceLessonWithUnscheduled(prevData, mutation.eventID)
+    default:
+      return prevData
+  }
+}
+
 
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
+  const displayStatus = getLessonDisplayStatus(lesson)
   const rawStatus = String(lesson.status || '').toLowerCase()
-  const syncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
-  const isDemoLesson = String(lesson.lessonKind || '').toLowerCase() === 'demo'
-  // Rescheduled linkage before generic cancelled (source row is cancelled but has rescheduledTo).
-  // Demo: calendar color 5/9 maps to status "rescheduled" in GAS; prefer Demo badge unless real reschedule link.
-  const displayStatus =
-    rawStatus === 'unscheduled'
-      ? 'unscheduled'
-      : rawStatus === 'cancelled' && lesson.awaitingRescheduleDate
-        ? 'reschedule_date_tbd'
-        : lesson.rescheduledTo
-          ? 'rescheduled'
-          : rawStatus === 'cancelled'
-            ? 'cancelled'
-            : syncStatus === 'failed' || syncStatus === 'pending'
-              ? 'sync_pending'
-              : isDemoLesson
-                ? 'demo'
-                : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -191,6 +354,7 @@ export default function LessonsThisMonth({
   sectionClassName,
   onLoadingChange,
   onMonthLessonsUpdated,
+  optimisticScheduleMutations = [],
   scheduleRefreshKey = 0,
 }) {
   const { success } = useToast()
@@ -201,11 +365,31 @@ export default function LessonsThisMonth({
     scheduleRefreshKey
   )
   const pendingPollCountRef = useRef(0)
+  const processedOptimisticMutationCountRef = useRef(0)
 
   useEffect(() => {
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
+
+  const applyOptimisticMutation = useCallback((mutation) => {
+    setData((prev) => applyOptimisticMutationToMonthData(prev, mutation))
+  }, [])
+
+  useEffect(() => {
+    processedOptimisticMutationCountRef.current = 0
+  }, [studentId])
+
+  useEffect(() => {
+    if (!Array.isArray(optimisticScheduleMutations) || optimisticScheduleMutations.length === 0) return
+    const start = processedOptimisticMutationCountRef.current
+    const nextMutations = optimisticScheduleMutations.slice(start)
+    if (nextMutations.length === 0) return
+    for (const mutation of nextMutations) {
+      applyOptimisticMutation(mutation)
+    }
+    processedOptimisticMutationCountRef.current = optimisticScheduleMutations.length
+  }, [optimisticScheduleMutations, applyOptimisticMutation])
 
   const hasPendingCalendarSync =
     !!data &&
@@ -246,16 +430,44 @@ export default function LessonsThisMonth({
   const handleCancel = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
+    applyOptimisticMutation({
+      type: 'patch_lesson',
+      eventID: lesson.eventID,
+      patch: {
+        transientStatus: 'sync_pending',
+        calendarSyncError: null,
+      },
+    })
     try {
       await api.cancelScheduleEvent(lesson.eventID)
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: undefined,
+          status: 'cancelled',
+          awaitingRescheduleDate: false,
+          calendarSyncStatus: 'synced',
+          calendarSyncError: null,
+        },
+      })
       success('Lesson cancelled')
       try {
-        await refetch()
+        await refetchSilent()
       } catch (refreshErr) {
         setActionError(refreshErr?.message || 'Cancelled, but refresh failed')
       }
       return true
     } catch (e) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: 'sync_failed',
+          calendarSyncStatus: 'failed',
+          calendarSyncError: e.message,
+        },
+      })
       setActionError(e.message)
       return false
     }
@@ -263,16 +475,44 @@ export default function LessonsThisMonth({
   const handleUncancel = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
+    applyOptimisticMutation({
+      type: 'patch_lesson',
+      eventID: lesson.eventID,
+      patch: {
+        transientStatus: 'sync_pending',
+        calendarSyncError: null,
+      },
+    })
     try {
       await api.uncancelScheduleEvent(lesson.eventID)
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: undefined,
+          status: 'scheduled',
+          awaitingRescheduleDate: false,
+          calendarSyncStatus: 'synced',
+          calendarSyncError: null,
+        },
+      })
       success('Lesson uncancelled')
       try {
-        await refetch()
+        await refetchSilent()
       } catch (refreshErr) {
         setActionError(refreshErr?.message || 'Uncancelled, but refresh failed')
       }
       return true
     } catch (e) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: 'sync_failed',
+          calendarSyncStatus: 'failed',
+          calendarSyncError: e.message,
+        },
+      })
       setActionError(e.message)
       return false
     }
@@ -307,8 +547,26 @@ export default function LessonsThisMonth({
   const handleSyncWithCalendar = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
+    applyOptimisticMutation({
+      type: 'patch_lesson',
+      eventID: lesson.eventID,
+      patch: {
+        transientStatus: 'sync_pending',
+        calendarSyncStatus: 'pending',
+        calendarSyncError: null,
+      },
+    })
     try {
       await api.syncScheduleEvent(lesson.eventID)
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: undefined,
+          calendarSyncStatus: 'synced',
+          calendarSyncError: null,
+        },
+      })
       success('Lesson synced with Calendar')
       try {
         await refetchSilent()
@@ -317,6 +575,15 @@ export default function LessonsThisMonth({
       }
       return true
     } catch (e) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: 'sync_failed',
+          calendarSyncStatus: 'failed',
+          calendarSyncError: e.message,
+        },
+      })
       setActionError(e.message)
       return false
     }
@@ -325,13 +592,34 @@ export default function LessonsThisMonth({
   const confirmRemoveLesson = async () => {
     if (!pendingRemoveLesson?.eventID) return
     setRemoving(true)
+    applyOptimisticMutation({
+      type: 'patch_lesson',
+      eventID: pendingRemoveLesson.eventID,
+      patch: {
+        transientStatus: 'deleting',
+        calendarSyncError: null,
+      },
+    })
     try {
       await api.removeScheduleEvent(pendingRemoveLesson.eventID)
+      applyOptimisticMutation({
+        type: 'replace_with_unscheduled',
+        eventID: pendingRemoveLesson.eventID,
+      })
       success('Lesson removed')
       setPendingRemoveLesson(null)
       setSelectedLesson(null)
-      await refetch()
+      await refetchSilent()
     } catch (e) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: pendingRemoveLesson.eventID,
+        patch: {
+          transientStatus: 'sync_failed',
+          calendarSyncStatus: 'failed',
+          calendarSyncError: e.message,
+        },
+      })
       setActionError(e.message)
     } finally {
       setRemoving(false)
@@ -524,13 +812,41 @@ export default function LessonsThisMonth({
           onSelectLater={async () => {
             const l = rescheduleChoiceLesson
             setActionError(null)
+            applyOptimisticMutation({
+              type: 'patch_lesson',
+              eventID: l.eventID,
+              patch: {
+                transientStatus: 'sync_pending',
+                calendarSyncError: null,
+              },
+            })
             try {
               await api.rescheduleAwaitingDate(l.eventID)
+              applyOptimisticMutation({
+                type: 'patch_lesson',
+                eventID: l.eventID,
+                patch: {
+                  transientStatus: undefined,
+                  status: 'cancelled',
+                  awaitingRescheduleDate: true,
+                  calendarSyncStatus: 'synced',
+                  calendarSyncError: null,
+                },
+              })
               success('Lesson marked as awaiting a new date')
               setRescheduleChoiceLesson(null)
               setSelectedLesson(null)
-              await refetch()
+              await refetchSilent()
             } catch (e) {
+              applyOptimisticMutation({
+                type: 'patch_lesson',
+                eventID: l.eventID,
+                patch: {
+                  transientStatus: 'sync_failed',
+                  calendarSyncStatus: 'failed',
+                  calendarSyncError: e?.message || 'Request failed',
+                },
+              })
               setActionError(e?.message || 'Request failed')
             }
           }}

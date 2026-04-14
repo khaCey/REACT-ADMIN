@@ -59,11 +59,14 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   /** Bumped after a successful book so LessonsThisMonth refetches (independent of calendar poll). */
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
+  /** Queue of optimistic lesson-card mutations consumed by LessonsThisMonth. */
+  const [optimisticScheduleMutations, setOptimisticScheduleMutations] = useState([])
   const [noteSearch, setNoteSearch] = useState('')
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
+  const nextOptimisticMutationIdRef = useRef(1)
 
   /** Uses modal `studentId` + loaded `student` record (`ID`) — not schedule rows. */
   const bookingExcluded = isStudentExcludedFromBooking(studentId, student)
@@ -74,7 +77,14 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
 
   useEffect(() => {
     setScheduleRefreshKey(0)
+    setOptimisticScheduleMutations([])
   }, [studentId])
+
+  const handleOptimisticScheduleMutation = useCallback((mutation) => {
+    if (!mutation || typeof mutation !== 'object') return
+    const id = nextOptimisticMutationIdRef.current++
+    setOptimisticScheduleMutations((prev) => [...prev, { id, ...mutation }])
+  }, [])
 
   /** @param {{ silent?: boolean }} [opts] - silent: refresh data without full-modal loading (avoids white flash while modal is open). */
   const fetchData = useCallback((opts = {}) => {
@@ -309,6 +319,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
                   onMonthLessonsUpdated={() => fetchData({ silent: true })}
                   onLoadingChange={setLessonsLoading}
+                  optimisticScheduleMutations={optimisticScheduleMutations}
                   scheduleRefreshKey={scheduleRefreshKey}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
@@ -567,6 +578,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           fetchData({ silent: true })
           setScheduleRefreshKey((k) => k + 1)
         }}
+        onOptimisticScheduleMutation={handleOptimisticScheduleMutation}
         rescheduleSource={rescheduleSourceLesson}
       />
     )}

@@ -315,6 +315,12 @@ function resolveBookStudentId(studentIdProp, student) {
   return null
 }
 
+function optimisticLessonKindForStudent(student) {
+  const payment = String(student?.Payment || student?.payment || '').toLowerCase()
+  if (payment.includes('owner')) return 'owner'
+  return studentIsDemoOrTrial(student) ? 'demo' : 'regular'
+}
+
 export default function BookLessonModal({
   studentId,
   student,
@@ -323,6 +329,7 @@ export default function BookLessonModal({
   rescheduleSource = null,
   onClose,
   onBooked,
+  onOptimisticScheduleMutation,
 }) {
   const { success } = useToast()
   const { staff } = useAuth()
@@ -600,6 +607,24 @@ export default function BookLessonModal({
       setSubmitting(true)
       setError(null)
       setHideBookingCalendar(true)
+      const tempEventId = `optimistic-reschedule-${Date.now()}`
+      onOptimisticScheduleMutation?.({
+        type: 'reschedule_start',
+        sourceEventID: rescheduleSource.eventID,
+        targetMonthKey: String(date || '').slice(0, 7),
+        targetDate: date,
+        targetTime: time,
+        targetLesson: {
+          eventID: tempEventId,
+          day: String(date || '').slice(8, 10) || '--',
+          time,
+          status: 'scheduled',
+          calendarSyncStatus: 'pending',
+          calendarSyncError: null,
+          lessonKind: optimisticLessonKindForStudent(student),
+          transientStatus: 'sync_pending',
+        },
+      })
       try {
         await api.rescheduleLesson({
           source_event_id: rescheduleSource.eventID,
@@ -636,6 +661,12 @@ export default function BookLessonModal({
           message: 'The lesson was rescheduled successfully.',
         })
       } catch (e) {
+        onOptimisticScheduleMutation?.({
+          type: 'reschedule_failed',
+          sourceEventID: rescheduleSource.eventID,
+          targetEventID: tempEventId,
+          error: e?.message || 'Failed to reschedule lesson',
+        })
         setError(e?.message || 'Failed to reschedule lesson')
         setHideBookingCalendar(false)
       } finally {
@@ -683,11 +714,26 @@ export default function BookLessonModal({
         const [date, time] = key.split('T')
         if (!date || !time) continue
         const packTotal = packTotalForSlotDate(packResult, date)
+        const tempEventId = `optimistic-book-${date}-${time}-${Date.now()}-${successCount + failed.length}`
         if (packTotal == null || packTotal <= 0) {
           failed.push(`${date} ${time}: Missing lesson pack total for this month.`)
           continue
         }
         try {
+          onOptimisticScheduleMutation?.({
+            type: 'book_start',
+            monthKey: String(date || '').slice(0, 7),
+            lesson: {
+              eventID: tempEventId,
+              day: String(date || '').slice(8, 10) || '--',
+              time,
+              status: 'scheduled',
+              calendarSyncStatus: 'pending',
+              calendarSyncError: null,
+              lessonKind: optimisticLessonKindForStudent(student),
+              transientStatus: 'sync_pending',
+            },
+          })
           await api.getBookingWarning(date, time, student_id)
           await api.bookLesson({
             student_id,
@@ -699,6 +745,11 @@ export default function BookLessonModal({
           })
           successCount += 1
         } catch (e) {
+          onOptimisticScheduleMutation?.({
+            type: 'book_failed',
+            eventID: tempEventId,
+            error: e?.message || 'Failed to book',
+          })
           failed.push(`${date} ${time}: ${e?.message || 'Failed to book'}`)
         }
       }

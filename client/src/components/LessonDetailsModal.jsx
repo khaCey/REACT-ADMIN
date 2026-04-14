@@ -10,6 +10,7 @@ const STATUS_STYLES = {
   rescheduled: { color: 'bg-amber-500', text: 'Rescheduled' },
   demo: { color: 'bg-orange-500', text: 'Demo' },
   unscheduled: { color: 'bg-red-500', text: 'Unscheduled' },
+  deleting: { color: 'bg-slate-700', text: 'Deleting...' },
   sync_pending: { color: 'bg-red-500', text: 'Syncing with Calendar' },
   sync_failed: { color: 'bg-red-600', text: 'Calendar sync failed' },
 }
@@ -50,19 +51,30 @@ export default function LessonDetailsModal({
 
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
+  const transientStatus = String(lesson.transientStatus || '').toLowerCase()
   const isAwaitingRescheduleDate = status === 'cancelled' && !!lesson.awaitingRescheduleDate
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   const displayStatus =
-    status === 'unscheduled'
+    transientStatus === 'deleting'
+      ? 'deleting'
+      : transientStatus === 'sync_failed'
+        ? 'sync_failed'
+        : transientStatus === 'rescheduled'
+          ? 'rescheduled'
+          : transientStatus === 'sync_pending'
+            ? 'sync_pending'
+    : status === 'unscheduled'
       ? 'unscheduled'
       : isAwaitingRescheduleDate
         ? 'reschedule_date_tbd'
-        : lesson?.rescheduledTo
+        : lesson?.optimisticRescheduledTo || lesson?.rescheduledTo
           ? 'rescheduled'
           : status === 'cancelled'
             ? 'cancelled'
-            : calendarSyncStatus === 'failed' || calendarSyncStatus === 'pending'
+            : calendarSyncStatus === 'failed'
+              ? 'sync_failed'
+              : calendarSyncStatus === 'pending'
               ? 'sync_pending'
               : isDemoLesson
                   ? 'demo'
@@ -70,14 +82,17 @@ export default function LessonDetailsModal({
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
-  const hasRescheduledTo = !!lesson?.rescheduledTo
-  const canSyncWithCalendar = !isUnscheduled && !isCancelled && calendarSyncStatus !== 'synced'
+  const hasRescheduledTo = !!(lesson?.optimisticRescheduledTo || lesson?.rescheduledTo)
+  const isTransientBusy = transientStatus === 'sync_pending' || transientStatus === 'deleting'
+  const canSyncWithCalendar = !isTransientBusy && !isUnscheduled && !isCancelled && calendarSyncStatus !== 'synced'
   const canReschedule =
-    !isUnscheduled && !isCancelled && calendarSyncStatus === 'synced'
-  const canSelectRescheduleDate = isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
+    !isTransientBusy && !isUnscheduled && !isCancelled && calendarSyncStatus === 'synced'
+  const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
   const hasExtraNotes =
+    !!lesson?.optimisticRescheduledTo ||
     !!lesson?.rescheduledTo ||
     !!lesson?.rescheduledFrom ||
+    !!lesson?.transientError ||
     !!lesson?.calendarSyncError ||
     isAwaitingRescheduleDate
 
@@ -175,11 +190,17 @@ export default function LessonDetailsModal({
           <div>
             <label className="block text-gray-600 mb-1">Notes</label>
             <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px]">
+              {lesson?.optimisticRescheduledTo && (
+                <div>Moving to: {lesson.optimisticRescheduledTo.date || '--'} {lesson.optimisticRescheduledTo.time || '--'}</div>
+              )}
               {lesson?.rescheduledTo && (
                 <div>Moved to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
               )}
               {lesson?.rescheduledFrom && (
                 <div>Moved from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
+              )}
+              {lesson?.transientError && (
+                <div>{lesson.transientError}</div>
               )}
               {lesson?.calendarSyncError && (
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
@@ -197,7 +218,7 @@ export default function LessonDetailsModal({
               <button
                 type="button"
                 onClick={() => setCancelConfirmOpen(true)}
-                disabled={confirmDialogOpen}
+                disabled={confirmDialogOpen || isTransientBusy}
                 className="rounded-md border border-amber-600 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Cancel
@@ -207,7 +228,7 @@ export default function LessonDetailsModal({
               <button
                 type="button"
                 onClick={() => setUncancelConfirmOpen(true)}
-                disabled={confirmDialogOpen}
+                disabled={confirmDialogOpen || isTransientBusy}
                 className="rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Uncancel
@@ -217,7 +238,7 @@ export default function LessonDetailsModal({
               <button
                 type="button"
                 onClick={handleOpenRescheduleChoice}
-                disabled={confirmDialogOpen}
+                disabled={confirmDialogOpen || isTransientBusy}
                 className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Reschedule
@@ -227,7 +248,7 @@ export default function LessonDetailsModal({
               <button
                 type="button"
                 onClick={handleSelectRescheduleDate}
-                disabled={confirmDialogOpen}
+                disabled={confirmDialogOpen || isTransientBusy}
                 className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Select date…
@@ -248,7 +269,7 @@ export default function LessonDetailsModal({
             <button
               type="button"
               onClick={handleRemove}
-              disabled={confirmDialogOpen}
+                disabled={confirmDialogOpen || isTransientBusy}
               className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               Remove
