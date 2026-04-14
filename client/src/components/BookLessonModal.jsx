@@ -899,11 +899,6 @@ export default function BookLessonModal({
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
               <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">Book a New Lesson</h3>
-              {rescheduleSource && (
-                <p className="text-[11px] text-amber-700 mt-1">
-                  Reschedule mode: pick one new slot to move this lesson.
-                </p>
-              )}
               <p className="text-xs text-gray-600 mt-0.5">
                 {studentName} {studentKanji ? `(${studentKanji})` : ''}
               </p>
@@ -944,14 +939,6 @@ export default function BookLessonModal({
                   : 'Adult: only hours without kids (子) lessons can be booked.'}
               </p>
             )}
-            {String(student?.Payment || student?.payment || '')
-              .toLowerCase()
-              .includes('owner') && (
-              <p className="mb-2 text-[11px] text-rose-800/90 leading-snug">
-                Owner&apos;s course: only book hours when your course teacher is on shift for that slot.
-              </p>
-            )}
-
             <div className="flex items-center justify-between mb-4">
               <button
                 type="button"
