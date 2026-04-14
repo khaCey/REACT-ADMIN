@@ -62,11 +62,9 @@ export default function LessonDetailsModal({
           ? 'rescheduled'
           : status === 'cancelled'
             ? 'cancelled'
-            : calendarSyncStatus === 'failed'
-              ? 'sync_failed'
-              : calendarSyncStatus === 'pending'
-                ? 'sync_pending'
-                : isDemoLesson
+            : calendarSyncStatus === 'failed' || calendarSyncStatus === 'pending'
+              ? 'sync_pending'
+              : isDemoLesson
                   ? 'demo'
                   : status
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
@@ -135,8 +133,7 @@ export default function LessonDetailsModal({
     if (syncing) return
     setSyncing(true)
     try {
-      const ok = await onSyncWithCalendar?.(lesson, student)
-      if (ok !== false) onClose()
+      await onSyncWithCalendar?.(lesson, student)
     } finally {
       setSyncing(false)
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Calendar } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
@@ -73,13 +73,11 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
           ? 'rescheduled'
           : rawStatus === 'cancelled'
             ? 'cancelled'
-            : syncStatus === 'failed'
-              ? 'sync_failed'
-              : syncStatus === 'pending'
-                ? 'sync_pending'
-                : isDemoLesson
-                  ? 'demo'
-                  : rawStatus
+            : syncStatus === 'failed' || syncStatus === 'pending'
+              ? 'sync_pending'
+              : isDemoLesson
+                ? 'demo'
+                : rawStatus
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -116,17 +114,23 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   )
 }
 
+const PENDING_SYNC_POLL_MS = 2000
+const PENDING_SYNC_POLL_MAX = 90
+
 function useLatestByMonth(studentId, refreshTrigger) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeMonth, setActiveMonth] = useState(null)
 
-  const fetchData = () => {
-    if (studentId == null) return
-    setLoading(true)
-    setError(null)
-    api
+  const fetchData = useCallback((opts = {}) => {
+    const silent = !!opts.silent
+    if (studentId == null) return Promise.resolve()
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
+    return api
       .getStudentLatestByMonth(studentId)
       .then((res) => {
         const latest = res.latestByMonth || {}
@@ -137,16 +141,38 @@ function useLatestByMonth(studentId, refreshTrigger) {
         setData(filtered)
         setActiveMonth((prev) => (prev == null ? thisYyyyMm : prev))
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
-  }
+      .catch((e) => {
+        if (!silent) setError(e.message)
+      })
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
+  }, [studentId])
 
   useEffect(() => {
     if (studentId == null) return
-    fetchData()
-  }, [studentId, refreshTrigger])
+    fetchData({ silent: false })
+  }, [studentId, refreshTrigger, fetchData])
 
-  return { data, loading, error, activeMonth, setActiveMonth, refetch: fetchData }
+  return {
+    data,
+    loading,
+    error,
+    activeMonth,
+    setActiveMonth,
+    refetch: () => fetchData({ silent: false }),
+    refetchSilent: () => fetchData({ silent: true }),
+  }
+}
+
+function findLessonInMonthData(monthDataObj, eventID) {
+  if (!monthDataObj || !eventID) return null
+  for (const key of Object.keys(monthDataObj)) {
+    const lessons = monthDataObj[key]?.lessons || []
+    const found = lessons.find((l) => l.eventID === eventID)
+    if (found) return found
+  }
+  return null
 }
 
 export default function LessonsThisMonth({
@@ -159,12 +185,46 @@ export default function LessonsThisMonth({
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
-  const { data, loading, error, activeMonth, setActiveMonth, refetch } = useLatestByMonth(studentId, lastSynced)
+  const { data, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
+    studentId,
+    lastSynced
+  )
+  const pendingPollCountRef = useRef(0)
 
   useEffect(() => {
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
+
+  const hasPendingCalendarSync =
+    !!data &&
+    Object.values(data).some((m) =>
+      (m?.lessons || []).some((l) => String(l.calendarSyncStatus || '').toLowerCase() === 'pending')
+    )
+
+  useEffect(() => {
+    if (!hasPendingCalendarSync || studentId == null) {
+      pendingPollCountRef.current = 0
+      return
+    }
+    const tick = () => {
+      if (pendingPollCountRef.current >= PENDING_SYNC_POLL_MAX) return
+      pendingPollCountRef.current += 1
+      refetchSilent()
+    }
+    tick()
+    const id = setInterval(tick, PENDING_SYNC_POLL_MS)
+    return () => clearInterval(id)
+  }, [hasPendingCalendarSync, studentId, refetchSilent])
+
+  useEffect(() => {
+    if (!data || !selectedLesson?.eventID) return
+    const id = selectedLesson.eventID
+    const fresh = findLessonInMonthData(data, id)
+    if (fresh) {
+      setSelectedLesson((prev) => (prev && prev.eventID === id ? fresh : prev))
+    }
+  }, [data, selectedLesson?.eventID])
   const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [removing, setRemoving] = useState(false)
@@ -240,7 +300,7 @@ export default function LessonsThisMonth({
       await api.syncScheduleEvent(lesson.eventID)
       success('Lesson synced with Calendar')
       try {
-        await refetch()
+        await refetchSilent()
       } catch (refreshErr) {
         setActionError(refreshErr?.message || 'Synced, but refresh failed')
       }
