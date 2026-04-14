@@ -57,6 +57,8 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [rescheduleSourceLesson, setRescheduleSourceLesson] = useState(null)
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
+  /** Bumped after a successful book so LessonsThisMonth refetches (independent of calendar poll). */
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
   const [noteSearch, setNoteSearch] = useState('')
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
@@ -69,6 +71,10 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   useEffect(() => {
     if (bookingExcluded) setBookLessonModal(false)
   }, [bookingExcluded])
+
+  useEffect(() => {
+    setScheduleRefreshKey(0)
+  }, [studentId])
 
   /** @param {{ silent?: boolean }} [opts] - silent: refresh data without full-modal loading (avoids white flash while modal is open). */
   const fetchData = useCallback((opts = {}) => {
@@ -303,6 +309,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
                   onMonthLessonsUpdated={() => fetchData({ silent: true })}
                   onLoadingChange={setLessonsLoading}
+                  scheduleRefreshKey={scheduleRefreshKey}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
 
@@ -556,7 +563,10 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
         }}
-        onBooked={() => fetchData({ silent: true })}
+        onBooked={() => {
+          fetchData({ silent: true })
+          setScheduleRefreshKey((k) => k + 1)
+        }}
         rescheduleSource={rescheduleSourceLesson}
       />
     )}

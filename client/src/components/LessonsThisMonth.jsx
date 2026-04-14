@@ -117,7 +117,11 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
 const PENDING_SYNC_POLL_MS = 2000
 const PENDING_SYNC_POLL_MAX = 90
 
-function useLatestByMonth(studentId, refreshTrigger) {
+/**
+ * @param {unknown} refreshTrigger - e.g. calendar poll `lastSynced`; changes trigger a normal refetch.
+ * @param {number} [scheduleRefreshKey] - increment (e.g. after booking) to refetch schedule without waiting on poll.
+ */
+function useLatestByMonth(studentId, refreshTrigger, scheduleRefreshKey = 0) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -182,12 +186,14 @@ export default function LessonsThisMonth({
   sectionClassName,
   onLoadingChange,
   onMonthLessonsUpdated,
+  scheduleRefreshKey = 0,
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
   const { data, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
     studentId,
-    lastSynced
+    lastSynced,
+    scheduleRefreshKey
   )
   const pendingPollCountRef = useRef(0)
 
