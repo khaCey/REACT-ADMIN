@@ -440,6 +440,92 @@ app.post('/api/admin/clear-table', requireAuth, requireAdmin, async (req, res) =
   }
 });
 
+/** Admin: browse monthly_schedule rows with filters. */
+app.get('/api/admin/monthly-schedule', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const rawStudentId = String(req.query?.studentId ?? '').trim();
+    const rawSyncStatus = String(req.query?.syncStatus ?? '').trim().toLowerCase();
+    const rawStatus = String(req.query?.status ?? '').trim().toLowerCase();
+    const rawQ = String(req.query?.q ?? '').trim();
+    const limit = Math.max(1, Math.min(500, parseInt(String(req.query?.limit ?? '100'), 10) || 100));
+    const offset = Math.max(0, parseInt(String(req.query?.offset ?? '0'), 10) || 0);
+    const studentId = rawStudentId === '' ? null : Number(rawStudentId);
+    if (rawStudentId !== '' && !Number.isFinite(studentId)) {
+      return res.status(400).json({ error: 'studentId must be a number when provided' });
+    }
+
+    const filterSql = `
+      FROM monthly_schedule ms
+      WHERE ($1::integer IS NULL OR ms.student_id = $1::integer)
+        AND ($2::text = '' OR LOWER(COALESCE(ms.calendar_sync_status, '')) = $2::text)
+        AND ($3::text = '' OR LOWER(COALESCE(ms.status, '')) = $3::text)
+        AND (
+          $4::text = ''
+          OR ms.event_id ILIKE '%' || $4::text || '%'
+          OR COALESCE(ms.student_name, '') ILIKE '%' || $4::text || '%'
+          OR COALESCE(ms.title, '') ILIKE '%' || $4::text || '%'
+        )
+    `;
+
+    const params = [studentId, rawSyncStatus, rawStatus, rawQ];
+    const totalResult = await query(`SELECT COUNT(*)::integer AS total ${filterSql}`, params);
+    const rowsResult = await query(
+      `SELECT ms.event_id, ms.student_name, ms.student_id, ms.title, ms.date, ms.start, ms.status,
+              ms.calendar_sync_status, ms.calendar_sync_error, ms.awaiting_reschedule_date
+       ${filterSql}
+       ORDER BY ms.date DESC NULLS LAST, ms.start DESC NULLS LAST, ms.student_name ASC, ms.event_id ASC
+       LIMIT $5 OFFSET $6`,
+      [...params, limit, offset]
+    );
+
+    res.json({
+      items: rowsResult.rows || [],
+      total: totalResult.rows[0]?.total || 0,
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error('[admin/monthly-schedule:list]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to load monthly schedule rows' });
+  }
+});
+
+/** Admin: delete one monthly_schedule row and related reschedule links. */
+app.delete('/api/admin/monthly-schedule/:eventId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const eventId = decodeURIComponent(String(req.params?.eventId || '').trim());
+    const studentName = String(req.query?.studentName || '').trim();
+    if (!eventId) return res.status(400).json({ error: 'eventId is required' });
+    if (!studentName) return res.status(400).json({ error: 'studentName is required' });
+
+    const deleted = await query(
+      `DELETE FROM monthly_schedule
+       WHERE event_id = $1 AND student_name = $2
+       RETURNING event_id, student_name`,
+      [eventId, studentName]
+    );
+    if ((deleted.rows || []).length === 0) {
+      return res.status(404).json({ error: 'monthly_schedule row not found' });
+    }
+
+    await query(
+      `DELETE FROM reschedules
+       WHERE (from_event_id = $1 AND from_student_name = $2)
+          OR (to_event_id = $1 AND to_student_name = $2)`,
+      [eventId, studentName]
+    );
+
+    res.json({
+      ok: true,
+      event_id: deleted.rows[0].event_id,
+      student_name: deleted.rows[0].student_name,
+    });
+  } catch (err) {
+    console.error('[admin/monthly-schedule:delete]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to delete monthly schedule row' });
+  }
+});
+
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 

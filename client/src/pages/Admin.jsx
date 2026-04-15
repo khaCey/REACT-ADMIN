@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
@@ -11,6 +11,18 @@ function formatBackupDate(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+const MONTHLY_SCHEDULE_PAGE_SIZE = 100
+
+function formatMonthlyScheduleDateTime(date, start) {
+  const dateStr = date ? String(date).slice(0, 10) : '—'
+  if (!start) return `${dateStr} —`
+  const d = new Date(start)
+  const timeStr = !Number.isNaN(d.getTime())
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '—'
+  return `${dateStr} ${timeStr}`
 }
 
 export default function Admin() {
@@ -34,6 +46,18 @@ export default function Admin() {
   const [fetchOneError, setFetchOneError] = useState('')
   const [testGasLoading, setTestGasLoading] = useState(false)
   const [testGasResult, setTestGasResult] = useState(null)
+  const [monthlyRows, setMonthlyRows] = useState([])
+  const [monthlyLoading, setMonthlyLoading] = useState(true)
+  const [monthlyRefreshing, setMonthlyRefreshing] = useState(false)
+  const [monthlyError, setMonthlyError] = useState('')
+  const [monthlyStudentId, setMonthlyStudentId] = useState('')
+  const [monthlySyncStatus, setMonthlySyncStatus] = useState('')
+  const [monthlyLessonStatus, setMonthlyLessonStatus] = useState('')
+  const [monthlyQuery, setMonthlyQuery] = useState('')
+  const [monthlyOffset, setMonthlyOffset] = useState(0)
+  const [monthlyTotal, setMonthlyTotal] = useState(0)
+  const [pendingMonthlyDelete, setPendingMonthlyDelete] = useState(null)
+  const [deletingMonthlyRow, setDeletingMonthlyRow] = useState(false)
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -70,6 +94,38 @@ export default function Admin() {
   useEffect(() => {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
   }, [])
+
+  const loadMonthlyRows = useCallback(async (nextOffset = 0, { silent = false } = {}) => {
+    if (silent) setMonthlyRefreshing(true)
+    else setMonthlyLoading(true)
+    setMonthlyError('')
+    try {
+      const res = await api.getAdminMonthlyScheduleEntries({
+        studentId: monthlyStudentId.trim(),
+        syncStatus: monthlySyncStatus,
+        status: monthlyLessonStatus,
+        q: monthlyQuery.trim(),
+        limit: MONTHLY_SCHEDULE_PAGE_SIZE,
+        offset: nextOffset,
+      })
+      setMonthlyRows(Array.isArray(res?.items) ? res.items : [])
+      setMonthlyTotal(Number(res?.total) || 0)
+      setMonthlyOffset(nextOffset)
+    } catch (err) {
+      setMonthlyError(err.message || 'Failed to load monthly schedule rows')
+      if (!silent) {
+        setMonthlyRows([])
+        setMonthlyTotal(0)
+      }
+    } finally {
+      if (silent) setMonthlyRefreshing(false)
+      else setMonthlyLoading(false)
+    }
+  }, [monthlyStudentId, monthlySyncStatus, monthlyLessonStatus, monthlyQuery])
+
+  useEffect(() => {
+    loadMonthlyRows(0)
+  }, [loadMonthlyRows])
 
   const handleCreateBackup = async () => {
     setBackupError('')
@@ -117,9 +173,34 @@ export default function Admin() {
     }
   }
 
+  const handleMonthlyDeleteConfirm = async () => {
+    if (!pendingMonthlyDelete?.event_id || !pendingMonthlyDelete?.student_name) return
+    setDeletingMonthlyRow(true)
+    try {
+      await api.deleteAdminMonthlyScheduleEntry({
+        eventId: pendingMonthlyDelete.event_id,
+        studentName: pendingMonthlyDelete.student_name,
+      })
+      success('monthly_schedule row deleted')
+      setPendingMonthlyDelete(null)
+      const nextOffset =
+        monthlyRows.length === 1 && monthlyOffset > 0
+          ? Math.max(0, monthlyOffset - MONTHLY_SCHEDULE_PAGE_SIZE)
+          : monthlyOffset
+      await loadMonthlyRows(nextOffset, { silent: true })
+    } catch (err) {
+      setMonthlyError(err.message || 'Failed to delete monthly schedule row')
+    } finally {
+      setDeletingMonthlyRow(false)
+    }
+  }
+
   if (backupsLoading) {
     return <FullPageLoading />
   }
+
+  const monthlyPage = Math.floor(monthlyOffset / MONTHLY_SCHEDULE_PAGE_SIZE) + 1
+  const monthlyPageCount = Math.max(1, Math.ceil(monthlyTotal / MONTHLY_SCHEDULE_PAGE_SIZE))
 
   return (
     <div className="w-full flex flex-col h-full min-h-0">
@@ -326,6 +407,177 @@ export default function Admin() {
           </button>
         </section>
 
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
+            <Database className="w-5 h-5 text-gray-600" />
+            Monthly Schedule Entries
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Browse exact <code className="bg-gray-100 px-1 rounded">monthly_schedule</code> rows, filter stuck entries, and delete specific rows when cleanup is needed.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+            <input
+              value={monthlyStudentId}
+              onChange={(e) => setMonthlyStudentId(e.target.value)}
+              placeholder="Student ID"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+            <select
+              value={monthlySyncStatus}
+              onChange={(e) => setMonthlySyncStatus(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+            >
+              <option value="">All sync statuses</option>
+              <option value="synced">synced</option>
+              <option value="pending">pending</option>
+              <option value="failed">failed</option>
+            </select>
+            <select
+              value={monthlyLessonStatus}
+              onChange={(e) => setMonthlyLessonStatus(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+            >
+              <option value="">All lesson statuses</option>
+              <option value="scheduled">scheduled</option>
+              <option value="cancelled">cancelled</option>
+              <option value="reserved">reserved</option>
+              <option value="rescheduled">rescheduled</option>
+              <option value="demo">demo</option>
+              <option value="unscheduled">unscheduled</option>
+            </select>
+            <div className="md:col-span-2 flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  value={monthlyQuery}
+                  onChange={(e) => setMonthlyQuery(e.target.value)}
+                  placeholder="Search event_id, student_name, title..."
+                  className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => loadMonthlyRows(monthlyOffset, { silent: true })}
+                disabled={monthlyRefreshing}
+                className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {monthlyRefreshing ? <LoadingSpinner size="xs" /> : <RefreshCw className="w-4 h-4" />}
+                Refresh
+              </button>
+            </div>
+          </div>
+          {monthlyError && <p className="text-sm text-red-600 mb-3">{monthlyError}</p>}
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            {monthlyLoading ? (
+              <div className="p-6 flex items-center justify-center">
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr className="text-left text-gray-700">
+                      <th className="px-3 py-2 font-medium">Student</th>
+                      <th className="px-3 py-2 font-medium">Event ID</th>
+                      <th className="px-3 py-2 font-medium">Date / Time</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium">Sync</th>
+                      <th className="px-3 py-2 font-medium">Title</th>
+                      <th className="px-3 py-2 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
+                          No monthly schedule rows found.
+                        </td>
+                      </tr>
+                    ) : (
+                      monthlyRows.map((row) => (
+                        <tr key={`${row.event_id}|${row.student_name}`} className="border-t border-gray-100">
+                          <td className="px-3 py-2 align-top">
+                            <div className="font-medium text-gray-900">{row.student_name || '—'}</div>
+                            <div className="text-xs text-gray-500">student_id: {row.student_id ?? 'null'}</div>
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <code className="text-xs break-all text-gray-700">{row.event_id}</code>
+                          </td>
+                          <td className="px-3 py-2 align-top text-gray-700">
+                            {formatMonthlyScheduleDateTime(row.date, row.start)}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <span className="inline-flex rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">
+                              {row.status || '—'}
+                            </span>
+                            {row.awaiting_reschedule_date ? (
+                              <div className="text-[11px] text-amber-700 mt-1">awaiting reschedule date</div>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <span
+                              className={`inline-flex rounded px-2 py-0.5 text-xs ${
+                                row.calendar_sync_status === 'failed'
+                                  ? 'bg-red-100 text-red-700'
+                                  : row.calendar_sync_status === 'pending'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-emerald-100 text-emerald-700'
+                              }`}
+                            >
+                              {row.calendar_sync_status || 'synced'}
+                            </span>
+                            {row.calendar_sync_error ? (
+                              <div className="text-[11px] text-red-600 mt-1 max-w-[220px] break-words">
+                                {row.calendar_sync_error}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 align-top text-gray-700 max-w-[260px]">
+                            <div className="truncate" title={row.title || ''}>{row.title || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2 align-top text-right">
+                            <button
+                              type="button"
+                              onClick={() => setPendingMonthlyDelete(row)}
+                              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete row
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Page {monthlyPage} / {monthlyPageCount} · {monthlyTotal} row(s)
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={monthlyOffset === 0 || monthlyRefreshing}
+                onClick={() => loadMonthlyRows(Math.max(0, monthlyOffset - MONTHLY_SCHEDULE_PAGE_SIZE), { silent: true })}
+                className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm disabled:opacity-50 cursor-pointer"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={monthlyOffset + MONTHLY_SCHEDULE_PAGE_SIZE >= monthlyTotal || monthlyRefreshing}
+                onClick={() => loadMonthlyRows(monthlyOffset + MONTHLY_SCHEDULE_PAGE_SIZE, { silent: true })}
+                className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="rounded-lg border border-rose-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
             <Trash2 className="w-5 h-5 text-rose-600" />
@@ -382,6 +634,17 @@ export default function Admin() {
           confirming={clearingTable}
           onConfirm={handleClearTableConfirm}
           onClose={() => !clearingTable && setClearConfirmOpen(false)}
+        />
+      )}
+      {pendingMonthlyDelete && (
+        <ConfirmActionModal
+          title="Delete monthly_schedule row"
+          message={`Delete this exact row?\n\nstudent_name: ${pendingMonthlyDelete.student_name}\nevent_id: ${pendingMonthlyDelete.event_id}\n\nUse this only for admin cleanup of stuck entries.`}
+          confirmLabel="Delete row"
+          destructive
+          confirming={deletingMonthlyRow}
+          onConfirm={handleMonthlyDeleteConfirm}
+          onClose={() => !deletingMonthlyRow && setPendingMonthlyDelete(null)}
         />
       )}
     </div>

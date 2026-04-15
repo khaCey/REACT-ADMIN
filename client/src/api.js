@@ -61,6 +61,21 @@ export const api = {
     fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
   clearTable: (table) =>
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
+  getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', q = '', limit = 100, offset = 0 } = {}) => {
+    const params = new URLSearchParams()
+    if (studentId !== '' && studentId != null) params.set('studentId', String(studentId))
+    if (syncStatus) params.set('syncStatus', String(syncStatus))
+    if (status) params.set('status', String(status))
+    if (q) params.set('q', String(q))
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    return fetchApi(`/admin/monthly-schedule?${params.toString()}`)
+  },
+  deleteAdminMonthlyScheduleEntry: ({ eventId, studentName }) =>
+    fetchApi(
+      `/admin/monthly-schedule/${encodeURIComponent(eventId)}?studentName=${encodeURIComponent(studentName)}`,
+      { method: 'DELETE' }
+    ),
   fetchStaffSchedule: () =>
     fetchApi('/admin/fetch-staff-schedule', { method: 'POST' }),
   fetchStaffScheduleForStaff: (staffId) =>
