@@ -292,6 +292,7 @@ function isOptimisticMutationResolved(serverData, mutation) {
       const serverLesson = monthKey
         ? (serverData[monthKey]?.lessons || []).find((l) => l.eventID === mutation.eventID)
         : null
+      if (mutation.patch?.transientStatus === 'deleting') return !serverLesson
       if (!serverLesson) return mutation.patch?.status === 'unscheduled'
       return Object.entries(mutation.patch || {}).every(([key, value]) => {
         if (key === 'transientStatus' || key === 'optimisticRescheduledTo' || key === 'transientError') return true
@@ -678,29 +679,30 @@ export default function LessonsThisMonth({
 
   const confirmRemoveLesson = async () => {
     if (!pendingRemoveLesson?.eventID) return
+    const lessonToRemove = pendingRemoveLesson
     setRemoving(true)
+    setPendingRemoveLesson(null)
+    setSelectedLesson(null)
     applyOptimisticMutation({
       type: 'patch_lesson',
-      eventID: pendingRemoveLesson.eventID,
+      eventID: lessonToRemove.eventID,
       patch: {
         transientStatus: 'deleting',
         calendarSyncError: null,
       },
     })
     try {
-      await api.removeScheduleEvent(pendingRemoveLesson.eventID)
+      await api.removeScheduleEvent(lessonToRemove.eventID)
       applyOptimisticMutation({
         type: 'replace_with_unscheduled',
-        eventID: pendingRemoveLesson.eventID,
+        eventID: lessonToRemove.eventID,
       })
       success('Lesson removed')
-      setPendingRemoveLesson(null)
-      setSelectedLesson(null)
       await refetchSilent()
     } catch (e) {
       applyOptimisticMutation({
         type: 'patch_lesson',
-        eventID: pendingRemoveLesson.eventID,
+        eventID: lessonToRemove.eventID,
         patch: {
           transientStatus: 'sync_failed',
           calendarSyncStatus: 'failed',
