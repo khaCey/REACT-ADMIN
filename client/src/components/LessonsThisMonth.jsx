@@ -311,7 +311,6 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const displayStatus = getLessonDisplayStatus(lesson)
   const rawStatus = String(lesson.status || '').toLowerCase()
   const isUnscheduled = lesson.status === 'unscheduled'
-  const eventIdStr = String(lesson?.eventID || '').trim()
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
     ? new Date(year, monthIndex, dayNum)
@@ -342,11 +341,6 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
           <span className={`mr-0.5 ${sz.dot} rounded-full shrink-0 ${styles.dot}`} />
           {title}
         </span>
-        {eventIdStr && (
-          <span className="block mt-0.5 text-[10px] leading-tight text-gray-400 truncate" title={eventIdStr}>
-            ID: {eventIdStr}
-          </span>
-        )}
       </span>
     </button>
   )
