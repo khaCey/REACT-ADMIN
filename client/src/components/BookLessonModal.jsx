@@ -723,6 +723,8 @@ export default function BookLessonModal({
           onOptimisticScheduleMutation?.({
             type: 'book_start',
             monthKey: String(date || '').slice(0, 7),
+            date,
+            time,
             lesson: {
               eventID: tempEventId,
               day: String(date || '').slice(8, 10) || '--',

@@ -12,6 +12,7 @@ import { query } from '../db/index.js';
 export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
   const sn = (studentName || '').trim();
   const rid = (rawEventId || '').trim();
+  const normalizedRid = rid.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
   if (!sn || !rid) return 0;
   const result = await query(
     `DELETE FROM monthly_schedule ms
@@ -20,11 +21,12 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
        AND (ms.event_id = $2 OR starts_with(ms.event_id, $2 || '_'))
        AND NOT EXISTS (
          SELECT 1 FROM reschedules rs
-         WHERE rs.from_event_id = ms.event_id
+         WHERE REGEXP_REPLACE(TRIM(rs.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                 = $3
            AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
              = REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g')
        )`,
-    [sn, rid]
+    [sn, rid, normalizedRid]
   );
   return result.rowCount ?? 0;
 }
@@ -261,7 +263,8 @@ async function reconcileMonthsToSnapshot(months, incomingKeys) {
       if (!incomingKeys.has(k)) {
         const block = await query(
           `SELECT 1 FROM reschedules rs
-           WHERE rs.from_event_id = $1
+           WHERE REGEXP_REPLACE(TRIM(rs.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                   = REGEXP_REPLACE(TRIM($1::text), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
              AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
                = REGEXP_REPLACE(TRIM($2::text), '\\s+', ' ', 'g')
            LIMIT 1`,

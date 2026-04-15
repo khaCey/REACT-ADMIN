@@ -105,6 +105,17 @@ function buildCalendarSyncKey() {
   return `booking-sync-${randomUUID()}`;
 }
 
+function buildMonthlyEventId(rawEventId, lessonDate, startTs) {
+  const raw = String(rawEventId || '').trim();
+  const date = String(lessonDate || '').trim();
+  if (!raw) return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return raw;
+  const start = startTs ? new Date(startTs) : null;
+  if (!start || Number.isNaN(start.getTime())) return `${raw}_${date}`;
+  const timeSuffix = start.toISOString().slice(11, 19).replace(/:/g, '-');
+  return `${raw}_${date}_${timeSuffix}`;
+}
+
 function lessonModeToLocationLabel(lessonMode) {
   return String(lessonMode || '').trim().toLowerCase() === 'online' ? 'Online' : 'Cafe';
 }
@@ -119,7 +130,7 @@ function shouldSyncCalendarForRows(rows) {
 
 async function syncBookedLessonEventToCalendar(localEventId) {
   const result = await query(
-    `SELECT m.event_id, m.student_name, m.student_id, m.title, m.start, m."end", m.status,
+    `SELECT m.event_id, m.student_name, m.student_id, m.title, to_char(m.date, 'YYYY-MM-DD') AS lesson_date, m.start, m."end", m.status,
             m.teacher_name, m.lesson_kind, m.lesson_mode, m.calendar_sync_status,
             m.calendar_sync_error, m.calendar_sync_key,
             s.name AS canonical_student_name, s.status AS student_status,
@@ -186,6 +197,7 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     return { ok: false, error: gasRes.error || 'Failed to sync with calendar' };
   }
 
+  const syncedMonthlyEventId = buildMonthlyEventId(gasRes.eventId, row.lesson_date, row.start);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -199,7 +211,7 @@ async function syncBookedLessonEventToCalendar(localEventId) {
               calendar_sync_key = COALESCE(calendar_sync_key, $5)
         WHERE event_id = $2 AND student_name = $3
           AND COALESCE(status, 'scheduled') <> 'cancelled'`,
-      [gasRes.eventId, row.event_id, row.student_name, CALENDAR_SYNC_STATUS_SYNCED, bookingKey]
+      [syncedMonthlyEventId, row.event_id, row.student_name, CALENDAR_SYNC_STATUS_SYNCED, bookingKey]
     );
     if ((updateResult.rowCount || 0) === 0) {
       await client.query('ROLLBACK');
@@ -218,14 +230,19 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     }
     await client.query(
       `UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2 AND from_student_name = $3`,
-      [gasRes.eventId, row.event_id, row.student_name]
+      [syncedMonthlyEventId, row.event_id, row.student_name]
     );
     await client.query(
       `UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2 AND to_student_name = $3`,
-      [gasRes.eventId, row.event_id, row.student_name]
+      [syncedMonthlyEventId, row.event_id, row.student_name]
     );
     await client.query('COMMIT');
-    return { ok: true, eventId: gasRes.eventId, calendarId: gasRes.calendarId, actionTaken: gasRes.actionTaken };
+    return {
+      ok: true,
+      eventId: syncedMonthlyEventId,
+      calendarId: gasRes.calendarId,
+      actionTaken: gasRes.actionTaken,
+    };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     await query(

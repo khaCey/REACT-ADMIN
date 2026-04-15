@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Calendar } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
@@ -121,6 +121,17 @@ function findLessonMonthKey(monthDataObj, eventID) {
   return null
 }
 
+function hasRealLessonAtDateTime(monthDataObj, monthKey, date, time, optimisticEventID = '') {
+  if (!monthDataObj || !monthKey || !date || !time) return false
+  const day = String(date).slice(8, 10)
+  return (monthDataObj[monthKey]?.lessons || []).some((lesson) => {
+    const eventID = String(lesson?.eventID || '')
+    if (!eventID || eventID === optimisticEventID) return false
+    if (eventID.startsWith('optimistic-')) return false
+    return String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
+  })
+}
+
 function buildOptimisticUnscheduled(monthKey, seed = Date.now()) {
   return {
     day: '--',
@@ -190,6 +201,17 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
   if (!prevData || !mutation) return prevData
   switch (mutation.type) {
     case 'book_start':
+      if (
+        hasRealLessonAtDateTime(
+          prevData,
+          mutation.monthKey,
+          mutation.date,
+          mutation.time,
+          mutation.lesson?.eventID
+        )
+      ) {
+        return prevData
+      }
       return insertLessonIntoMonth(prevData, mutation.monthKey, mutation.lesson, { replacePlaceholder: true })
     case 'book_failed':
       return applyLessonPatch(prevData, mutation.eventID, (lesson) => ({
@@ -208,7 +230,17 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
         },
         calendarSyncError: null,
       }))
-      next = insertLessonIntoMonth(next, mutation.targetMonthKey, mutation.targetLesson, { replacePlaceholder: true })
+      if (
+        !hasRealLessonAtDateTime(
+          next,
+          mutation.targetMonthKey,
+          mutation.targetDate,
+          mutation.targetTime,
+          mutation.targetLesson?.eventID
+        )
+      ) {
+        next = insertLessonIntoMonth(next, mutation.targetMonthKey, mutation.targetLesson, { replacePlaceholder: true })
+      }
       return next
     }
     case 'reschedule_failed': {
@@ -234,6 +266,42 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
       return replaceLessonWithUnscheduled(prevData, mutation.eventID)
     default:
       return prevData
+  }
+}
+
+function isOptimisticMutationResolved(serverData, mutation) {
+  if (!serverData || !mutation) return false
+  switch (mutation.type) {
+    case 'book_start':
+      return hasRealLessonAtDateTime(
+        serverData,
+        mutation.monthKey,
+        mutation.date,
+        mutation.time,
+        mutation.lesson?.eventID
+      )
+    case 'reschedule_start': {
+      const sourceMonthKey = findLessonMonthKey(serverData, mutation.sourceEventID)
+      const sourceLesson = sourceMonthKey
+        ? (serverData[sourceMonthKey]?.lessons || []).find((l) => l.eventID === mutation.sourceEventID)
+        : null
+      return !!sourceLesson?.rescheduledTo
+    }
+    case 'patch_lesson': {
+      const monthKey = findLessonMonthKey(serverData, mutation.eventID)
+      const serverLesson = monthKey
+        ? (serverData[monthKey]?.lessons || []).find((l) => l.eventID === mutation.eventID)
+        : null
+      if (!serverLesson) return mutation.patch?.status === 'unscheduled'
+      return Object.entries(mutation.patch || {}).every(([key, value]) => {
+        if (key === 'transientStatus' || key === 'optimisticRescheduledTo' || key === 'transientError') return true
+        return serverLesson?.[key] === value
+      })
+    }
+    case 'replace_with_unscheduled':
+      return !findLessonMonthKey(serverData, mutation.eventID)
+    default:
+      return false
   }
 }
 
@@ -360,13 +428,14 @@ export default function LessonsThisMonth({
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
-  const { data, setData, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
+  const { data: serverData, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
     studentId,
     lastSynced,
     scheduleRefreshKey
   )
   const pendingPollCountRef = useRef(0)
   const processedOptimisticMutationCountRef = useRef(0)
+  const [activeOptimisticMutations, setActiveOptimisticMutations] = useState([])
 
   useEffect(() => {
     onLoadingChange?.(loading)
@@ -374,11 +443,12 @@ export default function LessonsThisMonth({
   const [selectedLesson, setSelectedLesson] = useState(null)
 
   const applyOptimisticMutation = useCallback((mutation) => {
-    setData((prev) => applyOptimisticMutationToMonthData(prev, mutation))
+    setActiveOptimisticMutations((prev) => [...prev, mutation])
   }, [])
 
   useEffect(() => {
     processedOptimisticMutationCountRef.current = 0
+    setActiveOptimisticMutations([])
   }, [studentId])
 
   useEffect(() => {
@@ -391,6 +461,22 @@ export default function LessonsThisMonth({
     }
     processedOptimisticMutationCountRef.current = optimisticScheduleMutations.length
   }, [optimisticScheduleMutations, applyOptimisticMutation])
+
+  useEffect(() => {
+    if (!serverData || activeOptimisticMutations.length === 0) return
+    setActiveOptimisticMutations((prev) => {
+      const next = prev.filter((mutation) => !isOptimisticMutationResolved(serverData, mutation))
+      return next.length === prev.length ? prev : next
+    })
+  }, [serverData, activeOptimisticMutations.length])
+
+  const data = useMemo(() => {
+    let next = serverData
+    for (const mutation of activeOptimisticMutations) {
+      next = applyOptimisticMutationToMonthData(next, mutation)
+    }
+    return next
+  }, [serverData, activeOptimisticMutations])
 
   const hasPendingCalendarSync =
     !!data &&
