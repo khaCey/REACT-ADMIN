@@ -62,6 +62,39 @@ function formatOrdinalCalendarDay(yyyyMmDd) {
   return `${dayNum}${dayOrdinalSuffix(dayNum)}`;
 }
 
+const RESCHEDULE_TITLE_MARKER_RE = /Moved\s+(to|from)\s+(\?{3}|\d{1,2}(?:st|nd|rd|th))/i;
+
+function extractRescheduleTitleMarker(title) {
+  const m = String(title || '').match(RESCHEDULE_TITLE_MARKER_RE);
+  if (!m) return '';
+  const dir = String(m[1] || '').toLowerCase() === 'from' ? 'from' : 'to';
+  const label = String(m[2] || '').trim() || '???';
+  return `Moved ${dir} ${label}`;
+}
+
+function stripRescheduleTitleMarker(title) {
+  let s = String(title || '').trim();
+  if (!s) return '';
+  s = s.replace(/^\s*Moved\s+(?:to|from)\s+(?:\?{3}|\d{1,2}(?:st|nd|rd|th))\s*[·•-]\s*/i, '');
+  s = s.replace(/\s*[·•-]\s*Moved\s+(?:to|from)\s+(?:\?{3}|\d{1,2}(?:st|nd|rd|th))\s*$/i, '');
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  return s;
+}
+
+function applyRescheduleTitleMarker(baseTitle, direction, label) {
+  const base = stripRescheduleTitleMarker(baseTitle);
+  const dir = String(direction || '').toLowerCase() === 'from' ? 'from' : 'to';
+  const dayLabel = String(label || '').trim() || '???';
+  const marker = `Moved ${dir} ${dayLabel}`;
+  return base ? `${marker} · ${base}` : marker;
+}
+
+function preserveRescheduleTitleMarker(existingTitle, nextBaseTitle) {
+  const marker = extractRescheduleTitleMarker(existingTitle);
+  const base = stripRescheduleTitleMarker(nextBaseTitle);
+  return marker ? (base ? `${marker} · ${base}` : marker) : base;
+}
+
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
 const LOCAL_BOOKING_EVENT_ID_PREFIX = 'local-booking-';
@@ -709,7 +742,10 @@ router.post('/renumber-month-titles', async (req, res) => {
     let idx = 0;
     for (const r of rows.rows) {
       idx += 1;
-      const newTitle = `${studentName} (${locationLabel}) ${idx}/${pack}`;
+      const newTitle = preserveRescheduleTitleMarker(
+        r.title || '',
+        `${studentName} (${locationLabel}) ${idx}/${pack}`
+      );
       await query(
         `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
         [newTitle, r.event_id, r.student_name]
@@ -1216,14 +1252,20 @@ router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, async (req, res) => {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
+      const pendingTitle = applyRescheduleTitleMarker(oldRows[0]?.title || '', 'to', '???');
       await updateBookedLessonEventInGas(eventId, {
+        title: pendingTitle,
         colorId: '8',
         mergeStudentAdminDescription: { awaiting_reschedule_date: true },
       });
     }
     await query(
-      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = TRUE WHERE event_id = $1`,
-      [eventId]
+      `UPDATE monthly_schedule
+         SET status = 'cancelled',
+             awaiting_reschedule_date = TRUE,
+             title = $2
+       WHERE event_id = $1`,
+      [eventId, applyRescheduleTitleMarker(oldRows[0]?.title || '', 'to', '???')]
     );
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     for (let i = 0; i < oldRows.length; i++) {
@@ -1297,16 +1339,21 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
     if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
       const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
       const cid = bookingEventColorId(lk);
+      const restoredTitle = stripRescheduleTitleMarker(oldRows[0]?.title || '');
       const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
       if (cid) {
-        await updateBookedLessonEventInGas(eventId, { colorId: cid, ...merge });
+        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, colorId: cid, ...merge });
       } else {
-        await updateBookedLessonEventInGas(eventId, { clearColor: true, ...merge });
+        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, clearColor: true, ...merge });
       }
     }
     await query(
-      `UPDATE monthly_schedule SET status = 'scheduled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
-      [eventId]
+      `UPDATE monthly_schedule
+         SET status = 'scheduled',
+             awaiting_reschedule_date = FALSE,
+             title = $2
+       WHERE event_id = $1`,
+      [eventId, stripRescheduleTitleMarker(oldRows[0]?.title || '')]
     );
     const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     for (let i = 0; i < oldRows.length; i++) {
@@ -1458,11 +1505,11 @@ router.post('/reschedule-linked', async (req, res) => {
 
     const fromDisplay = formatOrdinalCalendarDay(source.src_date_str);
     const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
-    const suffixRescheduledFrom = fromDisplay ? ` · Moved from ${fromDisplay}` : '';
+    const movedFromLabel = fromDisplay || '???';
 
     let title;
     if (lessonKindForBooking === 'demo') {
-      title = `${studentName} D/L${suffixRescheduledFrom}`;
+      title = applyRescheduleTitleMarker(`${studentName} D/L`, 'from', movedFromLabel);
     } else {
       let totalLessons = parsePackTotalFromTitle(source.title);
       if (!totalLessons) {
@@ -1485,13 +1532,14 @@ router.post('/reschedule-linked', async (req, res) => {
       );
       const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
       const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
-      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}${suffixRescheduledFrom}`;
+      title = applyRescheduleTitleMarker(
+        `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`,
+        'from',
+        movedFromLabel
+      );
     }
 
-    const baseOldTitle = String(source.title || '')
-      .replace(/\s*·\s*(?:Rescheduled to|Moved to)\b.*$/i, '')
-      .trim();
-    const oldTitleUpdated = `${baseOldTitle} · Moved to ${toDisplay}`;
+    const oldTitleUpdated = applyRescheduleTitleMarker(source.title || '', 'to', toDisplay || '???');
 
     const localEventId = buildLocalBookingEventId();
     const calendarSyncKey = buildCalendarSyncKey();
