@@ -91,8 +91,7 @@ function applyRescheduleTitleMarker(baseTitle, direction, label) {
   const dayLabel = String(label || '').trim() || '???';
   const marker = `Moved ${dir} ${dayLabel}`;
   if (!base) return marker;
-  if (dir === 'to') return `${base} · ${marker}`;
-  return `${marker} · ${base}`;
+  return `${base} · ${marker}`;
 }
 
 function preserveRescheduleTitleMarker(existingTitle, nextBaseTitle) {
@@ -100,8 +99,7 @@ function preserveRescheduleTitleMarker(existingTitle, nextBaseTitle) {
   const base = stripRescheduleTitleMarker(nextBaseTitle);
   if (!marker) return base;
   if (!base) return marker;
-  if (/^Moved\s+to\b/i.test(marker)) return `${base} · ${marker}`;
-  return `${marker} · ${base}`;
+  return `${base} · ${marker}`;
 }
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */

@@ -73,7 +73,6 @@ function getLessonDisplayStatus(lesson) {
   if (lesson?.optimisticRescheduledTo || lesson?.rescheduledTo) return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
   if (syncStatus === 'failed') return 'sync_failed'
-  if (syncStatus === 'pending') return 'sync_pending'
   if (isDemoLesson) return 'demo'
   return rawStatus || 'scheduled'
 }

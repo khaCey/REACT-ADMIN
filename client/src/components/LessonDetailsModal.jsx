@@ -74,8 +74,6 @@ export default function LessonDetailsModal({
             ? 'cancelled'
             : calendarSyncStatus === 'failed'
               ? 'sync_failed'
-              : calendarSyncStatus === 'pending'
-              ? 'sync_pending'
               : isDemoLesson
                   ? 'demo'
                   : status
