@@ -12,6 +12,7 @@ import LessonsThisMonth from './LessonsThisMonth'
 import BookLessonModal from './BookLessonModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
+import GroupLinkModal from './GroupLinkModal'
 
 function StatusBadge({ status }) {
   const cls =
@@ -53,10 +54,12 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [editStudentModal, setEditStudentModal] = useState(false)
   const [bookLessonModal, setBookLessonModal] = useState(false)
   const [preBookLessonModal, setPreBookLessonModal] = useState(false)
+  const [groupLinkModalOpen, setGroupLinkModalOpen] = useState(false)
   const [overridePaidLessons, setOverridePaidLessons] = useState(null)
   const [rescheduleSourceLesson, setRescheduleSourceLesson] = useState(null)
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
+  const [studentGroup, setStudentGroup] = useState(null)
   /** Bumped after a successful book so LessonsThisMonth refetches (independent of calendar poll). */
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
   /** Queue of optimistic lesson-card mutations consumed by LessonsThisMonth. */
@@ -100,12 +103,14 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       api.getPayments(),
       api.getNotes(studentId),
       api.getStudentLatestByMonth(studentId).catch(() => ({ latestByMonth: null })),
+      api.getStudentGroup(studentId).catch(() => null),
     ])
-      .then(([s, p, n, latestRes]) => {
+      .then(([s, p, n, latestRes, groupRes]) => {
         setStudent(s)
         setPayments((p || []).filter((x) => String(x['Student ID']) === String(studentId)))
         setNotes(n || [])
         setBookingLatestByMonth(latestRes?.latestByMonth ?? null)
+        setStudentGroup(groupRes || null)
       })
       .catch((e) => setError(e.message))
       .finally(() => {
@@ -235,6 +240,22 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     }
     setPreBookLessonModal(true)
   }
+
+  const handleOpenGroupLinkLesson = useCallback(() => {
+    setGuideFocusKey(null)
+    setGroupLinkModalOpen(true)
+  }, [])
+
+  const handleSaveGroupLesson = useCallback(async ({ memberIds }) => {
+    const savedGroup = await api.saveStudentGroup(studentId, {
+      member_ids: memberIds,
+      expected_size: student?.人数 ?? student?.group_size,
+    })
+    setStudentGroup(savedGroup || null)
+    success('Group members saved')
+    setGroupLinkModalOpen(false)
+    await fetchData({ silent: true })
+  }, [fetchData, student, studentId, success])
 
   useEffect(() => {
     if (studentId == null) return
@@ -496,6 +517,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                     Book lesson
                   </button>
                 )}
+                {student?.Group === 'Group' && (
+                  <button
+                    type="button"
+                    onClick={handleOpenGroupLinkLesson}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-600 bg-white px-3 py-1.5 text-sm font-semibold text-purple-700 hover:bg-purple-50 cursor-pointer"
+                  >
+                    Manage Group Members
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
@@ -568,6 +598,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         studentId={studentId}
         student={student}
         preloadedLatestByMonth={bookingLatestByMonth}
+        studentGroup={studentGroup}
         overridePaidLessons={overridePaidLessons}
         onClose={() => {
           setBookLessonModal(false)
@@ -604,6 +635,16 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setBookLessonModal(true)
           await fetchData({ silent: true })
         }}
+      />
+    )}
+    {groupLinkModalOpen && student && (
+      <GroupLinkModal
+        student={student}
+        initialGroup={studentGroup}
+        onClose={() => {
+          setGroupLinkModalOpen(false)
+        }}
+        onSave={handleSaveGroupLesson}
       />
     )}
     </>,

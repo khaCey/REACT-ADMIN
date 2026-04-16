@@ -325,6 +325,7 @@ export default function BookLessonModal({
   studentId,
   student,
   preloadedLatestByMonth,
+  studentGroup = null,
   overridePaidLessons = null,
   rescheduleSource = null,
   onClose,
@@ -381,6 +382,11 @@ export default function BookLessonModal({
   const [lessonBalanceLoaded, setLessonBalanceLoaded] = useState(
     () => preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
   )
+  const canBookSavedGroup =
+    String(student?.Group || '').toLowerCase() === 'group' &&
+    Number(studentGroup?.groupId) > 0 &&
+    (studentGroup?.members || []).length >= 2
+
   const refreshLessonBalance = useCallback(() => {
     const sid = resolveBookStudentId(studentId, student)
     if (sid == null) {
@@ -720,6 +726,7 @@ export default function BookLessonModal({
           continue
         }
         try {
+          const shouldBookGroup = canBookSavedGroup && !rescheduleSource
           onOptimisticScheduleMutation?.({
             type: 'book_start',
             monthKey: String(date || '').slice(0, 7),
@@ -732,6 +739,7 @@ export default function BookLessonModal({
               status: 'scheduled',
               calendarSyncStatus: 'pending',
               calendarSyncError: null,
+              isGroup: shouldBookGroup,
               lessonKind: optimisticLessonKindForStudent(student),
               transientStatus: 'sync_pending',
             },
@@ -739,6 +747,7 @@ export default function BookLessonModal({
           await api.getBookingWarning(date, time, student_id)
           await api.bookLesson({
             student_id,
+            ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
             date: String(date),
             time: String(time),
             duration_minutes: 50,
@@ -851,7 +860,6 @@ export default function BookLessonModal({
 
   const studentName = student?.Name || student?.name || 'Student'
   const studentKanji = student?.['漢字'] || student?.name_kanji || ''
-
   /** Show full overlay only on first modal load; week navigation stays non-blocking. */
   const modalBusy = loading && !hasLoadedWeekOnce
 

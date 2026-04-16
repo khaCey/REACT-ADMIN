@@ -25,6 +25,9 @@ async function fetchApi(path, options = {}) {
 export const api = {
   getStudents: () => fetchApi('/students'),
   getStudent: (id) => fetchApi(`/students/${id}`),
+  getStudentGroup: (id) => fetchApi(`/students/${id}/group`),
+  saveStudentGroup: (id, body) =>
+    fetchApi(`/students/${id}/group`, { method: 'PUT', body: JSON.stringify(body) }),
   getStudentLatestByMonth: (id) => fetchApi(`/students/${id}/latest-by-month`),
   addStudent: (data) => fetchApi('/students', { method: 'POST', body: JSON.stringify(data) }),
   updateStudent: (id, data) => fetchApi(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

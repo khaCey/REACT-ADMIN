@@ -25,6 +25,10 @@ import {
   updateBookedLessonEventInGas,
   isBookingGasEnabled
 } from '../lib/bookingCalendarSync.js';
+import {
+  buildLessonTitleForOrderedStudents,
+  rewriteLessonTitleStudentNames,
+} from '../lib/groupLessonTitle.js';
 
 const router = Router();
 
@@ -86,13 +90,18 @@ function applyRescheduleTitleMarker(baseTitle, direction, label) {
   const dir = String(direction || '').toLowerCase() === 'from' ? 'from' : 'to';
   const dayLabel = String(label || '').trim() || '???';
   const marker = `Moved ${dir} ${dayLabel}`;
-  return base ? `${marker} · ${base}` : marker;
+  if (!base) return marker;
+  if (dir === 'to') return `${base} · ${marker}`;
+  return `${marker} · ${base}`;
 }
 
 function preserveRescheduleTitleMarker(existingTitle, nextBaseTitle) {
   const marker = extractRescheduleTitleMarker(existingTitle);
   const base = stripRescheduleTitleMarker(nextBaseTitle);
-  return marker ? (base ? `${marker} · ${base}` : marker) : base;
+  if (!marker) return base;
+  if (!base) return marker;
+  if (/^Moved\s+to\b/i.test(marker)) return `${base} · ${marker}`;
+  return `${marker} · ${base}`;
 }
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
@@ -149,8 +158,104 @@ function buildMonthlyEventId(rawEventId, lessonDate, startTs) {
   return `${raw}_${date}_${timeSuffix}`;
 }
 
+function rawEventIdFromMonthlyEventId(eventId) {
+  return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
+}
+
 function lessonModeToLocationLabel(lessonMode) {
   return String(lessonMode || '').trim().toLowerCase() === 'online' ? 'Online' : 'Cafe';
+}
+
+function locationLabelToLessonMode(locationLabel) {
+  return String(locationLabel || '').trim().toLowerCase() === 'online' ? 'online' : 'cafe';
+}
+
+function normalizePersonName(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+async function getOrderedGroupMembers(groupId, db = query) {
+  const gid = Number(groupId);
+  if (!Number.isFinite(gid) || gid <= 0) return [];
+  const result = await db(
+    `SELECT s.id, s.name, s.status, s.payment, s.is_child, sgm.sort_order
+       FROM student_group_members sgm
+       INNER JOIN students s ON s.id = sgm.student_id
+      WHERE sgm.group_id = $1
+      ORDER BY sgm.sort_order ASC, s.id ASC`,
+    [gid]
+  );
+  return (result.rows || []).map((row) => ({
+    id: Number(row.id),
+    name: normalizePersonName(row.name),
+    status: row.status,
+    payment: row.payment,
+    is_child: !!row.is_child,
+    sort_order: parseInt(row.sort_order, 10) || 0,
+  }));
+}
+
+async function getOrderedEventStudents(eventId, db = query) {
+  const result = await db(
+    `SELECT m.student_id, m.student_name, m.group_sort_order,
+            s.name AS canonical_student_name, s.status AS student_status,
+            s.payment AS student_payment, s.is_child AS student_is_child
+       FROM monthly_schedule m
+       LEFT JOIN students s ON s.id = m.student_id
+      WHERE m.event_id = $1
+      ORDER BY COALESCE(m.group_sort_order, 2147483647) ASC,
+               LOWER(COALESCE(s.name, m.student_name)) ASC`,
+    [eventId]
+  );
+  return (result.rows || []).map((row, index) => ({
+    id: row.student_id != null ? Number(row.student_id) : null,
+    name: normalizePersonName(row.canonical_student_name || row.student_name),
+    status: row.student_status,
+    payment: row.student_payment,
+    is_child: !!row.student_is_child,
+    sort_order: parseInt(row.group_sort_order, 10) || index + 1,
+  }));
+}
+
+function buildCanonicalLessonTitle(existingTitle, orderedStudents) {
+  const core = stripRescheduleTitleMarker(existingTitle || '');
+  const rewritten = rewriteLessonTitleStudentNames(core, orderedStudents);
+  return preserveRescheduleTitleMarker(existingTitle || '', rewritten);
+}
+
+async function getPackTotalForBooking(studentId, monthKey, providedPackTotal, db = query) {
+  const provided = parseInt(providedPackTotal, 10);
+  let totalLessons = Number.isFinite(provided) && provided > 0 ? provided : 0;
+  if (!totalLessons) {
+    const paidCountResult = await db(
+      `SELECT COALESCE(SUM(CASE WHEN p.amount IS NULL THEN 0 ELSE p.amount END), 0) AS total_paid
+         FROM payments p
+        WHERE p.student_id = $1
+          AND p.month = $2`,
+      [studentId, monthKey]
+    );
+    totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
+  }
+  if (!totalLessons) {
+    const packRow = await db(
+      'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
+      [studentId, monthKey]
+    );
+    totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
+  }
+  return totalLessons;
+}
+
+async function getBookedCountForMonth(studentId, monthKey, db = query) {
+  const bookedCountResult = await db(
+    `SELECT COUNT(DISTINCT m.event_id) AS cnt
+       FROM monthly_schedule m
+      WHERE (m.status IS NULL OR m.status <> 'cancelled')
+        AND m.student_id = $1
+        AND to_char(m.date, 'YYYY-MM') = $2`,
+    [studentId, monthKey]
+  );
+  return parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
 }
 
 function shouldSyncCalendarForRows(rows) {
@@ -166,46 +271,62 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     `SELECT m.event_id, m.student_name, m.student_id, m.title, to_char(m.date, 'YYYY-MM-DD') AS lesson_date, m.start, m."end", m.status,
             m.teacher_name, m.lesson_kind, m.lesson_mode, m.calendar_sync_status,
             m.calendar_sync_error, m.calendar_sync_key,
+            m.group_id, m.group_sort_order,
             s.name AS canonical_student_name, s.status AS student_status,
             s.payment AS student_payment, s.is_child AS student_is_child
        FROM monthly_schedule m
        LEFT JOIN students s ON s.id = m.student_id
       WHERE m.event_id = $1
-      LIMIT 1`,
+      ORDER BY COALESCE(m.group_sort_order, 2147483647) ASC,
+               LOWER(COALESCE(s.name, m.student_name)) ASC`,
     [localEventId]
   );
-  const row = result.rows[0];
+  const rows = result.rows || [];
+  const row = rows[0];
   if (!row) return { ok: false, error: 'Pending lesson not found' };
 
-  const studentName = String(row.canonical_student_name || row.student_name || '').trim();
+  const orderedStudents = rows.map((entry, index) => ({
+    id: entry.student_id != null ? Number(entry.student_id) : null,
+    name: String(entry.canonical_student_name || entry.student_name || '').trim(),
+    status: entry.student_status,
+    payment: entry.student_payment,
+    is_child: !!entry.student_is_child,
+    sort_order: parseInt(entry.group_sort_order, 10) || index + 1,
+  }));
+  const syncedTitle =
+    rows.length > 1 || row.group_id
+      ? buildCanonicalLessonTitle(row.title || '', orderedStudents)
+      : row.title || '';
   const bookingKey =
     String(row.calendar_sync_key || '').trim() || `${String(row.event_id || '').trim() || buildCalendarSyncKey()}`;
-  if (String(row.status || '').toLowerCase() === 'cancelled') {
+  if (rows.some((entry) => String(entry.status || '').toLowerCase() === 'cancelled')) {
     await query(
       `UPDATE monthly_schedule
-          SET calendar_sync_status = $3,
-              calendar_sync_error = $4,
+          SET calendar_sync_status = $2,
+              calendar_sync_error = $3,
               calendar_sync_attempted_at = NOW()
-        WHERE event_id = $1 AND student_name = $2`,
-      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, 'Cancelled before calendar sync']
+        WHERE event_id = $1`,
+      [row.event_id, CALENDAR_SYNC_STATUS_FAILED, 'Cancelled before calendar sync']
     );
     return { ok: false, error: 'Cancelled before calendar sync' };
   }
 
   await query(
     `UPDATE monthly_schedule
-        SET calendar_sync_status = $3,
+        SET calendar_sync_status = $2,
             calendar_sync_error = NULL,
             calendar_sync_attempted_at = NOW(),
-            calendar_sync_key = COALESCE(calendar_sync_key, $4)
-      WHERE event_id = $1 AND student_name = $2`,
-    [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_PENDING, bookingKey]
+            calendar_sync_key = COALESCE(calendar_sync_key, $3),
+            title = COALESCE($4, title)
+      WHERE event_id = $1`,
+    [row.event_id, CALENDAR_SYNC_STATUS_PENDING, bookingKey, syncedTitle]
   );
 
   const gasRes = await createBookedLessonEventInGas({
+    students: orderedStudents,
     student: {
       id: row.student_id,
-      name: studentName,
+      name: orderedStudents[0]?.name || '',
       status: row.student_status,
       payment: row.student_payment,
       is_child: !!row.student_is_child,
@@ -213,7 +334,7 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     startIso: row.start ? new Date(row.start).toISOString() : null,
     endIso: row.end ? new Date(row.end).toISOString() : null,
     assignedTeacherName: row.teacher_name,
-    title: row.title || '',
+    title: syncedTitle,
     location: String(row.lesson_kind || '').trim() === 'demo' ? '' : lessonModeToLocationLabel(row.lesson_mode),
     lessonKind: row.lesson_kind,
     bookingKey,
@@ -221,11 +342,11 @@ async function syncBookedLessonEventToCalendar(localEventId) {
   if (!gasRes.ok || !gasRes.eventId) {
     await query(
       `UPDATE monthly_schedule
-          SET calendar_sync_status = $3,
-              calendar_sync_error = $4,
+          SET calendar_sync_status = $2,
+              calendar_sync_error = $3,
               calendar_sync_attempted_at = NOW()
-        WHERE event_id = $1 AND student_name = $2`,
-      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, gasRes.error || 'Failed to sync with calendar']
+        WHERE event_id = $1`,
+      [row.event_id, CALENDAR_SYNC_STATUS_FAILED, gasRes.error || 'Failed to sync with calendar']
     );
     return { ok: false, error: gasRes.error || 'Failed to sync with calendar' };
   }
@@ -237,14 +358,15 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     const updateResult = await client.query(
       `UPDATE monthly_schedule
           SET event_id = $1,
+              title = $3,
               calendar_sync_status = $4,
               calendar_sync_error = NULL,
               calendar_sync_attempted_at = NOW(),
               calendar_synced_at = NOW(),
               calendar_sync_key = COALESCE(calendar_sync_key, $5)
-        WHERE event_id = $2 AND student_name = $3
+        WHERE event_id = $2
           AND COALESCE(status, 'scheduled') <> 'cancelled'`,
-      [syncedMonthlyEventId, row.event_id, row.student_name, CALENDAR_SYNC_STATUS_SYNCED, bookingKey]
+      [syncedMonthlyEventId, row.event_id, syncedTitle, CALENDAR_SYNC_STATUS_SYNCED, bookingKey]
     );
     if ((updateResult.rowCount || 0) === 0) {
       await client.query('ROLLBACK');
@@ -253,21 +375,21 @@ async function syncBookedLessonEventToCalendar(localEventId) {
       } catch {}
       await query(
         `UPDATE monthly_schedule
-            SET calendar_sync_status = $3,
-                calendar_sync_error = $4,
+            SET calendar_sync_status = $2,
+                calendar_sync_error = $3,
                 calendar_sync_attempted_at = NOW()
-          WHERE event_id = $1 AND student_name = $2`,
-        [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, 'Lesson changed before calendar sync completed']
+          WHERE event_id = $1`,
+        [row.event_id, CALENDAR_SYNC_STATUS_FAILED, 'Lesson changed before calendar sync completed']
       );
       return { ok: false, error: 'Lesson changed before calendar sync completed' };
     }
     await client.query(
-      `UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2 AND from_student_name = $3`,
-      [syncedMonthlyEventId, row.event_id, row.student_name]
+      `UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2`,
+      [syncedMonthlyEventId, row.event_id]
     );
     await client.query(
-      `UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2 AND to_student_name = $3`,
-      [syncedMonthlyEventId, row.event_id, row.student_name]
+      `UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`,
+      [syncedMonthlyEventId, row.event_id]
     );
     await client.query('COMMIT');
     return {
@@ -280,11 +402,11 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     try { await client.query('ROLLBACK'); } catch {}
     await query(
       `UPDATE monthly_schedule
-          SET calendar_sync_status = $3,
-              calendar_sync_error = $4,
+          SET calendar_sync_status = $2,
+              calendar_sync_error = $3,
               calendar_sync_attempted_at = NOW()
-        WHERE event_id = $1 AND student_name = $2`,
-      [row.event_id, row.student_name, CALENDAR_SYNC_STATUS_FAILED, err.message || 'Failed to update sync result']
+        WHERE event_id = $1`,
+      [row.event_id, CALENDAR_SYNC_STATUS_FAILED, err.message || 'Failed to update sync result']
     );
     return { ok: false, error: err.message || 'Failed to update sync result' };
   } finally {
@@ -720,7 +842,7 @@ router.post('/renumber-month-titles', async (req, res) => {
     );
 
     const rows = await query(
-      `SELECT event_id, student_name, title
+      `SELECT event_id, student_name, title, group_id, lesson_kind, lesson_mode
        FROM monthly_schedule
        WHERE student_id = $1
          AND to_char(date, 'YYYY-MM') = $2
@@ -742,14 +864,36 @@ router.post('/renumber-month-titles', async (req, res) => {
     let idx = 0;
     for (const r of rows.rows) {
       idx += 1;
-      const newTitle = preserveRescheduleTitleMarker(
-        r.title || '',
-        `${studentName} (${locationLabel}) ${idx}/${pack}`
-      );
-      await query(
-        `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
-        [newTitle, r.event_id, r.student_name]
-      );
+      const orderedStudents = await getOrderedEventStudents(r.event_id);
+      const titleStudents =
+        orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
+      const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
+      const baseTitle =
+        lessonKind === 'demo'
+          ? buildLessonTitleForOrderedStudents({
+              students: titleStudents,
+              lessonKind,
+              locationLabel,
+            })
+          : buildLessonTitleForOrderedStudents({
+              students: titleStudents,
+              lessonKind,
+              locationLabel: lessonModeToLocationLabel(r.lesson_mode || locationLabel),
+              lessonNumber: idx,
+              totalLessons: pack,
+            });
+      const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
+      if ((orderedStudents.length > 1) || r.group_id) {
+        await query(
+          `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`,
+          [newTitle, r.event_id]
+        );
+      } else {
+        await query(
+          `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
+          [newTitle, r.event_id, r.student_name]
+        );
+      }
     }
 
     res.json({ ok: true, updated: rows.rows.length, month: monthKey, pack_total: pack });
@@ -862,30 +1006,65 @@ router.put('/extend', async (req, res) => {
 /** Book a new lesson: create a Calendar event via GAS (source of truth). */
 router.post('/book', async (req, res) => {
   try {
-    const { student_id, date, time, duration_minutes, pack_total, location } = req.body || {};
+    const { student_id, group_id, date, time, duration_minutes, pack_total, location } = req.body || {};
     const dateStrRaw = date != null ? String(date).trim() : '';
     const timeStrRaw = time != null ? String(time).trim() : '';
-    const missingStudent =
-      student_id === undefined || student_id === null || student_id === '';
-    if (missingStudent || !dateStrRaw || !timeStrRaw) {
-      return res.status(400).json({ error: 'Missing student_id, date, or time' });
+    const hasStudentId = !(student_id === undefined || student_id === null || student_id === '');
+    const groupIdNum = Number(group_id);
+    if ((!hasStudentId && !(Number.isFinite(groupIdNum) && groupIdNum > 0)) || !dateStrRaw || !timeStrRaw) {
+      return res.status(400).json({ error: 'Missing student_id or group_id, date, or time' });
     }
-    const studentIdNum = Number(student_id);
-    if (Number.isFinite(studentIdNum) && BOOKING_DISABLED_STUDENT_IDS.has(studentIdNum)) {
-      return res.status(403).json({ error: 'Booking is not available for this student.' });
+
+    let orderedStudents = [];
+    let activeGroupId = Number.isFinite(groupIdNum) && groupIdNum > 0 ? groupIdNum : null;
+    let anchorStudentId = Number(student_id);
+    if (activeGroupId) {
+      orderedStudents = await getOrderedGroupMembers(activeGroupId);
+      if (orderedStudents.length === 0) {
+        return res.status(404).json({ error: 'Group not found or has no members.' });
+      }
+      if (!Number.isFinite(anchorStudentId) || !orderedStudents.some((student) => student.id === anchorStudentId)) {
+        anchorStudentId = Number(orderedStudents[0]?.id);
+      }
+    } else {
+      if (!Number.isFinite(anchorStudentId)) {
+        return res.status(400).json({ error: 'student_id must be a number' });
+      }
+      const studentResult = await query(
+        'SELECT id, name, is_child, status, payment FROM students WHERE id = $1',
+        [anchorStudentId]
+      );
+      if (studentResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      const student = studentResult.rows[0];
+      orderedStudents = [
+        {
+          id: Number(student.id),
+          name: normalizePersonName(student.name),
+          is_child: !!student.is_child,
+          status: student.status,
+          payment: student.payment,
+          sort_order: 1,
+        },
+      ];
     }
-    const studentResult = await query(
-      'SELECT id, name, is_child, status, payment FROM students WHERE id = $1',
-      [studentIdNum]
-    );
-    if (studentResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Student not found' });
+
+    if (orderedStudents.some((student) => BOOKING_DISABLED_STUDENT_IDS.has(Number(student.id)))) {
+      return res.status(403).json({ error: 'Booking is not available for one or more students in this group.' });
     }
-    const student = studentResult.rows[0];
-    const studentName = (student.name || '').trim();
-    if (!studentName) {
-      return res.status(400).json({ error: 'Student has no name' });
+    if (orderedStudents.some((student) => !normalizePersonName(student.name))) {
+      return res.status(400).json({ error: 'One or more selected students have no name.' });
     }
+    const studentKinds = new Set(orderedStudents.map((student) => !!student.is_child));
+    if (studentKinds.size > 1) {
+      return res.status(400).json({ error: 'Kids and adult students cannot be mixed in one linked group.' });
+    }
+
+    const anchorStudent =
+      orderedStudents.find((student) => Number(student.id) === anchorStudentId) || orderedStudents[0];
+    const studentIdNum = Number(anchorStudent.id);
+    const studentName = normalizePersonName(anchorStudent.name);
     const duration = Math.min(120, Math.max(30, Number(duration_minutes) || 50));
     const dateStr = dateStrRaw.slice(0, 10);
     const [hh, mm] = timeStrRaw.split(/[:\s]/).map((x) => parseInt(x, 10) || 0);
@@ -917,7 +1096,7 @@ router.post('/book', async (req, res) => {
          AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))`,
       [startDate.toISOString(), endDate.toISOString(), excludedStudentIds]
     );
-    const isChild = !!student.is_child;
+    const isChild = !!anchorStudent.is_child;
     for (const row of existingResult.rows) {
       const existingIsKids = !!row.is_kids_lesson;
       if (isChild && !existingIsKids) {
@@ -932,25 +1111,21 @@ router.post('/book', async (req, res) => {
       }
     }
 
+    const orderedStudentIds = orderedStudents.map((student) => Number(student.id)).filter(Number.isFinite);
     const dupResult = await query(
-      `SELECT 1 FROM monthly_schedule m
+      `SELECT COALESCE(s.name, m.student_name) AS student_name
+         FROM monthly_schedule m
+         LEFT JOIN students s ON s.id = m.student_id
        WHERE (m.status IS NULL OR m.status <> 'cancelled')
          AND ${SQL_NOT_STAFF_BREAK}
          AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
-         AND (
-           m.student_id = $3
-           OR (
-             m.student_id IS NULL
-             AND LOWER(TRIM(COALESCE(m.student_name, ''))) = LOWER(TRIM($4))
-           )
-         )
+         AND m.student_id = ANY($3::int[])
        LIMIT 1`,
-      [startDate.toISOString(), endDate.toISOString(), studentIdNum, studentName]
+      [startDate.toISOString(), endDate.toISOString(), orderedStudentIds]
     );
     if (dupResult.rows.length > 0) {
       return res.status(400).json({
-        error:
-          'This student already has a lesson overlapping this time. Cancel or reschedule the existing lesson first.',
+        error: `${normalizePersonName(dupResult.rows[0]?.student_name) || 'A selected student'} already has a lesson overlapping this time. Cancel or reschedule the existing lesson first.`,
       });
     }
 
@@ -1006,7 +1181,7 @@ router.post('/book', async (req, res) => {
       }
     }
 
-    if (isOwnerCoursePayment(student.payment)) {
+    if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
       const shamTeacherName = await resolveOwnerCourseTeacherName();
       if (shamTeacherName) {
         const shamNorm = normalizeTeacherNameForOwner(shamTeacherName);
@@ -1090,97 +1265,88 @@ router.post('/book', async (req, res) => {
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStr.slice(0, 7);
-    const lessonKindForBooking = deriveLessonKindFromStudent(student);
+    const lessonKindForBooking = deriveLessonKindFromStudent(anchorStudent);
 
     let title;
     if (lessonKindForBooking === 'demo') {
-      title = `${studentName} D/L`;
+      title = buildLessonTitleForOrderedStudents({
+        students: orderedStudents,
+        lessonKind: lessonKindForBooking,
+        locationLabel,
+      });
     } else {
-      const bookedCountResult = await query(
-        `SELECT COUNT(DISTINCT m.event_id) AS cnt
-         FROM monthly_schedule m
-         WHERE (m.status IS NULL OR m.status <> 'cancelled')
-           AND m.student_id = $1
-           AND to_char(m.date, 'YYYY-MM') = $2`,
-        [studentIdNum, monthKey]
-      );
-      const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey);
       const nextLessonNumber = bookedThisMonth + 1;
-
-      const providedPackTotal = parseInt(pack_total, 10);
-      let totalLessons = Number.isFinite(providedPackTotal) && providedPackTotal > 0 ? providedPackTotal : 0;
-      if (!totalLessons) {
-        const paidCountResult = await query(
-          `SELECT COALESCE(SUM(CASE WHEN p.amount IS NULL THEN 0 ELSE p.amount END), 0) AS total_paid
-           FROM payments p
-           WHERE p.student_id = $1
-             AND p.month = $2`,
-          [studentIdNum, monthKey]
-        );
-        totalLessons = Math.max(0, parseInt(paidCountResult.rows[0]?.total_paid, 10) || 0);
-      }
-      if (!totalLessons) {
-        const packRow = await query(
-          'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
-          [studentIdNum, monthKey]
-        );
-        totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
-      }
+      const totalLessons = await getPackTotalForBooking(studentIdNum, monthKey, pack_total);
       if (!totalLessons) {
         return res.status(400).json({
           error: 'Missing lesson pack total. Enter total lessons before booking.',
         });
       }
-      title = `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`;
+      title = buildLessonTitleForOrderedStudents({
+        students: orderedStudents,
+        lessonKind: lessonKindForBooking,
+        locationLabel,
+        lessonNumber: nextLessonNumber,
+        totalLessons,
+      });
     }
     const lessonKind = lessonKindForBooking;
     const localEventId = buildLocalBookingEventId();
     const calendarSyncKey = buildCalendarSyncKey();
-    await query(
-      `INSERT INTO monthly_schedule
-        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
-         calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
-         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
-       VALUES
-        ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
-         NULL, NULL, NULL, NULL)
-       ON CONFLICT (event_id, student_name)
-       DO UPDATE SET
-         title = EXCLUDED.title,
-         date = EXCLUDED.date,
-         start = EXCLUDED.start,
-         "end" = EXCLUDED."end",
-         status = EXCLUDED.status,
-         is_kids_lesson = EXCLUDED.is_kids_lesson,
-         teacher_name = EXCLUDED.teacher_name,
-         lesson_kind = EXCLUDED.lesson_kind,
-         lesson_mode = EXCLUDED.lesson_mode,
-         student_id = EXCLUDED.student_id,
-         calendar_sync_status = EXCLUDED.calendar_sync_status,
-         calendar_sync_error = EXCLUDED.calendar_sync_error,
-         calendar_sync_key = EXCLUDED.calendar_sync_key,
-         calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
-         calendar_synced_at = EXCLUDED.calendar_synced_at,
-         reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
-         reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
-         reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
-         reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
-      [
-        localEventId,
-        title,
-        dateStr,
-        startDate.toISOString(),
-        endDate.toISOString(),
-        studentName,
-        !!student.is_child,
-        assignedTeacherName,
-        lessonKind,
-        lessonKind === 'demo' ? 'unknown' : String(locationLabel || '').trim().toLowerCase() === 'online' ? 'online' : 'cafe',
-        studentIdNum,
-        CALENDAR_SYNC_STATUS_PENDING,
-        calendarSyncKey,
-      ]
-    );
+    for (let index = 0; index < orderedStudents.length; index += 1) {
+      const studentEntry = orderedStudents[index];
+      await query(
+        `INSERT INTO monthly_schedule
+          (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+           calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
+           group_id, group_sort_order,
+           reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
+         VALUES
+          ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
+           $14, $15, NULL, NULL, NULL, NULL)
+         ON CONFLICT (event_id, student_name)
+         DO UPDATE SET
+           title = EXCLUDED.title,
+           date = EXCLUDED.date,
+           start = EXCLUDED.start,
+           "end" = EXCLUDED."end",
+           status = EXCLUDED.status,
+           is_kids_lesson = EXCLUDED.is_kids_lesson,
+           teacher_name = EXCLUDED.teacher_name,
+           lesson_kind = EXCLUDED.lesson_kind,
+           lesson_mode = EXCLUDED.lesson_mode,
+           student_id = EXCLUDED.student_id,
+           calendar_sync_status = EXCLUDED.calendar_sync_status,
+           calendar_sync_error = EXCLUDED.calendar_sync_error,
+           calendar_sync_key = EXCLUDED.calendar_sync_key,
+           calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
+           calendar_synced_at = EXCLUDED.calendar_synced_at,
+           group_id = EXCLUDED.group_id,
+           group_sort_order = EXCLUDED.group_sort_order,
+           reschedule_snapshot_to_date = monthly_schedule.reschedule_snapshot_to_date,
+           reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
+           reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
+           reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
+        [
+          localEventId,
+          title,
+          dateStr,
+          startDate.toISOString(),
+          endDate.toISOString(),
+          normalizePersonName(studentEntry.name),
+          !!studentEntry.is_child,
+          assignedTeacherName,
+          lessonKind,
+          lessonKind === 'demo' ? 'unknown' : locationLabelToLessonMode(locationLabel),
+          Number(studentEntry.id),
+          CALENDAR_SYNC_STATUS_PENDING,
+          calendarSyncKey,
+          activeGroupId,
+          index + 1,
+        ]
+      );
+    }
 
     res.status(201).json({
       ok: true,
@@ -1191,6 +1357,7 @@ router.post('/book', async (req, res) => {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
+      group_id: activeGroupId,
     });
     queueBookedLessonEventSync(localEventId);
   } catch (err) {
