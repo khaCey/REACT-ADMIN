@@ -30,9 +30,6 @@ function PaymentBadge({ payment }) {
 function pickGuideStudent(students) {
   if (!Array.isArray(students) || students.length === 0) return null
 
-  const byTarouTanaka = students.find((s) => String(s?.Name || '').trim().toLowerCase() === 'tarou tanaka')
-  if (byTarouTanaka) return byTarouTanaka
-
   const byExactAdmin = students.find((s) => String(s?.Name || '').trim().toLowerCase() === 'admin')
   if (byExactAdmin) return byExactAdmin
 
