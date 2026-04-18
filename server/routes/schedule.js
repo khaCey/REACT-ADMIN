@@ -264,12 +264,20 @@ function shouldSyncCalendarForRows(rows) {
   );
 }
 
-/** GAS calendar delete on remove: only when DB explicitly says synced (empty/null is not synced). */
+/**
+ * GAS calendar delete on remove: only when every active row explicitly says synced.
+ * Uses .every (not .some) so group lessons do not delete from Calendar if any row is pending/failed.
+ * Empty/null status is not synced.
+ */
 function rowsIndicateExplicitCalendarSyncedForGasDelete(rows) {
-  return (rows || []).some(
+  const relevant = (rows || []).filter(
     (r) =>
-      String(r?.calendar_sync_status || '').trim().toLowerCase() === CALENDAR_SYNC_STATUS_SYNCED &&
-      !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
+      !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
+      String(r?.status || '').toLowerCase() !== 'cancelled'
+  );
+  if (relevant.length === 0) return false;
+  return relevant.every(
+    (r) => String(r?.calendar_sync_status || '').trim().toLowerCase() === CALENDAR_SYNC_STATUS_SYNCED
   );
 }
 
