@@ -264,6 +264,15 @@ function shouldSyncCalendarForRows(rows) {
   );
 }
 
+/** GAS calendar delete on remove: only when DB explicitly says synced (empty/null is not synced). */
+function rowsIndicateExplicitCalendarSyncedForGasDelete(rows) {
+  return (rows || []).some(
+    (r) =>
+      String(r?.calendar_sync_status || '').trim().toLowerCase() === CALENDAR_SYNC_STATUS_SYNCED &&
+      !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
+  );
+}
+
 async function syncBookedLessonEventToCalendar(localEventId) {
   const result = await query(
     `SELECT m.event_id, m.student_name, m.student_id, m.title, to_char(m.date, 'YYYY-MM-DD') AS lesson_date, m.start, m."end", m.status,
@@ -1825,7 +1834,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
+    if (isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(oldRows)) {
       const del = await deleteBookedLessonEventInGas(eventId);
       if (!del.ok) {
         return res.status(502).json({

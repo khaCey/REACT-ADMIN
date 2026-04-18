@@ -833,6 +833,12 @@ export default function LessonsThisMonth({
     </div>
   )
 
+  const pendingRemoveSync = String(pendingRemoveLesson?.calendarSyncStatus || '')
+    .trim()
+    .toLowerCase()
+  const pendingRemoveIsLocalOnly =
+    pendingRemoveSync === 'pending' || pendingRemoveSync === 'failed'
+
   const content = (
     <div className="flex flex-1 flex-col min-h-0">
       <div className="flex flex-col gap-1 flex-1 min-h-0 overflow-hidden px-2 py-1">
@@ -942,9 +948,13 @@ export default function LessonsThisMonth({
       )}
       {pendingRemoveLesson && (
         <ConfirmActionModal
-          title="Remove Lesson"
-          message="Remove this lesson from the schedule?"
-          confirmLabel="Remove"
+          title={pendingRemoveIsLocalOnly ? 'Remove from schedule only' : 'Remove Lesson'}
+          message={
+            pendingRemoveIsLocalOnly
+              ? 'This lesson was not synced to Google Calendar (or sync failed). Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
+              : 'Remove this lesson from the schedule?'
+          }
+          confirmLabel={pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'}
           destructive
           confirming={removing}
           onConfirm={confirmRemoveLesson}

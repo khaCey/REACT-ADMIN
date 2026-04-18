@@ -94,6 +94,9 @@ export default function LessonDetailsModal({
     !!lesson?.calendarSyncError ||
     isAwaitingRescheduleDate
 
+  const isLocalOnlyRemove =
+    calendarSyncStatus === 'pending' || calendarSyncStatus === 'failed'
+
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`
     : 'Not specified'
@@ -267,10 +270,15 @@ export default function LessonDetailsModal({
             <button
               type="button"
               onClick={handleRemove}
-                disabled={confirmDialogOpen || isTransientBusy}
+              disabled={confirmDialogOpen || isTransientBusy}
+              title={
+                isLocalOnlyRemove
+                  ? 'Removes this lesson from the schedule only; does not delete from Google Calendar.'
+                  : undefined
+              }
               className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Remove
+              {isLocalOnlyRemove ? 'Remove locally' : 'Remove'}
             </button>
           </div>
           <button
