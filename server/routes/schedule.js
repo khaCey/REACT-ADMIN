@@ -286,7 +286,7 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     `SELECT m.event_id, m.student_name, m.student_id, m.title, to_char(m.date, 'YYYY-MM-DD') AS lesson_date, m.start, m."end", m.status,
             m.teacher_name, m.lesson_kind, m.lesson_mode, m.calendar_sync_status,
             m.calendar_sync_error, m.calendar_sync_key,
-            m.group_id, m.group_sort_order,
+            m.group_sort_order,
             s.name AS canonical_student_name, s.status AS student_status,
             s.payment AS student_payment, s.is_child AS student_is_child
        FROM monthly_schedule m
@@ -309,7 +309,7 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     sort_order: parseInt(entry.group_sort_order, 10) || index + 1,
   }));
   const syncedTitle =
-    rows.length > 1 || row.group_id
+    rows.length > 1
       ? buildCanonicalLessonTitle(row.title || '', orderedStudents)
       : row.title || '';
   const bookingKey =
@@ -857,7 +857,7 @@ router.post('/renumber-month-titles', async (req, res) => {
     );
 
     const rows = await query(
-      `SELECT event_id, student_name, title, group_id, lesson_kind, lesson_mode
+      `SELECT event_id, student_name, title, lesson_kind, lesson_mode
        FROM monthly_schedule
        WHERE student_id = $1
          AND to_char(date, 'YYYY-MM') = $2
@@ -898,7 +898,7 @@ router.post('/renumber-month-titles', async (req, res) => {
               totalLessons: pack,
             });
       const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
-      if ((orderedStudents.length > 1) || r.group_id) {
+      if (orderedStudents.length > 1) {
         await query(
           `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`,
           [newTitle, r.event_id]
@@ -1357,7 +1357,7 @@ router.post('/book', async (req, res) => {
           Number(studentEntry.id),
           CALENDAR_SYNC_STATUS_PENDING,
           calendarSyncKey,
-          activeGroupId,
+          null,
           index + 1,
         ]
       );
@@ -1372,7 +1372,7 @@ router.post('/book', async (req, res) => {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
-      group_id: activeGroupId,
+      group_id: null,
     });
     queueBookedLessonEventSync(localEventId);
   } catch (err) {

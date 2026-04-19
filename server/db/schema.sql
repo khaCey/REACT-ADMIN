@@ -62,6 +62,29 @@ CREATE TABLE IF NOT EXISTS lessons (
 
 CREATE INDEX IF NOT EXISTS idx_lessons_student ON lessons(student_id);
 
+-- Persistent ordered groups for shared lesson titles / booking reuse.
+CREATE TABLE IF NOT EXISTS student_groups (
+  id SERIAL PRIMARY KEY,
+  expected_size INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS student_group_members (
+  group_id INTEGER NOT NULL REFERENCES student_groups(id) ON DELETE CASCADE,
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  sort_order INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (group_id, student_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_group_members_student_unique
+  ON student_group_members(student_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_group_members_sort_unique
+  ON student_group_members(group_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_student_group_members_group
+  ON student_group_members(group_id);
+
 -- Monthly schedule (cached events). Composite PK allows group lessons: one row per student per event.
 CREATE TABLE IF NOT EXISTS monthly_schedule (
   event_id VARCHAR(255) NOT NULL,
@@ -92,6 +115,8 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_key VARCHAR(
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_attempted_at TIMESTAMPTZ;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_synced_at TIMESTAMPTZ;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS awaiting_reschedule_date BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES student_groups(id);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS group_sort_order INTEGER;
 -- Persisted reschedule hints for UI (survives calendar poll); JOINs still preferred when present.
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_date DATE;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_time VARCHAR(16);
@@ -101,6 +126,12 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_t
 CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   ON monthly_schedule(calendar_sync_key)
   WHERE calendar_sync_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_monthly_schedule_group_id
+  ON monthly_schedule(group_id);
+
+-- Optional manual migration after app no longer reads monthly_schedule.group_id:
+-- DROP INDEX IF EXISTS idx_monthly_schedule_group_id;
+-- ALTER TABLE monthly_schedule DROP COLUMN IF EXISTS group_id;
 
 -- Linked reschedules: source lesson -> destination lesson
 CREATE TABLE IF NOT EXISTS reschedules (
