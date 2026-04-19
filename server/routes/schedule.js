@@ -1608,6 +1608,21 @@ router.patch(/^\/(.+)\/reschedule\/?$/, async (req, res) => {
         req
       );
     }
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && newRows.length > 0) {
+      const nr = newRows[0];
+      const startIso = nr.start ? new Date(nr.start).toISOString() : '';
+      const endIso = nr.end ? new Date(nr.end).toISOString() : '';
+      const patch = {
+        ...(nr.title ? { title: String(nr.title) } : {}),
+        ...(startIso ? { startIso } : {}),
+        ...(endIso ? { endIso } : {}),
+      };
+      if (Object.keys(patch).length > 0) {
+        updateBookedLessonEventInGas(eventId, patch).catch((err) => {
+          console.error('[schedule/reschedule] calendar update failed:', err?.message || err);
+        });
+      }
+    }
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1733,6 +1748,10 @@ router.post('/reschedule-linked', async (req, res) => {
           ? 'online'
           : 'cafe';
 
+    const sourceRowsFull = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const deleteSourceFromCalendar =
+      isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(sourceRowsFull);
+
     client = await pool.connect();
     await client.query('BEGIN');
     const srcDateStr = String(source.src_date_str || '').trim();
@@ -1801,14 +1820,10 @@ router.post('/reschedule-linked', async (req, res) => {
     await client.query('COMMIT');
 
     queueBookedLessonEventSync(localEventId);
-    if (isBookingGasEnabled()) {
+    if (deleteSourceFromCalendar) {
       setTimeout(() => {
-        updateBookedLessonEventInGas(sourceEventId, {
-          colorId: '8',
-          title: oldTitleUpdated,
-          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
-        }).catch((err) => {
-          console.error('[reschedule-linked] source calendar update failed:', err?.message || err);
+        deleteBookedLessonEventInGas(sourceEventId).catch((err) => {
+          console.error('[reschedule-linked] source calendar delete failed:', err?.message || err);
         });
       }, 0);
     }

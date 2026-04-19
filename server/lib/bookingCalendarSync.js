@@ -68,7 +68,7 @@ export function bookingEventColorId(lessonKind) {
 
 /**
  * Create a Calendar event via GAS.
- * @param {{ student: StudentForBooking, startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
+ * @param {{ student: StudentForBooking, students?: StudentForBooking[], startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function createBookedLessonEventInGas(args) {
@@ -82,15 +82,20 @@ export async function createBookedLessonEventInGas(args) {
   url.searchParams.set('key', apiKey);
  
   const student = args?.student;
+  const students = Array.isArray(args?.students) && args.students.length > 0 ? args.students : student ? [student] : [];
   // Prefer student payment/status so demo/owner never get a manual palette color when DB lesson_kind is stale.
   const lessonKind = student
     ? deriveLessonKind(student)
     : String(args?.lessonKind || '').trim().toLowerCase() || 'regular';
   const teacher = (args?.assignedTeacherName || '').trim();
   const bookingKey = String(args?.bookingKey || '').trim();
+  const studentIds = students
+    .map((entry) => entry?.id)
+    .filter((value, index, arr) => value != null && arr.indexOf(value) === index);
   const descLines = [
     'Source: Student Admin booking',
     student?.id != null ? `StudentId: ${student.id}` : null,
+    studentIds.length > 1 ? `StudentIds: ${studentIds.join(',')}` : null,
     teacher ? `#teacher${teacher}` : null,
     bookingKey ? `BookingSyncKey: ${bookingKey}` : null,
   ].filter(Boolean);
@@ -203,7 +208,7 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
 /**
  * Update a Calendar booking event via GAS (title/color/description markers).
  * @param {string} monthlyEventId
- * @param {{ title?: string, colorId?: string, clearColor?: boolean, mergeStudentAdminDescription?: { awaiting_reschedule_date?: boolean } }} updates
+ * @param {{ title?: string, colorId?: string, clearColor?: boolean, startIso?: string, endIso?: string, mergeStudentAdminDescription?: { awaiting_reschedule_date?: boolean } }} updates
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}) {
@@ -216,12 +221,16 @@ export async function updateBookedLessonEventInGas(monthlyEventId, updates = {})
   const url = new URL(baseUrl);
   url.searchParams.set('key', apiKey);
   const merge = updates?.mergeStudentAdminDescription;
+  const startIso = updates?.startIso != null ? String(updates.startIso).trim() : '';
+  const endIso = updates?.endIso != null ? String(updates.endIso).trim() : '';
   const payload = {
     action: 'lesson_book_update',
     eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
     ...(updates?.title ? { title: String(updates.title) } : {}),
     ...(updates?.colorId ? { colorId: String(updates.colorId) } : {}),
     ...(updates?.clearColor ? { clearColor: true } : {}),
+    ...(startIso ? { start: startIso } : {}),
+    ...(endIso ? { end: endIso } : {}),
     ...(merge && typeof merge === 'object' ? { mergeStudentAdminDescription: merge } : {}),
     source: 'student-admin-server',
     timestamp: new Date().toISOString(),
