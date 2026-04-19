@@ -512,6 +512,50 @@ function hourInHalfOpenRange(hourLabel, startTime, endTime) {
   return hourLabel >= startTime && hourLabel < endTime;
 }
 
+/**
+ * Grid keys where an owner's-course lesson overlaps a candidate booking starting at that slot.
+ * Uses the same interval overlap idea as POST /book (not only the lesson's start hour).
+ * Candidate window length = max booking duration (120m) so the grid does not under-block vs POST.
+ */
+function buildOwnerCourseSlotOccupiedForWeek(weekStart, scheduleRows) {
+  const occupied = {};
+  const candidateMs = 120 * 60 * 1000;
+  for (const r of scheduleRows) {
+    const kind = String(r.lesson_kind || '').trim();
+    if (kind === 'staff_break') continue;
+    const lk = String(r.lesson_kind || '').trim().toLowerCase();
+    const pay = String(r.student_payment || '').toLowerCase();
+    if (lk !== 'owner' && !pay.includes('owner')) continue;
+
+    const lessonStart = r.start_ts != null ? new Date(r.start_ts) : null;
+    if (!lessonStart || Number.isNaN(lessonStart.getTime())) continue;
+    let lessonEnd = r.end_ts != null ? new Date(r.end_ts) : null;
+    if (!lessonEnd || Number.isNaN(lessonEnd.getTime())) {
+      lessonEnd = new Date(lessonStart.getTime() + 50 * 60 * 1000);
+    }
+
+    for (let di = 0; di < 7; di += 1) {
+      const dateStr = addDaysToYyyyMmDd(weekStart, di);
+      for (const timeStr of GRID_TIME_SLOTS) {
+        const parts = String(timeStr || '')
+          .trim()
+          .slice(0, 5)
+          .split(':')
+          .map((x) => parseInt(x, 10) || 0);
+        const hh = parts[0];
+        const mm = parts[1] ?? 0;
+        const candStart = parseJstToUtc(dateStr, hh, mm);
+        if (!candStart) continue;
+        const candEnd = new Date(candStart.getTime() + candidateMs);
+        if (lessonStart < candEnd && lessonEnd > candStart) {
+          occupied[`${dateStr}T${timeStr}`] = true;
+        }
+      }
+    }
+  }
+  return occupied;
+}
+
 /** Test route: GET /api/schedule returns 200 so the mount can be verified */
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
 
@@ -529,7 +573,8 @@ router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
  * - Optional `student_id`: response includes `studentBookedSlots` (slot keys this student
  *   already occupies in the week) for booking UI.
  * - `ownerCourseConflictBlocked`: when student has owner's course payment, slot keys where
- *   another owner's course lesson already exists (hour bucket); mirrors POST /book rule.
+ *   another owner's course lesson overlaps a candidate booking at that grid start (interval overlap,
+ *   max 120m window — aligns with POST /book).
  * - Rows for students in BOOKING_DISABLED_STUDENT_IDS are omitted (not counted in slots/slotMix).
  * - `breakRuleBlocked`: slot keys where spare capacity exists but no on-shift teacher can take another
  *   regular lesson without exceeding 5 consecutive JST teaching hours (see teacherBreakRules).
@@ -558,6 +603,8 @@ router.get('/week', async (req, res) => {
         `SELECT
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS date_jst,
            to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
+           m.start AS start_ts,
+           m."end" AS end_ts,
            m.is_kids_lesson,
            m.event_id,
            m.student_name,
@@ -776,20 +823,8 @@ router.get('/week', async (req, res) => {
       }
     }
 
-    /** Hour slots that already have an owner's course lesson (lesson_kind or student payment). */
-    const ownerCourseSlotOccupied = {};
-    for (const r of scheduleResult.rows) {
-      const kind = String(r.lesson_kind || '').trim();
-      if (kind === 'staff_break') continue;
-      const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
-      const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
-      if (!dateStr || !timeStr) continue;
-      const lk = String(r.lesson_kind || '').trim().toLowerCase();
-      const pay = String(r.student_payment || '').toLowerCase();
-      if (lk === 'owner' || pay.includes('owner')) {
-        ownerCourseSlotOccupied[`${dateStr}T${timeStr}`] = true;
-      }
-    }
+    /** Hour slots where an owner's course lesson overlaps a new booking at that grid time (matches POST /book overlap). */
+    const ownerCourseSlotOccupied = buildOwnerCourseSlotOccupiedForWeek(weekStart, scheduleResult.rows);
 
     /** Owner's course (payment contains "owner"): only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
     const ownerShamBlocked = {};
