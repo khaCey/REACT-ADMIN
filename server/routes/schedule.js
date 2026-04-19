@@ -1820,9 +1820,35 @@ router.post('/reschedule-linked', async (req, res) => {
     );
     await client.query('COMMIT');
 
+    /** After cancel, other students may still be booked on the same shared Google event — do not delete their calendar entry. */
+    const sourceStillHasActiveBookings =
+      (
+        await query(
+          `SELECT 1 FROM monthly_schedule
+            WHERE event_id = $1
+              AND (status IS NULL OR LOWER(TRIM(status)) <> 'cancelled')
+            LIMIT 1`,
+          [sourceEventId]
+        )
+      ).rows.length > 0;
+
     queueBookedLessonEventSync(localEventId);
     let calendarSourceDeleteError = null;
-    if (deleteSourceFromCalendar) {
+    let calendarSourceDeleteSkipped = null;
+    const shouldDeleteSourceCalendar =
+      deleteSourceFromCalendar &&
+      !sourceStillHasActiveBookings &&
+      String(sourceEventId).trim() !== String(localEventId).trim();
+
+    if (deleteSourceFromCalendar && sourceStillHasActiveBookings) {
+      calendarSourceDeleteSkipped = 'source_event_has_other_active_bookings';
+      console.log(
+        '[reschedule-linked] skipping source calendar delete (shared event still in use):',
+        sourceEventId
+      );
+    }
+
+    if (shouldDeleteSourceCalendar) {
       try {
         const del = await deleteBookedLessonEventInGas(sourceEventId);
         if (!del.ok) {
@@ -1843,6 +1869,7 @@ router.post('/reschedule-linked', async (req, res) => {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
+      ...(calendarSourceDeleteSkipped ? { calendar_source_delete_skipped: calendarSourceDeleteSkipped } : {}),
       ...(calendarSourceDeleteError ? { calendar_source_delete_error: calendarSourceDeleteError } : {}),
     });
   } catch (err) {
