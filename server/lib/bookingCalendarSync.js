@@ -207,6 +207,7 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
 
 /**
  * Update a Calendar booking event via GAS (title/color/description markers).
+ * Omit start/end to change metadata only (e.g. linked reschedule: graphite old slot without moving time).
  * @param {string} monthlyEventId
  * @param {{ title?: string, colorId?: string, clearColor?: boolean, startIso?: string, endIso?: string, mergeStudentAdminDescription?: { awaiting_reschedule_date?: boolean } }} updates
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}

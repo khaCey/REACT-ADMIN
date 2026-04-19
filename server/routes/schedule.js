@@ -160,23 +160,6 @@ function rawEventIdFromMonthlyEventId(eventId) {
   return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
 }
 
-/** Free `event_id` when the cancelled source row blocks the active row’s target id (same monthly key). */
-async function archiveCancelledRowToFreeEventId(db, sourceEventId, sourceStudentName) {
-  const archiveFromId = `${sourceEventId}_cancelled_${randomUUID()}`;
-  await db(
-    `UPDATE monthly_schedule SET event_id = $1
-     WHERE event_id = $2 AND student_name = $3
-       AND LOWER(TRIM(COALESCE(status, ''))) = 'cancelled'`,
-    [archiveFromId, sourceEventId, sourceStudentName]
-  );
-  await db(
-    `UPDATE reschedules SET from_event_id = $1
-     WHERE from_event_id = $2 AND from_student_name = $3`,
-    [archiveFromId, sourceEventId, sourceStudentName]
-  );
-  return archiveFromId;
-}
-
 function lessonModeToLocationLabel(lessonMode) {
   return String(lessonMode || '').trim().toLowerCase() === 'online' ? 'Online' : 'Cafe';
 }
@@ -1646,7 +1629,7 @@ router.patch(/^\/(.+)\/reschedule\/?$/, async (req, res) => {
   }
 });
 
-/** Linked reschedule: insert destination as local pending (like POST /book), cancel source, link rows; calendar sync is queued. */
+/** Linked reschedule: insert destination as local pending (like POST /book), cancel source, link rows; Calendar: graphite+title on source event (see PATCH cancel), queue create for new slot. */
 router.post('/reschedule-linked', async (req, res) => {
   let client;
   try {
@@ -1766,9 +1749,14 @@ router.post('/reschedule-linked', async (req, res) => {
           : 'cafe';
 
     const sourceRowsFull = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
-    /** Same predicate as PATCH cancel calendar updates: legacy empty sync status counts as synced. */
-    const deleteSourceFromCalendar =
-      isBookingGasEnabled() && shouldSyncCalendarForRows(sourceRowsFull);
+    const oldSourceRowForLog = sourceRowsFull.find(
+      (r) => String(r.student_name || '').trim() === String(sourceStudentName || '').trim()
+    );
+    /** Same predicate as PATCH cancel: style source Calendar (graphite) when lesson was on Calendar. */
+    const shouldStyleSourceCalendar =
+      isBookingGasEnabled() &&
+      shouldSyncCalendarForRows(sourceRowsFull) &&
+      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX);
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -1837,142 +1825,85 @@ router.post('/reschedule-linked', async (req, res) => {
     );
     await client.query('COMMIT');
 
-    /** After cancel, other students may still be booked on the same shared Google event — do not delete or retime their calendar entry. */
-    const sourceStillHasActiveBookings =
-      (
-        await query(
-          `SELECT 1 FROM monthly_schedule
-            WHERE event_id = $1
-              AND (status IS NULL OR LOWER(TRIM(status)) <> 'cancelled')
-            LIMIT 1`,
-          [sourceEventId]
-        )
-      ).rows.length > 0;
-
     const startIso = startDate.toISOString();
     const endIso = endDate.toISOString();
 
-    /** Solo + synced source: PATCH the existing Google Calendar event instead of delete + recreate. */
-    let calendarInPlaceUpdated = false;
-    let calendarMoveAttempted = false;
-    let responseNewEventId = localEventId;
-    let responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_PENDING;
+    /** Keep original Calendar event at original time: graphite + “Moved to …” title; create new event at new time via sync queue. */
+    let calendarSourceGraphiteOk = false;
+    let calendarSourceStyleError = null;
 
-    const shouldTryCalendarMove =
-      deleteSourceFromCalendar &&
-      !sourceStillHasActiveBookings &&
-      String(sourceEventId).trim() !== String(localEventId).trim();
-
-    const rawGoogleId = rawEventIdFromMonthlyEventId(sourceEventId);
-    const syncedMonthlyEventId =
-      rawGoogleId && dateStrRaw ? buildMonthlyEventId(rawGoogleId, dateStrRaw, startDate) : '';
-
-    if (
-      shouldTryCalendarMove &&
-      syncedMonthlyEventId &&
-      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
-    ) {
+    if (shouldStyleSourceCalendar) {
       try {
-        calendarMoveAttempted = true;
-        if (syncedMonthlyEventId === sourceEventId) {
-          await archiveCancelledRowToFreeEventId(query, sourceEventId, sourceStudentName);
-        }
-        const upd = await updateBookedLessonEventInGas(sourceEventId, {
-          title,
-          startIso,
-          endIso,
+        const styleUpd = await updateBookedLessonEventInGas(sourceEventId, {
+          title: oldTitleUpdated,
+          colorId: '8',
+          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
         });
-        if (upd.ok) {
-          const upRes = await query(
-            `UPDATE monthly_schedule SET
-               event_id = $1,
-               title = $2,
-               calendar_sync_status = $3,
-               calendar_sync_error = NULL,
-               calendar_sync_attempted_at = NOW(),
-               calendar_synced_at = NOW(),
-               calendar_sync_key = COALESCE(calendar_sync_key, $4)
-             WHERE event_id = $5`,
-            [
-              syncedMonthlyEventId,
-              title,
-              CALENDAR_SYNC_STATUS_SYNCED,
-              calendarSyncKey,
-              localEventId,
-            ]
-          );
-          const rowsTouched = Number(upRes.rowCount ?? 0);
-          if (rowsTouched > 0) {
-            await query(`UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`, [
-              syncedMonthlyEventId,
-              localEventId,
-            ]);
-            calendarInPlaceUpdated = true;
-            responseNewEventId = syncedMonthlyEventId;
-            responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_SYNCED;
-          } else {
-            console.error(
-              '[reschedule-linked] calendar in-place DB update matched 0 rows for localEventId:',
-              localEventId
-            );
-          }
+        if (styleUpd.ok) {
+          calendarSourceGraphiteOk = true;
         } else {
-          console.error(
-            '[reschedule-linked] calendar in-place update failed (GAS):',
-            upd.error
-          );
+          calendarSourceStyleError = styleUpd.error || 'Calendar source styling failed';
+          console.error('[reschedule-linked] source graphite/title update failed:', calendarSourceStyleError);
         }
       } catch (err) {
-        console.error('[reschedule-linked] calendar in-place update threw:', err?.message || err);
+        calendarSourceStyleError = err?.message || String(err);
+        console.error('[reschedule-linked] source graphite/title update threw:', calendarSourceStyleError);
       }
     }
 
-    let calendarSourceDeleteError = null;
-    let calendarSourceDeleteSkipped = null;
-
-    if (!calendarInPlaceUpdated) {
+    if (isBookingGasEnabled()) {
       queueBookedLessonEventSync(localEventId);
-      /** Never delete the source Calendar event after we attempted PATCH — failures would orphan or duplicate; deleting removes the user’s real booking. Legacy path only when we never attempted move. */
-      const shouldDeleteSourceCalendar =
-        deleteSourceFromCalendar &&
-        !sourceStillHasActiveBookings &&
-        String(sourceEventId).trim() !== String(localEventId).trim() &&
-        !calendarMoveAttempted;
+    }
 
-      if (deleteSourceFromCalendar && sourceStillHasActiveBookings) {
-        calendarSourceDeleteSkipped = 'source_event_has_other_active_bookings';
-        console.log(
-          '[reschedule-linked] skipping source calendar delete (shared event still in use):',
-          sourceEventId
+    if (oldSourceRowForLog) {
+      const srcAfter = (
+        await query(
+          `SELECT * FROM monthly_schedule WHERE event_id = $1 AND student_name = $2`,
+          [sourceEventId, sourceStudentName]
+        )
+      ).rows[0];
+      if (srcAfter) {
+        await logChange(
+          {
+            entityType: 'monthly_schedule',
+            entityKey: `${sourceEventId}_${sourceStudentName}`,
+            action: 'update',
+            oldData: oldSourceRowForLog,
+            newData: srcAfter,
+          },
+          req
         );
       }
-
-      if (shouldDeleteSourceCalendar) {
-        try {
-          const del = await deleteBookedLessonEventInGas(sourceEventId);
-          if (!del.ok) {
-            calendarSourceDeleteError = del.error || 'Calendar delete failed';
-            console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
-          }
-        } catch (err) {
-          calendarSourceDeleteError = err?.message || String(err);
-          console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
-        }
-      }
+    }
+    const newRowForLog = (
+      await query(`SELECT * FROM monthly_schedule WHERE event_id = $1 AND student_name = $2`, [
+        localEventId,
+        studentName,
+      ])
+    ).rows[0];
+    if (newRowForLog) {
+      await logChange(
+        {
+          entityType: 'monthly_schedule',
+          entityKey: `${localEventId}_${studentName}`,
+          action: 'create',
+          oldData: null,
+          newData: newRowForLog,
+        },
+        req
+      );
     }
 
     res.status(201).json({
       ok: true,
       source_event_id: sourceEventId,
-      new_event_id: responseNewEventId,
+      new_event_id: localEventId,
       date: dateStrRaw,
       start: startIso,
       end: endIso,
-      calendar_sync_status: responseCalendarSyncStatus,
-      ...(calendarInPlaceUpdated ? { calendar_updated_in_place: true } : {}),
-      ...(calendarMoveAttempted && !calendarInPlaceUpdated ? { calendar_move_failed: true } : {}),
-      ...(calendarSourceDeleteSkipped ? { calendar_source_delete_skipped: calendarSourceDeleteSkipped } : {}),
-      ...(calendarSourceDeleteError ? { calendar_source_delete_error: calendarSourceDeleteError } : {}),
+      calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
+      ...(shouldStyleSourceCalendar && calendarSourceGraphiteOk ? { calendar_source_graphite_ok: true } : {}),
+      ...(calendarSourceStyleError ? { calendar_source_style_error: calendarSourceStyleError } : {}),
     });
   } catch (err) {
     if (client) {
