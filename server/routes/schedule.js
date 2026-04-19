@@ -160,6 +160,23 @@ function rawEventIdFromMonthlyEventId(eventId) {
   return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
 }
 
+/** Free `event_id` when the cancelled source row blocks the active row’s target id (same monthly key). */
+async function archiveCancelledRowToFreeEventId(db, sourceEventId, sourceStudentName) {
+  const archiveFromId = `${sourceEventId}_cancelled_${randomUUID()}`;
+  await db(
+    `UPDATE monthly_schedule SET event_id = $1
+     WHERE event_id = $2 AND student_name = $3
+       AND LOWER(TRIM(COALESCE(status, ''))) = 'cancelled'`,
+    [archiveFromId, sourceEventId, sourceStudentName]
+  );
+  await db(
+    `UPDATE reschedules SET from_event_id = $1
+     WHERE from_event_id = $2 AND from_student_name = $3`,
+    [archiveFromId, sourceEventId, sourceStudentName]
+  );
+  return archiveFromId;
+}
+
 function lessonModeToLocationLabel(lessonMode) {
   return String(lessonMode || '').trim().toLowerCase() === 'online' ? 'Online' : 'Cafe';
 }
@@ -1835,8 +1852,9 @@ router.post('/reschedule-linked', async (req, res) => {
     const startIso = startDate.toISOString();
     const endIso = endDate.toISOString();
 
-    /** Solo + synced source: PATCH the existing Google event (same event id) instead of delete + create — avoids removing the original calendar booking. */
+    /** Solo + synced source: PATCH the existing Google Calendar event instead of delete + recreate. */
     let calendarInPlaceUpdated = false;
+    let calendarMoveAttempted = false;
     let responseNewEventId = localEventId;
     let responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_PENDING;
 
@@ -1852,10 +1870,13 @@ router.post('/reschedule-linked', async (req, res) => {
     if (
       shouldTryCalendarMove &&
       syncedMonthlyEventId &&
-      syncedMonthlyEventId !== sourceEventId &&
       !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
     ) {
       try {
+        calendarMoveAttempted = true;
+        if (syncedMonthlyEventId === sourceEventId) {
+          await archiveCancelledRowToFreeEventId(query, sourceEventId, sourceStudentName);
+        }
         const upd = await updateBookedLessonEventInGas(sourceEventId, {
           title,
           startIso,
@@ -1880,7 +1901,8 @@ router.post('/reschedule-linked', async (req, res) => {
               localEventId,
             ]
           );
-          if ((upRes.rowCount || 0) > 0) {
+          const rowsTouched = Number(upRes.rowCount ?? 0);
+          if (rowsTouched > 0) {
             await query(`UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`, [
               syncedMonthlyEventId,
               localEventId,
@@ -1888,18 +1910,20 @@ router.post('/reschedule-linked', async (req, res) => {
             calendarInPlaceUpdated = true;
             responseNewEventId = syncedMonthlyEventId;
             responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_SYNCED;
+          } else {
+            console.error(
+              '[reschedule-linked] calendar in-place DB update matched 0 rows for localEventId:',
+              localEventId
+            );
           }
         } else {
           console.error(
-            '[reschedule-linked] calendar in-place update failed, falling back:',
+            '[reschedule-linked] calendar in-place update failed (GAS):',
             upd.error
           );
         }
       } catch (err) {
-        console.error(
-          '[reschedule-linked] calendar in-place update failed, falling back:',
-          err?.message || err
-        );
+        console.error('[reschedule-linked] calendar in-place update threw:', err?.message || err);
       }
     }
 
@@ -1908,10 +1932,12 @@ router.post('/reschedule-linked', async (req, res) => {
 
     if (!calendarInPlaceUpdated) {
       queueBookedLessonEventSync(localEventId);
+      /** Never delete the source Calendar event after we attempted PATCH — failures would orphan or duplicate; deleting removes the user’s real booking. Legacy path only when we never attempted move. */
       const shouldDeleteSourceCalendar =
         deleteSourceFromCalendar &&
         !sourceStillHasActiveBookings &&
-        String(sourceEventId).trim() !== String(localEventId).trim();
+        String(sourceEventId).trim() !== String(localEventId).trim() &&
+        !calendarMoveAttempted;
 
       if (deleteSourceFromCalendar && sourceStillHasActiveBookings) {
         calendarSourceDeleteSkipped = 'source_event_has_other_active_bookings';
@@ -1944,6 +1970,7 @@ router.post('/reschedule-linked', async (req, res) => {
       end: endIso,
       calendar_sync_status: responseCalendarSyncStatus,
       ...(calendarInPlaceUpdated ? { calendar_updated_in_place: true } : {}),
+      ...(calendarMoveAttempted && !calendarInPlaceUpdated ? { calendar_move_failed: true } : {}),
       ...(calendarSourceDeleteSkipped ? { calendar_source_delete_skipped: calendarSourceDeleteSkipped } : {}),
       ...(calendarSourceDeleteError ? { calendar_source_delete_error: calendarSourceDeleteError } : {}),
     });
