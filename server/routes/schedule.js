@@ -528,6 +528,8 @@ router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
  *   overlapping lesson for the same student.
  * - Optional `student_id`: response includes `studentBookedSlots` (slot keys this student
  *   already occupies in the week) for booking UI.
+ * - `ownerCourseConflictBlocked`: when student has owner's course payment, slot keys where
+ *   another owner's course lesson already exists (hour bucket); mirrors POST /book rule.
  * - Rows for students in BOOKING_DISABLED_STUDENT_IDS are omitted (not counted in slots/slotMix).
  * - `breakRuleBlocked`: slot keys where spare capacity exists but no on-shift teacher can take another
  *   regular lesson without exceeding 5 consecutive JST teaching hours (see teacherBreakRules).
@@ -562,8 +564,10 @@ router.get('/week', async (req, res) => {
            m.student_id,
            m.lesson_kind,
            m.teacher_name,
-           m.title
+           m.title,
+           s.payment AS student_payment
          FROM monthly_schedule m
+         LEFT JOIN students s ON s.id = m.student_id
          WHERE m.date >= $1::date AND m.date < $1::date + interval '7 days'
          AND (m.status IS NULL OR m.status <> 'cancelled')
          AND (m.student_id IS NULL OR NOT (m.student_id = ANY($2::int[])))
@@ -772,6 +776,21 @@ router.get('/week', async (req, res) => {
       }
     }
 
+    /** Hour slots that already have an owner's course lesson (lesson_kind or student payment). */
+    const ownerCourseSlotOccupied = {};
+    for (const r of scheduleResult.rows) {
+      const kind = String(r.lesson_kind || '').trim();
+      if (kind === 'staff_break') continue;
+      const dateStr = r.date_jst ? String(r.date_jst).trim().slice(0, 10) : '';
+      const timeStr = r.time_jst ? String(r.time_jst).trim().slice(0, 5) : '';
+      if (!dateStr || !timeStr) continue;
+      const lk = String(r.lesson_kind || '').trim().toLowerCase();
+      const pay = String(r.student_payment || '').toLowerCase();
+      if (lk === 'owner' || pay.includes('owner')) {
+        ownerCourseSlotOccupied[`${dateStr}T${timeStr}`] = true;
+      }
+    }
+
     /** Owner's course (payment contains "owner"): only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
     const ownerShamBlocked = {};
     if (Number.isFinite(studentIdNum) && isOwnerCoursePayment(studentPaymentForGrid)) {
@@ -789,6 +808,12 @@ router.get('/week', async (req, res) => {
         }
       }
     }
+
+    /** Owner's course: cannot double-book another owner's lesson in the same hour (grid aligns with POST /book overlap rule). */
+    const ownerCourseConflictBlocked =
+      Number.isFinite(studentIdNum) && isOwnerCoursePayment(studentPaymentForGrid)
+        ? { ...ownerCourseSlotOccupied }
+        : {};
 
     /** When `student_id` query is set, keys where that student already has a lesson this hour (JST bucket). */
     const studentBookedSlots = {};
@@ -817,6 +842,7 @@ router.get('/week', async (req, res) => {
       studentBookedSlots,
       breakRuleBlocked,
       ownerShamBlocked,
+      ownerCourseConflictBlocked,
       staffBreakBySlot,
     });
   } catch (err) {
@@ -1122,6 +1148,29 @@ router.post('/book', async (req, res) => {
       if (!isChild && existingIsKids) {
         return res.status(400).json({
           error: 'Cannot book an adult lesson in a time slot that contains kids lessons. Kids and adults must be kept separate.',
+        });
+      }
+    }
+
+    if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
+      const ownerOverlap = await query(
+        `SELECT 1 FROM monthly_schedule m
+         LEFT JOIN students s ON s.id = m.student_id
+         WHERE (m.status IS NULL OR m.status <> 'cancelled')
+           AND ${SQL_NOT_STAFF_BREAK}
+           AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+           AND (
+             LOWER(TRIM(COALESCE(m.lesson_kind, ''))) = 'owner'
+             OR LOWER(TRIM(COALESCE(s.payment, ''))) LIKE '%owner%'
+           )
+           AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))
+         LIMIT 1`,
+        [startDate.toISOString(), endDate.toISOString(), excludedStudentIds]
+      );
+      if (ownerOverlap.rows.length > 0) {
+        return res.status(400).json({
+          error:
+            "An owner's course lesson is already scheduled for this time. Choose another slot.",
         });
       }
     }

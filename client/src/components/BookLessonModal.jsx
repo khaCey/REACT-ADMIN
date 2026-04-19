@@ -349,6 +349,8 @@ export default function BookLessonModal({
   const [breakRuleBlocked, setBreakRuleBlocked] = useState({})
   /** Owner's course: slots where OWNER_COURSE_STAFF_ID teacher is not on shift (server). */
   const [ownerShamBlocked, setOwnerShamBlocked] = useState({})
+  /** Owner's course: slot hour already has another owner's lesson (server). */
+  const [ownerCourseConflictBlocked, setOwnerCourseConflictBlocked] = useState({})
   /** Keys -> staff break entries from `lesson_kind = staff_break` (non-booking display). */
   const [staffBreakBySlot, setStaffBreakBySlot] = useState({})
   const [loading, setLoading] = useState(true)
@@ -432,6 +434,7 @@ export default function BookLessonModal({
       setStudentBookedSlots(cached.studentBookedSlots || {})
       setBreakRuleBlocked(cached.breakRuleBlocked || {})
       setOwnerShamBlocked(cached.ownerShamBlocked || {})
+      setOwnerCourseConflictBlocked(cached.ownerCourseConflictBlocked || {})
       setStaffBreakBySlot(cached.staffBreakBySlot || {})
       setScheduleWeekStart(weekStartStr)
       setHasLoadedWeekOnce(true)
@@ -451,6 +454,7 @@ export default function BookLessonModal({
         setStudentBookedSlots(data.studentBookedSlots || {})
         setBreakRuleBlocked(data.breakRuleBlocked || {})
         setOwnerShamBlocked(data.ownerShamBlocked || {})
+        setOwnerCourseConflictBlocked(data.ownerCourseConflictBlocked || {})
         setStaffBreakBySlot(data.staffBreakBySlot || {})
         setScheduleWeekStart(weekStartStr)
         setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
@@ -538,6 +542,7 @@ export default function BookLessonModal({
         if (isKidAdultMixBlocked(student, slotMix[key])) return false
         if (breakRuleBlocked[key]) return false
         if (ownerShamBlocked[key]) return false
+        if (ownerCourseConflictBlocked[key]) return false
         return true
       })
     )
@@ -549,6 +554,7 @@ export default function BookLessonModal({
     slotMix,
     breakRuleBlocked,
     ownerShamBlocked,
+    ownerCourseConflictBlocked,
     studentBookedSlots,
     student,
   ])
@@ -579,6 +585,7 @@ export default function BookLessonModal({
     if (isKidAdultMixBlocked(student, slotMix[key])) return
     if (breakRuleBlocked[key]) return
     if (ownerShamBlocked[key]) return
+    if (ownerCourseConflictBlocked[key]) return
     if (rescheduleSource) {
       setSelectedSlotKeys([key])
       return
@@ -655,6 +662,7 @@ export default function BookLessonModal({
           setStudentBookedSlots(weekData.studentBookedSlots || {})
           setBreakRuleBlocked(weekData.breakRuleBlocked || {})
           setOwnerShamBlocked(weekData.ownerShamBlocked || {})
+          setOwnerCourseConflictBlocked(weekData.ownerCourseConflictBlocked || {})
           setStaffBreakBySlot(weekData.staffBreakBySlot || {})
           setScheduleWeekStart(weekStartStr)
         }
@@ -788,6 +796,7 @@ export default function BookLessonModal({
         setStudentBookedSlots(weekData.studentBookedSlots || {})
         setBreakRuleBlocked(weekData.breakRuleBlocked || {})
         setOwnerShamBlocked(weekData.ownerShamBlocked || {})
+        setOwnerCourseConflictBlocked(weekData.ownerCourseConflictBlocked || {})
         setStaffBreakBySlot(weekData.staffBreakBySlot || {})
         setScheduleWeekStart(weekStartStr)
       }
@@ -821,6 +830,7 @@ export default function BookLessonModal({
       setStudentBookedSlots(data.studentBookedSlots || {})
       setBreakRuleBlocked(data.breakRuleBlocked || {})
       setOwnerShamBlocked(data.ownerShamBlocked || {})
+      setOwnerCourseConflictBlocked(data.ownerCourseConflictBlocked || {})
       setStaffBreakBySlot(data.staffBreakBySlot || {})
       setScheduleWeekStart(weekStartStr)
       setWeekCache((prev) => ({ ...prev, [cacheKey]: data }))
@@ -1009,6 +1019,7 @@ export default function BookLessonModal({
                           const mixBlocked = isKidAdultMixBlocked(student, mix)
                           const breakBlocked = !!breakRuleBlocked[key]
                           const shamBlocked = !!ownerShamBlocked[key]
+                          const ownerConflictBlocked = !!ownerCourseConflictBlocked[key]
                           const alreadyYours = !!studentBookedSlots[key]
                           const isSelected = selectedSlotKeys.includes(key)
                           const isPast = isSlotPastJst(dateStr, timeStr)
@@ -1028,6 +1039,16 @@ export default function BookLessonModal({
                             shamBlocked && !isPast && capacity > 0 && !isFull && !alreadyYours && !mixBlocked && !breakBlocked
                               ? 'Sham only'
                               : null
+                          const ownerConflictLabel =
+                            ownerConflictBlocked &&
+                            !isPast &&
+                            capacity > 0 &&
+                            !isFull &&
+                            !alreadyYours &&
+                            !mixBlocked &&
+                            !breakBlocked
+                              ? 'Owner booked'
+                              : null
                           const label = alreadyYours
                             ? 'Yours'
                             : isSelected
@@ -1036,6 +1057,8 @@ export default function BookLessonModal({
                               ? mixLabel
                               : breakLabel
                                 ? breakLabel
+                                : ownerConflictLabel
+                                  ? ownerConflictLabel
                                 : shamLabel
                                   ? shamLabel
                                 : isPast
@@ -1050,7 +1073,8 @@ export default function BookLessonModal({
                             mixBlocked ||
                             alreadyYours ||
                             breakBlocked ||
-                            shamBlocked
+                            shamBlocked ||
+                            ownerConflictBlocked
                           const slotTypeLabel =
                             slotType === 'kids' ? '子'
                               : slotType === 'adult' ? 'Adult'
@@ -1073,7 +1097,8 @@ export default function BookLessonModal({
                                     mixBlocked ||
                                     alreadyYours ||
                                     breakBlocked ||
-                                    shamBlocked
+                                    shamBlocked ||
+                                    ownerConflictBlocked
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
