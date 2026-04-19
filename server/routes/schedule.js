@@ -1820,7 +1820,7 @@ router.post('/reschedule-linked', async (req, res) => {
     );
     await client.query('COMMIT');
 
-    /** After cancel, other students may still be booked on the same shared Google event — do not delete their calendar entry. */
+    /** After cancel, other students may still be booked on the same shared Google event — do not delete or retime their calendar entry. */
     const sourceStillHasActiveBookings =
       (
         await query(
@@ -1832,43 +1832,118 @@ router.post('/reschedule-linked', async (req, res) => {
         )
       ).rows.length > 0;
 
-    queueBookedLessonEventSync(localEventId);
-    let calendarSourceDeleteError = null;
-    let calendarSourceDeleteSkipped = null;
-    const shouldDeleteSourceCalendar =
+    const startIso = startDate.toISOString();
+    const endIso = endDate.toISOString();
+
+    /** Solo + synced source: PATCH the existing Google event (same event id) instead of delete + create — avoids removing the original calendar booking. */
+    let calendarInPlaceUpdated = false;
+    let responseNewEventId = localEventId;
+    let responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_PENDING;
+
+    const shouldTryCalendarMove =
       deleteSourceFromCalendar &&
       !sourceStillHasActiveBookings &&
       String(sourceEventId).trim() !== String(localEventId).trim();
 
-    if (deleteSourceFromCalendar && sourceStillHasActiveBookings) {
-      calendarSourceDeleteSkipped = 'source_event_has_other_active_bookings';
-      console.log(
-        '[reschedule-linked] skipping source calendar delete (shared event still in use):',
-        sourceEventId
-      );
-    }
+    const rawGoogleId = rawEventIdFromMonthlyEventId(sourceEventId);
+    const syncedMonthlyEventId =
+      rawGoogleId && dateStrRaw ? buildMonthlyEventId(rawGoogleId, dateStrRaw, startDate) : '';
 
-    if (shouldDeleteSourceCalendar) {
+    if (
+      shouldTryCalendarMove &&
+      syncedMonthlyEventId &&
+      syncedMonthlyEventId !== sourceEventId &&
+      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
+    ) {
       try {
-        const del = await deleteBookedLessonEventInGas(sourceEventId);
-        if (!del.ok) {
-          calendarSourceDeleteError = del.error || 'Calendar delete failed';
-          console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+        const upd = await updateBookedLessonEventInGas(sourceEventId, {
+          title,
+          startIso,
+          endIso,
+        });
+        if (upd.ok) {
+          const upRes = await query(
+            `UPDATE monthly_schedule SET
+               event_id = $1,
+               title = $2,
+               calendar_sync_status = $3,
+               calendar_sync_error = NULL,
+               calendar_sync_attempted_at = NOW(),
+               calendar_synced_at = NOW(),
+               calendar_sync_key = COALESCE(calendar_sync_key, $4)
+             WHERE event_id = $5`,
+            [
+              syncedMonthlyEventId,
+              title,
+              CALENDAR_SYNC_STATUS_SYNCED,
+              calendarSyncKey,
+              localEventId,
+            ]
+          );
+          if ((upRes.rowCount || 0) > 0) {
+            await query(`UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`, [
+              syncedMonthlyEventId,
+              localEventId,
+            ]);
+            calendarInPlaceUpdated = true;
+            responseNewEventId = syncedMonthlyEventId;
+            responseCalendarSyncStatus = CALENDAR_SYNC_STATUS_SYNCED;
+          }
+        } else {
+          console.error(
+            '[reschedule-linked] calendar in-place update failed, falling back:',
+            upd.error
+          );
         }
       } catch (err) {
-        calendarSourceDeleteError = err?.message || String(err);
-        console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+        console.error(
+          '[reschedule-linked] calendar in-place update failed, falling back:',
+          err?.message || err
+        );
+      }
+    }
+
+    let calendarSourceDeleteError = null;
+    let calendarSourceDeleteSkipped = null;
+
+    if (!calendarInPlaceUpdated) {
+      queueBookedLessonEventSync(localEventId);
+      const shouldDeleteSourceCalendar =
+        deleteSourceFromCalendar &&
+        !sourceStillHasActiveBookings &&
+        String(sourceEventId).trim() !== String(localEventId).trim();
+
+      if (deleteSourceFromCalendar && sourceStillHasActiveBookings) {
+        calendarSourceDeleteSkipped = 'source_event_has_other_active_bookings';
+        console.log(
+          '[reschedule-linked] skipping source calendar delete (shared event still in use):',
+          sourceEventId
+        );
+      }
+
+      if (shouldDeleteSourceCalendar) {
+        try {
+          const del = await deleteBookedLessonEventInGas(sourceEventId);
+          if (!del.ok) {
+            calendarSourceDeleteError = del.error || 'Calendar delete failed';
+            console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+          }
+        } catch (err) {
+          calendarSourceDeleteError = err?.message || String(err);
+          console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+        }
       }
     }
 
     res.status(201).json({
       ok: true,
       source_event_id: sourceEventId,
-      new_event_id: localEventId,
+      new_event_id: responseNewEventId,
       date: dateStrRaw,
-      start: startDate.toISOString(),
-      end: endDate.toISOString(),
-      calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
+      start: startIso,
+      end: endIso,
+      calendar_sync_status: responseCalendarSyncStatus,
+      ...(calendarInPlaceUpdated ? { calendar_updated_in_place: true } : {}),
       ...(calendarSourceDeleteSkipped ? { calendar_source_delete_skipped: calendarSourceDeleteSkipped } : {}),
       ...(calendarSourceDeleteError ? { calendar_source_delete_error: calendarSourceDeleteError } : {}),
     });
