@@ -1749,8 +1749,9 @@ router.post('/reschedule-linked', async (req, res) => {
           : 'cafe';
 
     const sourceRowsFull = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    /** Same predicate as PATCH cancel calendar updates: legacy empty sync status counts as synced. */
     const deleteSourceFromCalendar =
-      isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(sourceRowsFull);
+      isBookingGasEnabled() && shouldSyncCalendarForRows(sourceRowsFull);
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -1820,12 +1821,18 @@ router.post('/reschedule-linked', async (req, res) => {
     await client.query('COMMIT');
 
     queueBookedLessonEventSync(localEventId);
+    let calendarSourceDeleteError = null;
     if (deleteSourceFromCalendar) {
-      setTimeout(() => {
-        deleteBookedLessonEventInGas(sourceEventId).catch((err) => {
-          console.error('[reschedule-linked] source calendar delete failed:', err?.message || err);
-        });
-      }, 0);
+      try {
+        const del = await deleteBookedLessonEventInGas(sourceEventId);
+        if (!del.ok) {
+          calendarSourceDeleteError = del.error || 'Calendar delete failed';
+          console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+        }
+      } catch (err) {
+        calendarSourceDeleteError = err?.message || String(err);
+        console.error('[reschedule-linked] source calendar delete failed:', calendarSourceDeleteError);
+      }
     }
 
     res.status(201).json({
@@ -1836,6 +1843,7 @@ router.post('/reschedule-linked', async (req, res) => {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
+      ...(calendarSourceDeleteError ? { calendar_source_delete_error: calendarSourceDeleteError } : {}),
     });
   } catch (err) {
     if (client) {
