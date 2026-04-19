@@ -94,8 +94,7 @@ export default function LessonDetailsModal({
     !!lesson?.calendarSyncError ||
     isAwaitingRescheduleDate
 
-  const isLocalOnlyRemove =
-    calendarSyncStatus === 'pending' || calendarSyncStatus === 'failed'
+  const isLocalOnlyRemove = calendarSyncStatus === 'failed'
 
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`

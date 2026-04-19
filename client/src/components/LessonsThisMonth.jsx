@@ -692,7 +692,7 @@ export default function LessonsThisMonth({
     })
     try {
       const rmSync = String(lessonToRemove.calendarSyncStatus || '').trim().toLowerCase()
-      const removeLocalOnly = rmSync === 'pending' || rmSync === 'failed'
+      const removeLocalOnly = rmSync === 'failed'
       await api.removeScheduleEvent(lessonToRemove.eventID, { localOnly: removeLocalOnly })
       applyOptimisticMutation({
         type: 'replace_with_unscheduled',
@@ -838,8 +838,7 @@ export default function LessonsThisMonth({
   const pendingRemoveSync = String(pendingRemoveLesson?.calendarSyncStatus || '')
     .trim()
     .toLowerCase()
-  const pendingRemoveIsLocalOnly =
-    pendingRemoveSync === 'pending' || pendingRemoveSync === 'failed'
+  const pendingRemoveIsLocalOnly = pendingRemoveSync === 'failed'
 
   const content = (
     <div className="flex flex-1 flex-col min-h-0">
@@ -953,7 +952,7 @@ export default function LessonsThisMonth({
           title={pendingRemoveIsLocalOnly ? 'Remove from schedule only' : 'Remove Lesson'}
           message={
             pendingRemoveIsLocalOnly
-              ? 'This lesson was not synced to Google Calendar (or sync failed). Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
+              ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
               : 'Remove this lesson from the schedule?'
           }
           confirmLabel={pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'}
