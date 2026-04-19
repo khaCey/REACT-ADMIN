@@ -1842,7 +1842,9 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(oldRows)) {
+    const localOnlyRemove =
+      req.query?.localOnly === '1' || String(req.query?.localOnly || '').toLowerCase() === 'true';
+    if (!localOnlyRemove && isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(oldRows)) {
       const del = await deleteBookedLessonEventInGas(eventId);
       if (!del.ok) {
         return res.status(502).json({

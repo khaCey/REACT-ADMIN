@@ -691,7 +691,9 @@ export default function LessonsThisMonth({
       },
     })
     try {
-      await api.removeScheduleEvent(lessonToRemove.eventID)
+      const rmSync = String(lessonToRemove.calendarSyncStatus || '').trim().toLowerCase()
+      const removeLocalOnly = rmSync === 'pending' || rmSync === 'failed'
+      await api.removeScheduleEvent(lessonToRemove.eventID, { localOnly: removeLocalOnly })
       applyOptimisticMutation({
         type: 'replace_with_unscheduled',
         eventID: lessonToRemove.eventID,

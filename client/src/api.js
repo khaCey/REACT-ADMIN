@@ -175,8 +175,11 @@ export const api = {
     fetchApi(`/schedule/${encodeURIComponent(eventId)}/reschedule`, { method: 'PATCH', body: JSON.stringify(body) }),
   rescheduleLesson: (body) =>
     fetchApi('/schedule/reschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
-  removeScheduleEvent: (eventId) =>
-    fetchApi(`/schedule/${encodeURIComponent(eventId)}`, { method: 'DELETE' }),
+  /** @param {{ localOnly?: boolean }} [opts] — when true, server skips Google Calendar (GAS) delete */
+  removeScheduleEvent: (eventId, { localOnly = false } = {}) => {
+    const q = localOnly ? '?localOnly=1' : ''
+    return fetchApi(`/schedule/${encodeURIComponent(eventId)}${q}`, { method: 'DELETE' })
+  },
 
   getScheduleTeachers: (date) =>
     fetchApi(`/schedule/teachers?date=${encodeURIComponent(date)}`),
