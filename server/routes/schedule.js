@@ -1843,7 +1843,6 @@ router.post('/reschedule-linked', async (req, res) => {
     const oldTitleUpdated = applyRescheduleTitleMarker(sourceAnchor.title || '', 'to', toDisplay || '???');
 
     const localEventId = buildLocalBookingEventId();
-    const calendarSyncKey = buildCalendarSyncKey();
     const lessonKind = lessonKindForBooking;
     const lessonModeVal =
       lessonKind === 'demo'
@@ -1896,6 +1895,7 @@ router.post('/reschedule-linked', async (req, res) => {
             : 'cafe';
       const sourceTitleCore = stripRescheduleTitleMarker(sourceRow.title || title || '');
       const destinationTitle = applyRescheduleTitleMarker(sourceTitleCore, 'from', movedFromLabel);
+      const calendarSyncKey = buildCalendarSyncKey();
 
       await client.query(
         `INSERT INTO monthly_schedule
