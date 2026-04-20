@@ -5,6 +5,7 @@
 `GET /api/schedule/week?week_start=YYYY-MM-DD` (Monday) returns:
 
 - Optional query **`student_id`**: when set to a numeric student id, the response includes **`studentBookedSlots`**: map of the same slot keys → `true` for hours where **that student** already has a non-cancelled lesson (matches `student_id`, or legacy rows with null `student_id` and the same trimmed name, case-insensitive). Used by **`BookLessonModal`** to disable “double booking” the same hour.
+- Optional query **`duration_minutes`** (30–120, default **50**, same clamp as **`POST /book`**): length of the hypothetical new lesson used for **owner’s-course overlap** preview (`ownerCourseConflictBlocked`). **`BookLessonModal`** sends **50** to match its booking payload.
 - **`slots`**: map of `YYYY-MM-DDTHH:MM` → **number of booked “lessons”** in that **JST hour** slot.
   - Each **distinct `event_id`** counts as **one** booking (group lessons with several students on the same calendar event count once).
   - Rows without a usable `event_id` fall back to one count per `(student_name, date, hour)` key.

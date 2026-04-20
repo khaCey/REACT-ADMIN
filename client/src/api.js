@@ -150,6 +150,11 @@ export const api = {
     if (opts.studentId != null && opts.studentId !== '') {
       params.set('student_id', String(opts.studentId));
     }
+    const dm =
+      opts.durationMinutes != null && opts.durationMinutes !== ''
+        ? Number(opts.durationMinutes)
+        : 50;
+    params.set('duration_minutes', String(Number.isFinite(dm) ? dm : 50));
     return fetchApi(`/schedule/week?${params.toString()}`, { cache: 'no-store' });
   },
   getBookingWarning: (date, time, studentId) => {

@@ -113,6 +113,11 @@ function isOwnerCoursePayment(payment) {
   return String(payment || '').toLowerCase().includes('owner');
 }
 
+/** Same clamp as POST /book for lesson duration (minutes). */
+function clampBookingDurationMinutes(raw) {
+  return Math.min(120, Math.max(30, Number(raw) || 50));
+}
+
 function normalizeTeacherNameForOwner(s) {
   return String(s || '').trim().toLowerCase();
 }
@@ -515,11 +520,12 @@ function hourInHalfOpenRange(hourLabel, startTime, endTime) {
 /**
  * Grid keys where an owner's-course lesson overlaps a candidate booking starting at that slot.
  * Uses the same interval overlap idea as POST /book (not only the lesson's start hour).
- * Candidate window length = max booking duration (120m) so the grid does not under-block vs POST.
+ * Candidate window length matches POST /book duration clamp (default 50m; optional GET duration_minutes).
  */
-function buildOwnerCourseSlotOccupiedForWeek(weekStart, scheduleRows) {
+function buildOwnerCourseSlotOccupiedForWeek(weekStart, scheduleRows, candidateDurationMinutes) {
   const occupied = {};
-  const candidateMs = 120 * 60 * 1000;
+  const durationMin = clampBookingDurationMinutes(candidateDurationMinutes);
+  const candidateMs = durationMin * 60 * 1000;
   for (const r of scheduleRows) {
     const kind = String(r.lesson_kind || '').trim();
     if (kind === 'staff_break') continue;
@@ -573,8 +579,8 @@ router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
  * - Optional `student_id`: response includes `studentBookedSlots` (slot keys this student
  *   already occupies in the week) for booking UI.
  * - `ownerCourseConflictBlocked`: when student has owner's course payment, slot keys where
- *   another owner's course lesson overlaps a candidate booking at that grid start (interval overlap,
- *   max 120m window — aligns with POST /book).
+ *   another owner's course lesson overlaps a candidate booking at that grid start (interval overlap;
+ *   candidate length matches POST /book: clamp(duration_minutes query, default 50, 30–120)).
  * - Rows for students in BOOKING_DISABLED_STUDENT_IDS are omitted (not counted in slots/slotMix).
  * - `breakRuleBlocked`: slot keys where spare capacity exists but no on-shift teacher can take another
  *   regular lesson without exceeding 5 consecutive JST teaching hours (see teacherBreakRules).
@@ -824,7 +830,11 @@ router.get('/week', async (req, res) => {
     }
 
     /** Hour slots where an owner's course lesson overlaps a new booking at that grid time (matches POST /book overlap). */
-    const ownerCourseSlotOccupied = buildOwnerCourseSlotOccupiedForWeek(weekStart, scheduleResult.rows);
+    const ownerCourseSlotOccupied = buildOwnerCourseSlotOccupiedForWeek(
+      weekStart,
+      scheduleResult.rows,
+      clampBookingDurationMinutes(req.query.duration_minutes)
+    );
 
     /** Owner's course (payment contains "owner"): only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
     const ownerShamBlocked = {};

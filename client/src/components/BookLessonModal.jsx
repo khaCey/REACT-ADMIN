@@ -13,6 +13,8 @@ import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
 import { studentIsDemoOrTrial } from '../config/booking'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
+/** Matches POST /schedule/book default `duration_minutes` and `/schedule/week` overlap preview. */
+const WEEK_SCHEDULE_DURATION_MINUTES = 50
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
@@ -423,8 +425,11 @@ export default function BookLessonModal({
 
   useEffect(() => {
     const sid = resolveBookStudentId(studentId, student)
-    const weekOpts = sid != null ? { studentId: sid } : undefined
-    const cacheKey = `${weekStartStr}::${sid ?? ''}`
+    const weekOpts =
+      sid != null
+        ? { studentId: sid, durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
+        : { durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
+    const cacheKey = `${weekStartStr}::${sid ?? ''}::${WEEK_SCHEDULE_DURATION_MINUTES}`
     const cached = weekCache[cacheKey]
     if (cached) {
       setSlots(cached.slots || {})
@@ -475,14 +480,17 @@ export default function BookLessonModal({
   useEffect(() => {
     // Preload current + next month (JST) so moving across weeks feels seamless.
     const sid = resolveBookStudentId(studentId, student)
-    const weekOpts = sid != null ? { studentId: sid } : undefined
+    const weekOpts =
+      sid != null
+        ? { studentId: sid, durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
+        : { durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
     const weekStarts = getWeekStartsCoveringTwoMonthsJst()
     if (weekStarts.length === 0) return
 
     let cancelled = false
     ;(async () => {
       for (const ws of weekStarts) {
-        const cacheKey = `${ws}::${sid ?? ''}`
+        const cacheKey = `${ws}::${sid ?? ''}::${WEEK_SCHEDULE_DURATION_MINUTES}`
         if (cancelled) return
         if (weekCache[cacheKey]) continue
         try {
@@ -651,7 +659,12 @@ export default function BookLessonModal({
         success('Lesson rescheduled')
         onBooked?.()
         const [weekData, latestRes] = await Promise.all([
-          api.getWeekSchedule(weekStartStr, { studentId: sidRaw }).catch(() => null),
+          api
+            .getWeekSchedule(weekStartStr, {
+              studentId: sidRaw,
+              durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES,
+            })
+            .catch(() => null),
           api.getStudentLatestByMonth(sidRaw).catch(() => null),
         ])
         if (weekData) {
@@ -785,7 +798,12 @@ export default function BookLessonModal({
       }
 
       const [weekData, latestRes] = await Promise.all([
-        api.getWeekSchedule(weekStartStr, { studentId: student_id }).catch(() => null),
+        api
+          .getWeekSchedule(weekStartStr, {
+            studentId: student_id,
+            durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES,
+          })
+          .catch(() => null),
         api.getStudentLatestByMonth(student_id).catch(() => null),
       ])
       if (weekData) {
@@ -819,8 +837,11 @@ export default function BookLessonModal({
 
   const refetchWeekSchedule = useCallback(async () => {
     const sid = resolveBookStudentId(studentId, student)
-    const weekOpts = sid != null ? { studentId: sid } : undefined
-    const cacheKey = `${weekStartStr}::${sid ?? ''}`
+    const weekOpts =
+      sid != null
+        ? { studentId: sid, durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
+        : { durationMinutes: WEEK_SCHEDULE_DURATION_MINUTES }
+    const cacheKey = `${weekStartStr}::${sid ?? ''}::${WEEK_SCHEDULE_DURATION_MINUTES}`
     try {
       const data = await api.getWeekSchedule(weekStartStr, weekOpts)
       setSlots(data.slots || {})
