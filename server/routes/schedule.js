@@ -226,6 +226,29 @@ function buildCanonicalLessonTitle(existingTitle, orderedStudents) {
   return preserveRescheduleTitleMarker(existingTitle || '', rewritten);
 }
 
+async function canonicalizeEventTitleById(eventId, { direction = null, label = '' } = {}, db = query) {
+  const rowsResult = await db(
+    `SELECT title
+       FROM monthly_schedule
+      WHERE event_id = $1
+      ORDER BY student_name ASC`,
+    [eventId]
+  );
+  const rows = rowsResult.rows || [];
+  if (rows.length === 0) return '';
+  const seedTitle = String(rows[0]?.title || '');
+  const orderedStudents = await getOrderedEventStudents(eventId, db);
+  const canonicalNoMarker =
+    orderedStudents.length > 1 && seedTitle
+      ? stripRescheduleTitleMarker(buildCanonicalLessonTitle(seedTitle, orderedStudents))
+      : stripRescheduleTitleMarker(seedTitle);
+  const finalTitle = direction
+    ? applyRescheduleTitleMarker(canonicalNoMarker, direction, label)
+    : canonicalNoMarker;
+  await db(`UPDATE monthly_schedule SET title = $2 WHERE event_id = $1`, [eventId, finalTitle]);
+  return finalTitle;
+}
+
 async function getPackTotalForBooking(studentId, monthKey, providedPackTotal, db = query) {
   const provided = parseInt(providedPackTotal, 10);
   let totalLessons = Number.isFinite(provided) && provided > 0 ? provided : 0;
@@ -1840,7 +1863,14 @@ router.post('/reschedule-linked', async (req, res) => {
       );
     }
 
-    const oldTitleUpdated = applyRescheduleTitleMarker(sourceAnchor.title || '', 'to', toDisplay || '???');
+    const sourceTitleSeed = sourceAnchor.title || title || '';
+    const sourceOrderedStudents = await getOrderedEventStudents(sourceEventId);
+    const canonicalBaseTitle =
+      sourceOrderedStudents.length > 1 && sourceTitleSeed
+        ? stripRescheduleTitleMarker(buildCanonicalLessonTitle(sourceTitleSeed, sourceOrderedStudents))
+        : stripRescheduleTitleMarker(sourceTitleSeed);
+    const canonicalSourceTitleUpdated = applyRescheduleTitleMarker(canonicalBaseTitle, 'to', toDisplay || '???');
+    const canonicalDestinationTitle = applyRescheduleTitleMarker(canonicalBaseTitle, 'from', movedFromLabel);
 
     const localEventId = buildLocalBookingEventId();
     const lessonKind = lessonKindForBooking;
@@ -1935,8 +1965,7 @@ router.post('/reschedule-linked', async (req, res) => {
           : String(locationLabel || '').trim().toLowerCase() === 'online'
             ? 'online'
             : 'cafe';
-      const sourceTitleCore = stripRescheduleTitleMarker(sourceRow.title || title || '');
-      const destinationTitle = applyRescheduleTitleMarker(sourceTitleCore, 'from', movedFromLabel);
+      const destinationTitle = canonicalDestinationTitle;
       const calendarSyncKey = buildCalendarSyncKey();
 
       const sourceGroupId =
@@ -2001,7 +2030,7 @@ router.post('/reschedule-linked', async (req, res) => {
         ]
       );
 
-      const sourceTitleUpdated = applyRescheduleTitleMarker(sourceRow.title || '', 'to', toDisplay || '???');
+      const sourceTitleUpdated = canonicalSourceTitleUpdated;
       await client.query(
         `UPDATE monthly_schedule
             SET status = 'rescheduled',
@@ -2020,6 +2049,16 @@ router.post('/reschedule-linked', async (req, res) => {
         [sourceEventId, sourceRowStudentName, localEventId, destinationStudentName, req.staff?.id ?? null]
       );
     }
+    await canonicalizeEventTitleById(
+      sourceEventId,
+      { direction: 'to', label: toDisplay || '???' },
+      client.query.bind(client)
+    );
+    await canonicalizeEventTitleById(
+      localEventId,
+      { direction: 'from', label: movedFromLabel },
+      client.query.bind(client)
+    );
     await client.query('COMMIT');
 
     const startIso = startDate.toISOString();
@@ -2032,7 +2071,7 @@ router.post('/reschedule-linked', async (req, res) => {
     if (shouldStyleSourceCalendar) {
       try {
         const styleUpd = await updateBookedLessonEventInGas(sourceEventId, {
-          title: oldTitleUpdated,
+          title: canonicalSourceTitleUpdated,
           colorId: '8',
           mergeStudentAdminDescription: { awaiting_reschedule_date: false },
         });
