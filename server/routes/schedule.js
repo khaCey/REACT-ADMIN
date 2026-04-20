@@ -1757,7 +1757,7 @@ router.post('/reschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
+        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date, group_id, group_sort_order,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
@@ -1939,14 +1939,24 @@ router.post('/reschedule-linked', async (req, res) => {
       const destinationTitle = applyRescheduleTitleMarker(sourceTitleCore, 'from', movedFromLabel);
       const calendarSyncKey = buildCalendarSyncKey();
 
+      const sourceGroupId =
+        sourceRow.group_id != null && Number.isFinite(Number(sourceRow.group_id))
+          ? Number(sourceRow.group_id)
+          : null;
+      const sourceGroupSortOrder =
+        sourceRow.group_sort_order != null && Number.isFinite(Number(sourceRow.group_sort_order))
+          ? Number(sourceRow.group_sort_order)
+          : null;
+
       await client.query(
         `INSERT INTO monthly_schedule
           (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
            calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
+           group_id, group_sort_order,
            reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
          VALUES
           ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
-           NULL, NULL, $14::date, $15)
+           $14, $15, NULL, NULL, $16::date, $17)
          ON CONFLICT (event_id, student_name)
          DO UPDATE SET
            title = EXCLUDED.title,
@@ -1964,6 +1974,8 @@ router.post('/reschedule-linked', async (req, res) => {
            calendar_sync_key = EXCLUDED.calendar_sync_key,
            calendar_sync_attempted_at = EXCLUDED.calendar_sync_attempted_at,
            calendar_synced_at = EXCLUDED.calendar_synced_at,
+          group_id = EXCLUDED.group_id,
+          group_sort_order = EXCLUDED.group_sort_order,
            reschedule_snapshot_to_date = COALESCE(monthly_schedule.reschedule_snapshot_to_date, EXCLUDED.reschedule_snapshot_to_date),
            reschedule_snapshot_to_time = COALESCE(monthly_schedule.reschedule_snapshot_to_time, EXCLUDED.reschedule_snapshot_to_time),
            reschedule_snapshot_from_date = COALESCE(monthly_schedule.reschedule_snapshot_from_date, EXCLUDED.reschedule_snapshot_from_date),
@@ -1982,6 +1994,8 @@ router.post('/reschedule-linked', async (req, res) => {
           resolvedStudentId,
           CALENDAR_SYNC_STATUS_PENDING,
           calendarSyncKey,
+          sourceGroupId,
+          sourceGroupSortOrder,
           srcDateForSnap,
           srcTimeJst,
         ]
