@@ -164,7 +164,9 @@ router.put('/:id/group', async (req, res) => {
       ) || requestedIds.length;
     if (expectedSize > 0 && requestedIds.length !== expectedSize) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: `This group requires exactly ${expectedSize} students.` });
+      const who =
+        expectedSize === 1 ? 'exactly 1 student' : `exactly ${expectedSize} students`;
+      return res.status(400).json({ error: `This group requires ${who}.` });
     }
 
     const selectedStudents = await client.query(

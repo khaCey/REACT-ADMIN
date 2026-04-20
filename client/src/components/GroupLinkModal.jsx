@@ -210,6 +210,7 @@ export default function GroupLinkModal({
     try {
       await onSave?.({
         memberIds: ids,
+        expectedSize,
       })
     } catch (err) {
       setError(err?.message || 'Failed to save group lesson')

@@ -246,16 +246,22 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     setGroupLinkModalOpen(true)
   }, [])
 
-  const handleSaveGroupLesson = useCallback(async ({ memberIds }) => {
+  const handleSaveGroupLesson = useCallback(async ({ memberIds, expectedSize }) => {
+    const size =
+      expectedSize ??
+      Math.max(
+        2,
+        parseInt(student?.人数 ?? student?.group_size, 10) || studentGroup?.expectedSize || 2
+      )
     const savedGroup = await api.saveStudentGroup(studentId, {
       member_ids: memberIds,
-      expected_size: student?.人数 ?? student?.group_size,
+      expected_size: size,
     })
     setStudentGroup(savedGroup || null)
     success('Group members saved')
     setGroupLinkModalOpen(false)
     await fetchData({ silent: true })
-  }, [fetchData, student, studentId, success])
+  }, [fetchData, student, studentGroup, studentId, success])
 
   useEffect(() => {
     if (studentId == null) return
