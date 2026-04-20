@@ -24,13 +24,41 @@ function paymentInsertParams(body, transactionId) {
   ];
 }
 
-/** Other members of the payer's linked group (same group_id), excluding the payer. */
-async function getOtherGroupMemberStudentIds(payerStudentId) {
-  const g = await query(`SELECT group_id FROM student_group_members WHERE student_id = $1 LIMIT 1`, [
-    payerStudentId,
-  ]);
-  if (g.rows.length === 0) return [];
-  const groupId = g.rows[0].group_id;
+function parseBodyStudentId(raw) {
+  if (raw == null || raw === '') return NaN;
+  const n = Number(String(raw).trim());
+  if (!Number.isFinite(n)) return NaN;
+  return Math.trunc(n);
+}
+
+/**
+ * Other members of the payer's linked group (same group_id), excluding the payer.
+ * @param {number} payerStudentId
+ * @param {number | null | undefined} preferredGroupId When set (e.g. from GET /students/:id/group), must match that group so POST matches the UI.
+ */
+async function getOtherGroupMemberStudentIds(payerStudentId, preferredGroupId = null) {
+  let groupId = null;
+  const pref =
+    preferredGroupId != null && preferredGroupId !== ''
+      ? parseBodyStudentId(preferredGroupId)
+      : NaN;
+  if (Number.isInteger(pref) && pref > 0) {
+    const member = await query(
+      `SELECT 1 FROM student_group_members WHERE group_id = $1 AND student_id = $2 LIMIT 1`,
+      [pref, payerStudentId]
+    );
+    if (member.rows.length > 0) {
+      groupId = pref;
+    }
+  }
+  if (groupId == null) {
+    const g = await query(
+      `SELECT group_id FROM student_group_members WHERE student_id = $1 ORDER BY group_id ASC LIMIT 1`,
+      [payerStudentId]
+    );
+    if (g.rows.length === 0) return [];
+    groupId = g.rows[0].group_id;
+  }
   const m = await query(
     `SELECT student_id FROM student_group_members WHERE group_id = $1 AND student_id <> $2 ORDER BY student_id`,
     [groupId, payerStudentId]
@@ -66,14 +94,14 @@ router.post('/', async (req, res) => {
     const body = req.body;
     const replicate =
       body.replicate_to_linked_group === true || body.replicateToLinkedGroup === true;
-    const payerIdRaw = body['Student ID'] ?? body.student_id;
-    const payerId = typeof payerIdRaw === 'number' ? payerIdRaw : Number(payerIdRaw);
+    const payerId = parseBodyStudentId(body['Student ID'] ?? body.student_id);
+    const preferredGroupRaw = body.linked_group_id ?? body.linkedGroupId;
 
     const transactionId = body['Transaction ID'] || body.transaction_id || newTransactionId();
 
     const peerIds =
-      replicate && Number.isFinite(payerId) && Number.isInteger(payerId) && payerId >= 0
-        ? await getOtherGroupMemberStudentIds(payerId)
+      replicate && Number.isInteger(payerId) && payerId >= 0
+        ? await getOtherGroupMemberStudentIds(payerId, preferredGroupRaw)
         : [];
 
     if (!replicate || peerIds.length === 0) {

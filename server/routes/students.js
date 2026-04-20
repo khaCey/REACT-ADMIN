@@ -44,6 +44,7 @@ async function getStudentGroupPayload(studentId, db = query) {
        FROM student_group_members sgm
        INNER JOIN student_groups sg ON sg.id = sgm.group_id
       WHERE sgm.student_id = $1
+      ORDER BY sg.id ASC
       LIMIT 1`,
     [studentId]
   );

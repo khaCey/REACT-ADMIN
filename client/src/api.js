@@ -35,7 +35,7 @@ export const api = {
   deleteStudent: (id) => fetchApi(`/students/${id}`, { method: 'DELETE' }),
 
   getPayments: () => fetchApi('/payments'),
-  /** POST body may include `replicate_to_linked_group: true` to insert matching rows for other linked-group members. */
+  /** POST body may include `replicate_to_linked_group: true` and optional `linked_group_id` (from getStudentGroup) so replication matches the UI group. */
   addPayment: (data) => fetchApi('/payments', { method: 'POST', body: JSON.stringify(data) }),
   updatePayment: (id, data) => fetchApi(`/payments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePayment: (id) => fetchApi(`/payments/${id}`, { method: 'DELETE' }),

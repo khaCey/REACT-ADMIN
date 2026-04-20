@@ -44,6 +44,8 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [error, setError] = useState(null)
   const [studentGroupMembers, setStudentGroupMembers] = useState(null)
+  const [linkedGroupId, setLinkedGroupId] = useState(null)
+  const [groupFetchDone, setGroupFetchDone] = useState(true)
   const [replicateToLinkedGroup, setReplicateToLinkedGroup] = useState(false)
 
   const monthFromValue = (val) => {
@@ -91,17 +93,32 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
   useEffect(() => {
     if (mode !== 'add' || studentId == null) {
       setStudentGroupMembers(null)
+      setLinkedGroupId(null)
       setReplicateToLinkedGroup(false)
+      setGroupFetchDone(true)
       return
     }
+    setGroupFetchDone(false)
+    setLinkedGroupId(null)
+    setStudentGroupMembers(null)
     let cancelled = false
     api
       .getStudentGroup(studentId)
       .then((res) => {
-        if (!cancelled) setStudentGroupMembers(res?.members ?? null)
+        if (!cancelled) {
+          setStudentGroupMembers(res?.members ?? null)
+          const gid = res?.groupId
+          setLinkedGroupId(gid != null && Number.isFinite(Number(gid)) ? Number(gid) : null)
+        }
       })
       .catch(() => {
-        if (!cancelled) setStudentGroupMembers(null)
+        if (!cancelled) {
+          setStudentGroupMembers(null)
+          setLinkedGroupId(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGroupFetchDone(true)
       })
     return () => {
       cancelled = true
@@ -144,6 +161,9 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
       }
       if (mode === 'add' && replicateToLinkedGroup) {
         payload.replicate_to_linked_group = true
+        if (linkedGroupId != null && Number.isFinite(linkedGroupId)) {
+          payload.linked_group_id = linkedGroupId
+        }
       }
       if (mode === 'add') {
         const result = await api.addPayment(payload)
@@ -322,7 +342,10 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
             </select>
           </div>
         </div>
-        {mode === 'add' && Array.isArray(studentGroupMembers) && studentGroupMembers.length > 1 && (
+        {mode === 'add' && studentId != null && !groupFetchDone && (
+          <p className="px-4 pb-2 text-sm text-gray-500">Loading linked group…</p>
+        )}
+        {mode === 'add' && groupFetchDone && Array.isArray(studentGroupMembers) && studentGroupMembers.length > 1 && (
           <div className="px-4 pb-2">
             <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
               <input
@@ -354,7 +377,7 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
           </div>
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || (mode === 'add' && studentId != null && !groupFetchDone)}
             className="rounded-md bg-green-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 cursor-pointer"
           >
             {submitting ? 'Saving...' : 'Save'}
