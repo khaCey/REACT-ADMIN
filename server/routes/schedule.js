@@ -1402,9 +1402,10 @@ router.post('/book', async (req, res) => {
     }
     const lessonKind = lessonKindForBooking;
     const localEventId = buildLocalBookingEventId();
-    const calendarSyncKey = buildCalendarSyncKey();
     for (let index = 0; index < orderedStudents.length; index += 1) {
       const studentEntry = orderedStudents[index];
+      // One key per row: idx_monthly_schedule_calendar_sync_key is unique. GAS bookingKey still comes from rows[0] in sync.
+      const calendarSyncKey = buildCalendarSyncKey();
       await query(
         `INSERT INTO monthly_schedule
           (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
