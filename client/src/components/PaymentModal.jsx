@@ -106,15 +106,19 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
       .getStudentGroup(studentId)
       .then((res) => {
         if (!cancelled) {
-          setStudentGroupMembers(res?.members ?? null)
+          const members = res?.members ?? null
+          setStudentGroupMembers(members)
           const gid = res?.groupId
           setLinkedGroupId(gid != null && Number.isFinite(Number(gid)) ? Number(gid) : null)
+          // Default on when replication applies so staff do not need to opt in.
+          setReplicateToLinkedGroup(Array.isArray(members) && members.length > 1)
         }
       })
       .catch(() => {
         if (!cancelled) {
           setStudentGroupMembers(null)
           setLinkedGroupId(null)
+          setReplicateToLinkedGroup(false)
         }
       })
       .finally(() => {
