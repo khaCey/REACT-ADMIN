@@ -35,7 +35,14 @@ import staffRouter from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
-import { roundTeacherShiftStartEnd } from './lib/timezone.js';
+import {
+  bulkSyncCalendarsFromGasForStaffType,
+  getCurrentAndNextMonthJapanRange,
+  getMonthAndNextMonthJapanRange,
+  getStaffScheduleGasConfig,
+  normaliseGasEvents,
+  syncOneStaffCalendarFromGas,
+} from './lib/staffScheduleGasSync.js';
 import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
 import cron from 'node-cron';
 
@@ -527,92 +534,6 @@ app.delete('/api/admin/monthly-schedule/:eventId', requireAuth, requireAdmin, as
 });
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/** Normalize ISO string: if it has no timezone (Z or +HH:MM), treat as JST so we never depend on server local time. */
-function normalizeIsoToUtc(iso) {
-  if (!iso || typeof iso !== 'string') return null;
-  const s = iso.trim();
-  if (!s) return null;
-  const hasTz = /Z$/i.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
-  const toParse = hasTz ? s : s.replace(/\.\d{3}$/, '') + '+09:00';
-  const utcMs = new Date(toParse).getTime();
-  return Number.isNaN(utcMs) ? null : utcMs;
-}
-
-/** Parse ISO dateTime to Asia/Tokyo calendar date (YYYY-MM-DD) and time (HH:MM). Uses instant + 9h then day boundary so the date is correct for Japan. */
-function isoToTokyoDateAndTime(iso) {
-  const utcMs = normalizeIsoToUtc(iso);
-  if (utcMs == null) return null;
-  const jstMs = utcMs + JST_OFFSET_MS;
-  const jstDay = Math.floor(jstMs / MS_PER_DAY);
-  const d = new Date(jstDay * MS_PER_DAY);
-  const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  const hours = Math.floor((jstMs % MS_PER_DAY) / (60 * 60 * 1000));
-  const minutes = Math.floor((jstMs % (60 * 60 * 1000)) / (60 * 1000));
-  const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-  return { date: dateStr, time: timeStr };
-}
-
-/**
- * Current + next calendar month in Japan (Asia/Tokyo) for teacher schedule GAS fetch.
- * - timeMin/timeMax: first instant of current month JST through exclusive start of month-after-next (Calendar API style).
- * - rangeStart/rangeEnd: inclusive YYYY-MM-DD bounds for DELETE/replace in teacher_schedules.
- */
-function getCurrentAndNextMonthJapanRange() {
-  const now = new Date();
-  const jstMs = now.getTime() + JST_OFFSET_MS;
-  const jstDay = Math.floor(jstMs / MS_PER_DAY);
-  const d = new Date(jstDay * MS_PER_DAY);
-  const year = d.getUTCFullYear();
-  const month = d.getUTCMonth() + 1;
-  const timeMinUTC = Date.UTC(year, month - 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
-  const timeMaxUTC = Date.UTC(year, month + 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
-  const timeMinISO = new Date(timeMinUTC).toISOString();
-  const timeMaxISO = new Date(timeMaxUTC).toISOString();
-  const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
-  let nYear = year;
-  let nMonth = month + 1;
-  if (nMonth > 12) {
-    nMonth = 1;
-    nYear += 1;
-  }
-  const lastDayNext = new Date(Date.UTC(nYear, nMonth, 0)).getUTCDate();
-  const rangeEnd = `${nYear}-${String(nMonth).padStart(2, '0')}-${String(lastDayNext).padStart(2, '0')}`;
-  return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
-}
-
-/**
- * Month + next-month in JST for teacher schedule GAS fetch.
- * @param {string} yyyyMm - YYYY-MM
- */
-function getMonthAndNextMonthJapanRange(yyyyMm) {
-  if (!/^\d{4}-\d{2}$/.test(String(yyyyMm || '').trim())) {
-    return null;
-  }
-  const [yStr, mStr] = String(yyyyMm).split('-');
-  const year = parseInt(yStr, 10);
-  const month = parseInt(mStr, 10); // 1-12
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
-
-  // Calendar API style: timeMax is exclusive. For month M (1-based), the exclusive bound for M + next (2 months)
-  // is start of (M + 2). Since Date.UTC month is 0-based, that's (month + 1).
-  const timeMinUTC = Date.UTC(year, month - 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
-  const timeMaxUTC = Date.UTC(year, month + 1, 1, 0, 0, 0, 0) - JST_OFFSET_MS;
-  const timeMinISO = new Date(timeMinUTC).toISOString();
-  const timeMaxISO = new Date(timeMaxUTC).toISOString();
-
-  const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
-  let nYear = year;
-  let nMonth = month + 1; // next month (1-based)
-  if (nMonth > 12) {
-    nMonth = 1;
-    nYear += 1;
-  }
-  const lastDayNext = new Date(Date.UTC(nYear, nMonth, 0)).getUTCDate();
-  const rangeEnd = `${nYear}-${String(nMonth).padStart(2, '0')}-${String(lastDayNext).padStart(2, '0')}`;
-  return { timeMinISO, timeMaxISO, rangeStart, rangeEnd };
-}
 
 // Avoid calling GAS for all teachers repeatedly (e.g. multiple bookings in short bursts).
 const TEACHER_SCHEDULE_AUTO_FETCH_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -628,133 +549,16 @@ async function refreshTeacherSchedulesFromGASForMonth(yyyyMm) {
     return { ok: true, skipped: true, reason: 'throttled', yyyyMm };
   }
 
-  const { url, key } = getStaffScheduleGasConfig();
-  if (!url || !key) {
-    throw new Error('Missing STAFF_SCHEDULE_GAS_URL / STAFF_SCHEDULE_API_KEY for teacher schedule refresh');
-  }
-
-  const staffResult = await query(
-    `SELECT id, name, calendar_id FROM staff
-     WHERE staff_type = 'english_teacher'
-       AND calendar_id IS NOT NULL AND TRIM(calendar_id) != ''
-     ORDER BY name ASC`
-  );
-  const staffList = staffResult.rows;
-
-  let totalStored = 0;
-  const errors = [];
-
-  for (const staff of staffList) {
-    const calendarId = String(staff.calendar_id || '').trim();
-    const teacherName = staff.name;
-    if (!calendarId) continue;
-
-    const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(
-      range.timeMinISO
-    )}&timeMax=${encodeURIComponent(range.timeMaxISO)}`;
-
-    let json;
-    try {
-      const fetchRes = await fetch(gasUrl);
-      json = await fetchRes.json().catch(() => ({}));
-      if (!fetchRes.ok) {
-        errors.push({ staff: teacherName, error: `GAS responded with ${fetchRes.status}` });
-        continue;
-      }
-    } catch (err) {
-      errors.push({ staff: teacherName, error: err.message });
-      continue;
-    }
-
-    if (json?.error) {
-      errors.push({ staff: teacherName, error: json.error });
-      continue;
-    }
-
-    const events = normaliseGasEvents(json);
-    const rows = [];
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i];
-      const startRaw = ev.start?.dateTime || ev.start;
-      const endRaw = ev.end?.dateTime || ev.end;
-      if (!startRaw || !endRaw) continue;
-
-      const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
-      const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
-      const startParsed = isoToTokyoDateAndTime(startStr);
-      const endParsed = isoToTokyoDateAndTime(endStr);
-      if (!startParsed || !endParsed) continue;
-      if (isBreakEvent(ev)) continue;
-      if (isShortEvent(startParsed.time, endParsed.time)) continue;
-
-      const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
-      rows.push({ date: startParsed.date, start_time, end_time });
-    }
-
-    await query(
-      `DELETE FROM teacher_schedules
-       WHERE teacher_name = $1
-         AND date >= $2::date
-         AND date <= $3::date`,
-      [teacherName, range.rangeStart, range.rangeEnd]
-    );
-
-    for (const row of rows) {
-      await query(
-        `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time)
-         VALUES ($1::date, $2, $3::time, $4::time)
-         ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
-        [row.date, teacherName, row.start_time, row.end_time]
-      );
-      totalStored++;
-    }
-  }
+  const result = await bulkSyncCalendarsFromGasForStaffType('english_teacher', range);
 
   lastTeacherScheduleAutoFetchAtByMonth.set(yyyyMm, Date.now());
   return {
     ok: true,
     yyyyMm,
-    staffProcessed: staffList.length,
-    eventsStored: totalStored,
-    errors: errors.length > 0 ? errors : undefined,
+    staffProcessed: result.staffProcessed,
+    eventsStored: result.eventsStored,
+    errors: result.errors,
   };
-}
-
-/** Normalize GAS response to an array of events (raw array or { events } or { items }). */
-function normaliseGasEvents(json) {
-  if (Array.isArray(json)) return json;
-  if (json && Array.isArray(json.events)) return json.events;
-  if (json && Array.isArray(json.items)) return json.items;
-  return [];
-}
-
-/** Skip past break events (~1h) when storing teacher schedules. Summary contains "break" (case-insensitive). */
-function isBreakEvent(ev) {
-  const s = (ev.summary || '').trim().toLowerCase();
-  return s.includes('break');
-}
-
-/** Skip events that are 1 hour or less (likely breaks/short blocks) when storing teacher schedules. */
-function isShortEvent(startTime, endTime) {
-  const toMins = (t) => {
-    if (!t || typeof t !== 'string') return NaN;
-    const parts = String(t).trim().split(':').map(Number);
-    if (parts.length < 2) return NaN;
-    return (parts[0] || 0) * 60 + (parts[1] || 0);
-  };
-  const startM = toMins(startTime);
-  const endM = toMins(endTime);
-  if (Number.isNaN(startM) || Number.isNaN(endM)) return false;
-  let duration = endM - startM;
-  if (duration < 0) duration += 24 * 60;
-  return duration <= 65;
-}
-
-/** URL and key for staff-schedule GAS only. Use STAFF_SCHEDULE_GAS_URL so you do not call the student-schedule GAS (CALENDAR_POLL_URL). */
-function getStaffScheduleGasConfig() {
-  const url = (process.env.STAFF_SCHEDULE_GAS_URL || process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
-  const key = (process.env.STAFF_SCHEDULE_API_KEY || process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
-  return { url, key };
 }
 
 /** Admin: test GAS staff-schedule endpoint – returns URL, status, and response preview (no DB writes). */
@@ -825,100 +629,50 @@ app.get('/api/admin/test-gas', requireAuth, requireAdmin, async (req, res) => {
 /** Admin: fetch English teachers' schedules from GAS (by calendarId) and store in teacher_schedules. */
 app.post('/api/admin/fetch-staff-schedule', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { url, key } = getStaffScheduleGasConfig();
-    if (!url || !key) {
-      return res.status(400).json({
-        error: 'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for teacher calendar fetch, not the student-schedule endpoint.',
-      });
-    }
-
-    const staffResult = await query(
-      `SELECT id, name, calendar_id FROM staff
-       WHERE staff_type = 'english_teacher'
-         AND calendar_id IS NOT NULL AND TRIM(calendar_id) != ''
-       ORDER BY name ASC`
-    );
-    const staffList = staffResult.rows;
-
-    const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentAndNextMonthJapanRange();
-
-    let totalStored = 0;
-    const errors = [];
-
-    for (const staff of staffList) {
-      const calendarId = String(staff.calendar_id || '').trim();
-      const teacherName = staff.name;
-      if (!calendarId) continue;
-
-      const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
-      let json;
-      try {
-        const fetchRes = await fetch(gasUrl);
-        json = await fetchRes.json().catch(() => ({}));
-      } catch (err) {
-        errors.push({ staff: teacherName, error: err.message });
-        continue;
-      }
-      if (json.error) {
-        errors.push({ staff: teacherName, error: json.error });
-        continue;
-      }
-      const events = normaliseGasEvents(json);
-      if (events.length === 0 && !Array.isArray(json)) {
-        console.warn('[fetch-staff-schedule] GAS returned 0 events for', teacherName, '; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
-      }
-      const rows = [];
-      for (let i = 0; i < events.length; i++) {
-        const ev = events[i];
-        const startRaw = ev.start?.dateTime || ev.start;
-        const endRaw = ev.end?.dateTime || ev.end;
-        if (!startRaw || !endRaw) continue;
-        const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
-        const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
-        const startParsed = isoToTokyoDateAndTime(startStr);
-        const endParsed = isoToTokyoDateAndTime(endStr);
-        if (!startParsed || !endParsed) continue;
-        if (isBreakEvent(ev)) continue;
-        if (isShortEvent(startParsed.time, endParsed.time)) continue;
-        if (rows.length === 0) {
-          console.log('[fetch-staff-schedule]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
-        }
-        const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
-        rows.push({
-          date: startParsed.date,
-          start_time,
-          end_time,
-        });
-      }
-
-      await query(
-        `DELETE FROM teacher_schedules WHERE teacher_name = $1 AND date >= $2::date AND date <= $3::date`,
-        [teacherName, rangeStart, rangeEnd]
-      );
-      for (const row of rows) {
-        await query(
-          `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time)
-           VALUES ($1::date, $2, $3::time, $4::time)
-           ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
-          [row.date, teacherName, row.start_time, row.end_time]
-        );
-        totalStored++;
-      }
-    }
-
+    const result = await bulkSyncCalendarsFromGasForStaffType('english_teacher');
     res.json({
       ok: true,
-      staffProcessed: staffList.length,
-      eventsStored: totalStored,
-      errors: errors.length > 0 ? errors : undefined,
+      staffProcessed: result.staffProcessed,
+      eventsStored: result.eventsStored,
+      errors: result.errors,
     });
   } catch (err) {
     console.error('[admin/fetch-staff-schedule]', err.message);
-    res.status(500).json({ error: err.message });
+    const msg = err.message || 'Failed to fetch schedules';
+    if (/STAFF_SCHEDULE|CALENDAR_POLL/i.test(msg)) {
+      return res.status(400).json({
+        error:
+          'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for calendar fetch by calendarId.',
+      });
+    }
+    res.status(500).json({ error: msg });
   }
 });
 
-/** Admin/operator: fetch one staff member's schedule from GAS and store in teacher_schedules. */
+/** Admin: fetch Japanese staff (and legacy untyped) schedules from GAS; same GAS + teacher_schedules storage as teachers. */
+app.post('/api/admin/fetch-japanese-staff-schedule', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await bulkSyncCalendarsFromGasForStaffType('japanese_staff');
+    res.json({
+      ok: true,
+      staffProcessed: result.staffProcessed,
+      eventsStored: result.eventsStored,
+      errors: result.errors,
+    });
+  } catch (err) {
+    console.error('[admin/fetch-japanese-staff-schedule]', err.message);
+    const msg = err.message || 'Failed to fetch schedules';
+    if (/STAFF_SCHEDULE|CALENDAR_POLL/i.test(msg)) {
+      return res.status(400).json({
+        error:
+          'Set STAFF_SCHEDULE_GAS_URL and STAFF_SCHEDULE_API_KEY in .env (or CALENDAR_POLL_*). Use STAFF_SCHEDULE_* for calendar fetch by calendarId.',
+      });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+/** Admin: fetch one staff member's schedule from GAS and store in teacher_schedules. */
 app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const staffId = parseInt(req.params.id, 10);
@@ -931,77 +685,41 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
       });
     }
 
-    const staffResult = await query(
-      'SELECT id, name, calendar_id FROM staff WHERE id = $1',
-      [staffId]
-    );
+    const staffResult = await query('SELECT id, name, calendar_id FROM staff WHERE id = $1', [staffId]);
     const staff = staffResult.rows[0];
     if (!staff) return res.status(404).json({ error: 'Staff not found' });
 
     const calendarId = String(staff.calendar_id || '').trim();
     if (!calendarId) {
-      return res.status(400).json({ error: 'Staff has no calendar ID set. Add a calendar ID and save, then fetch schedule.' });
+      return res.status(400).json({
+        error: 'Staff has no calendar ID set. Add a calendar ID and save, then fetch schedule.',
+      });
     }
 
     const teacherName = staff.name;
     const { timeMinISO, timeMaxISO, rangeStart, rangeEnd } = getCurrentAndNextMonthJapanRange();
 
-    const gasUrl = `${url}?key=${encodeURIComponent(key)}&calendarId=${encodeURIComponent(calendarId)}&timeMin=${encodeURIComponent(timeMinISO)}&timeMax=${encodeURIComponent(timeMaxISO)}`;
-    const fetchRes = await fetch(gasUrl);
-    const contentType = fetchRes.headers.get('content-type') || '';
-    if (!fetchRes.ok) {
-      const body = await fetchRes.text();
-      console.warn('[fetch-staff-schedule/:id] GAS responded with', fetchRes.status, body.slice(0, 200));
-      return res.status(400).json({ error: `GAS returned ${fetchRes.status}. Use STAFF_SCHEDULE_GAS_URL for a Web App that lists teacher calendar events by calendarId (not the student-schedule GAS).` });
-    }
-    const json = await fetchRes.json().catch((e) => {
-      console.warn('[fetch-staff-schedule/:id] GAS response was not JSON:', e.message);
-      return {};
-    });
-    if (json.error) {
-      return res.status(400).json({ error: json.error });
-    }
-    const events = normaliseGasEvents(json);
-    if (events.length === 0 && !Array.isArray(json)) {
-      console.warn('[fetch-staff-schedule/:id] GAS returned 0 events; response keys:', Object.keys(json || {}).join(', '), '- use STAFF_SCHEDULE_GAS_URL for a GAS that returns teacher calendar events by calendarId');
-    }
-    const rows = [];
-    events.forEach((ev, i) => {
-      const startRaw = ev.start?.dateTime || ev.start;
-      const endRaw = ev.end?.dateTime || ev.end;
-      if (!startRaw || !endRaw) return;
-      const startStr = typeof startRaw === 'string' ? startRaw : startRaw?.dateTime ?? String(startRaw);
-      const endStr = typeof endRaw === 'string' ? endRaw : endRaw?.dateTime ?? String(endRaw);
-      const startParsed = isoToTokyoDateAndTime(startStr);
-      const endParsed = isoToTokyoDateAndTime(endStr);
-      if (!startParsed || !endParsed) return;
-      if (isBreakEvent(ev)) return;
-      if (isShortEvent(startParsed.time, endParsed.time)) return;
-      if (rows.length === 0) {
-        console.log('[fetch-staff-schedule/:id]', teacherName, 'first event: rawStart=', startStr, '-> parsed', startParsed.date, startParsed.time);
-      }
-      const { start_time, end_time } = roundTeacherShiftStartEnd(startParsed.time, endParsed.time);
-      rows.push({ date: startParsed.date, start_time, end_time });
+    const result = await syncOneStaffCalendarFromGas({
+      teacherName,
+      calendarId,
+      url,
+      key,
+      timeMinISO,
+      timeMaxISO,
+      rangeStart,
+      rangeEnd,
+      logFirstEvent: true,
     });
 
-    await query(
-      `DELETE FROM teacher_schedules WHERE teacher_name = $1 AND date >= $2::date AND date <= $3::date`,
-      [teacherName, rangeStart, rangeEnd]
-    );
-    for (const row of rows) {
-      await query(
-        `INSERT INTO teacher_schedules (date, teacher_name, start_time, end_time)
-         VALUES ($1::date, $2, $3::time, $4::time)
-         ON CONFLICT (date, teacher_name, start_time) DO UPDATE SET end_time = $4::time`,
-        [row.date, teacherName, row.start_time, row.end_time]
-      );
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error || 'Failed to fetch schedule' });
     }
 
     res.json({
       ok: true,
       staffId,
       teacherName,
-      eventsStored: rows.length,
+      eventsStored: result.eventsStored,
     });
   } catch (err) {
     console.error('[admin/fetch-staff-schedule/:id]', err.message);

@@ -40,6 +40,8 @@ export default function Admin() {
   const [clearError, setClearError] = useState('')
   const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
   const [fetchScheduleError, setFetchScheduleError] = useState('')
+  const [fetchJapaneseStaffScheduleLoading, setFetchJapaneseStaffScheduleLoading] = useState(false)
+  const [fetchJapaneseStaffScheduleError, setFetchJapaneseStaffScheduleError] = useState('')
   const [staffList, setStaffList] = useState([])
   const [fetchOneStaffId, setFetchOneStaffId] = useState('')
   const [fetchOneLoading, setFetchOneLoading] = useState(false)
@@ -288,7 +290,9 @@ export default function Admin() {
             Fetch Staff Schedule
           </h3>
           <p className="text-sm text-gray-600 mb-4">
-            Fetch English teachers&apos; schedules from their Google Calendars via GAS and save to the database. Uses each staff&apos;s calendar ID; replaces their shifts for the <strong>current and next calendar month</strong> (Japan time). Set <code className="bg-gray-100 px-1 rounded">STAFF_SCHEDULE_GAS_URL</code> in .env to the GAS that returns teacher calendar events (not the student-schedule GAS).
+            Fetch schedules from Google Calendar via GAS into <code className="bg-gray-100 px-1 rounded">teacher_schedules</code>.
+            English teachers and Japanese staff use the same GAS and env (<code className="bg-gray-100 px-1 rounded">STAFF_SCHEDULE_GAS_URL</code>); each row needs a calendar ID.
+            Replaces shifts for the <strong>current and next calendar month</strong> (Japan time).
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <label className="text-sm font-medium text-gray-700">Fetch one staff:</label>
@@ -376,35 +380,67 @@ export default function Admin() {
               )}
             </div>
           )}
-          <p className="text-sm text-gray-500 mb-3">Or fetch all English teachers at once:</p>
+          <p className="text-sm text-gray-500 mb-3">Bulk fetch from Google (current + next month, Japan):</p>
           {fetchScheduleError && <p className="text-sm text-red-600 mb-2">{fetchScheduleError}</p>}
-          <button
-            type="button"
-            onClick={async () => {
-              setFetchScheduleError('')
-              setFetchScheduleLoading(true)
-              try {
-                const res = await api.fetchStaffSchedule()
-                const msg = res.eventsStored != null
-                  ? `Fetched for ${res.staffProcessed ?? 0} staff, ${res.eventsStored} events stored.`
-                  : 'Fetch complete.'
-                if (res.errors?.length) {
-                  success(`${msg} ${res.errors.length} error(s).`)
-                } else {
-                  success(msg)
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <button
+              type="button"
+              onClick={async () => {
+                setFetchScheduleError('')
+                setFetchScheduleLoading(true)
+                try {
+                  const res = await api.fetchStaffSchedule()
+                  const msg = res.eventsStored != null
+                    ? `English teachers: ${res.staffProcessed ?? 0} staff, ${res.eventsStored} events stored.`
+                    : 'Fetch complete.'
+                  if (res.errors?.length) {
+                    success(`${msg} ${res.errors.length} error(s).`)
+                  } else {
+                    success(msg)
+                  }
+                } catch (err) {
+                  setFetchScheduleError(err.message || 'Failed to fetch teacher schedules')
+                } finally {
+                  setFetchScheduleLoading(false)
                 }
-              } catch (err) {
-                setFetchScheduleError(err.message || 'Failed to fetch staff schedule')
-              } finally {
-                setFetchScheduleLoading(false)
-              }
-            }}
-            disabled={fetchScheduleLoading}
-            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-            {fetchScheduleLoading ? 'Fetching…' : 'Fetch Staff Schedule (all)'}
-          </button>
+              }}
+              disabled={fetchScheduleLoading}
+              className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
+              {fetchScheduleLoading ? 'Fetching…' : 'Fetch English teachers (all)'}
+            </button>
+            {fetchJapaneseStaffScheduleError && (
+              <span className="text-sm text-red-600">{fetchJapaneseStaffScheduleError}</span>
+            )}
+            <button
+              type="button"
+              onClick={async () => {
+                setFetchJapaneseStaffScheduleError('')
+                setFetchJapaneseStaffScheduleLoading(true)
+                try {
+                  const res = await api.fetchJapaneseStaffSchedule()
+                  const msg = res.eventsStored != null
+                    ? `Japanese staff: ${res.staffProcessed ?? 0} staff, ${res.eventsStored} events stored.`
+                    : 'Fetch complete.'
+                  if (res.errors?.length) {
+                    success(`${msg} ${res.errors.length} error(s).`)
+                  } else {
+                    success(msg)
+                  }
+                } catch (err) {
+                  setFetchJapaneseStaffScheduleError(err.message || 'Failed to fetch Japanese staff schedules')
+                } finally {
+                  setFetchJapaneseStaffScheduleLoading(false)
+                }
+              }}
+              disabled={fetchJapaneseStaffScheduleLoading}
+              className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {fetchJapaneseStaffScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
+              {fetchJapaneseStaffScheduleLoading ? 'Fetching…' : 'Fetch Japanese staff (all)'}
+            </button>
+          </div>
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">

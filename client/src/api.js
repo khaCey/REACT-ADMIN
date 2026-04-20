@@ -81,6 +81,9 @@ export const api = {
     ),
   fetchStaffSchedule: () =>
     fetchApi('/admin/fetch-staff-schedule', { method: 'POST' }),
+  /** Japanese staff + legacy untyped rows with calendar_id (same GAS as English teachers). */
+  fetchJapaneseStaffSchedule: () =>
+    fetchApi('/admin/fetch-japanese-staff-schedule', { method: 'POST' }),
   fetchStaffScheduleForStaff: (staffId) =>
     fetchApi(`/admin/fetch-staff-schedule/${staffId}`, { method: 'POST' }),
   testGas: (calendarId) =>
