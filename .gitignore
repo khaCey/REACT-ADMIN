@@ -13,3 +13,6 @@ student-admin-*.json
 
 # Separate GAS project (local copy only; deploy from Apps Script)
 Calendar API/
+
+# Migration data CSVs
+migration-data/**/*.csv
