@@ -207,6 +207,8 @@ export default function Staff() {
   const [fetchScheduleStaffId, setFetchScheduleStaffId] = useState('')
   const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
   const [fetchScheduleError, setFetchScheduleError] = useState('')
+  const [fetchJapaneseBulkLoading, setFetchJapaneseBulkLoading] = useState(false)
+  const [fetchJapaneseBulkError, setFetchJapaneseBulkError] = useState('')
   const [shiftLog, setShiftLog] = useState([])
   const [weekSlots, setWeekSlots] = useState([])
   const [weekStart, setWeekStart] = useState(() => {
@@ -242,7 +244,7 @@ export default function Staff() {
   const loadWeek = useCallback(() => {
     setLoadingShifts(true)
     setShiftLoadError(null)
-    api
+    return api
       .getShiftsWeek(weekStart)
       .then((res) => {
         setWeekSlots(res.week || [])
@@ -273,7 +275,7 @@ export default function Staff() {
 
   const loadTeacherCalendar = useCallback(() => {
     setTeacherCalendarLoading(true)
-    api
+    return api
       .getTeacherCalendar(weekStart)
       .then((res) => setTeacherCalendarEvents(res.events || []))
       .catch(() => setTeacherCalendarEvents([]))
@@ -526,6 +528,46 @@ export default function Staff() {
                     Read-only view of staff on shift (same people as the assignment table: Japanese staff and legacy
                     rows, not English teachers). Colors match each person&apos;s schedule color from Edit Staff.
                   </p>
+                  {isAdmin && (
+                    <div className="flex flex-wrap items-center gap-3 mb-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setFetchJapaneseBulkError('')
+                          setFetchJapaneseBulkLoading(true)
+                          try {
+                            const res = await api.fetchJapaneseStaffSchedule()
+                            const msg =
+                              res.eventsStored != null
+                                ? `Japanese staff: ${res.staffProcessed ?? 0} calendars, ${res.eventsStored} blocks stored.`
+                                : 'Fetch complete.'
+                            if (res.errors?.length) {
+                              success(`${msg} ${res.errors.length} error(s).`)
+                            } else {
+                              success(msg)
+                            }
+                            await Promise.all([loadWeek(), loadTeacherCalendar()])
+                          } catch (err) {
+                            setFetchJapaneseBulkError(err.message || 'Failed to fetch Japanese staff schedules')
+                          } finally {
+                            setFetchJapaneseBulkLoading(false)
+                          }
+                        }}
+                        disabled={fetchJapaneseBulkLoading}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {fetchJapaneseBulkLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
+                        {fetchJapaneseBulkLoading ? 'Fetching…' : 'Fetch Japanese staff from Google (all)'}
+                      </button>
+                      <span className="text-xs text-gray-500">
+                        Same as Admin → uses calendar IDs on Japanese / legacy staff rows. Refreshes this week&apos;s
+                        roster and the teacher calendar below.
+                      </span>
+                      {fetchJapaneseBulkError && (
+                        <span className="text-sm text-red-600">{fetchJapaneseBulkError}</span>
+                      )}
+                    </div>
+                  )}
                   {shiftRosterBlocks.length === 0 ? (
                     <div className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500">
                       No shifts assigned for this week.
@@ -807,21 +849,29 @@ export default function Staff() {
             </div>
             {isAdmin && (
               <div className="flex flex-wrap items-center gap-3 mb-4">
-                <label className="text-sm font-medium text-gray-700">Fetch schedule for:</label>
+                <label className="text-sm font-medium text-gray-700">Fetch from Google Calendar:</label>
                 <select
                   value={fetchScheduleStaffId}
                   onChange={(e) => {
                     setFetchScheduleStaffId(e.target.value)
                     setFetchScheduleError('')
                   }}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[200px]"
                 >
                   <option value="">— Select staff —</option>
-                  {staffList.filter((s) => s.calendar_id && s.staff_type === 'english_teacher').map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
+                  {staffList
+                    .filter((s) => s.active !== false && String(s.calendar_id || '').trim() !== '')
+                    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.staff_type === 'english_teacher'
+                          ? ' (English)'
+                          : s.staff_type === 'japanese_staff'
+                            ? ' (Japanese)'
+                            : ''}
+                      </option>
+                    ))}
                 </select>
                 <button
                   type="button"
@@ -837,7 +887,7 @@ export default function Staff() {
                           ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
                           : 'Schedule fetched.'
                       success(msg)
-                      loadTeacherCalendar()
+                      await Promise.all([loadTeacherCalendar(), loadWeek()])
                     } catch (err) {
                       setFetchScheduleError(err.message || 'Failed to fetch schedule')
                     } finally {
