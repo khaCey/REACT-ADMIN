@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -177,10 +177,16 @@ export default function Dashboard() {
   const [todayDate, setTodayDate] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const hasLoadedOnceRef = useRef(false)
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true)
+  const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     setError('')
     const monthsBack = chartRangeYears * 12 - 1
     const from = subtractMonths(chartEndMonth, monthsBack)
@@ -199,12 +205,17 @@ export default function Dashboard() {
       setTodayLessons([])
       setTodayDate('')
     } finally {
-      setLoading(false)
+      if (silent) {
+        setRefreshing(false)
+      } else {
+        setLoading(false)
+      }
     }
   }, [chartEndMonth, chartRangeYears])
 
   useEffect(() => {
-    fetchDashboard()
+    fetchDashboard({ silent: hasLoadedOnceRef.current })
+    hasLoadedOnceRef.current = true
   }, [fetchDashboard])
 
   const showPaymentBadges = (lesson) =>
@@ -224,6 +235,7 @@ export default function Dashboard() {
           <LayoutDashboard className="w-6 h-6 text-green-600" />
           Dashboard
         </h2>
+        {refreshing && <span className="text-sm text-gray-500">Refreshing…</span>}
       </div>
 
       {error && (
@@ -231,7 +243,7 @@ export default function Dashboard() {
           <span>{error}</span>
           <button
             type="button"
-            onClick={fetchDashboard}
+            onClick={() => fetchDashboard({ silent: true })}
             className="text-red-700 underline font-medium"
           >
             Retry
@@ -423,8 +435,8 @@ export default function Dashboard() {
         <StudentDetailsModal
           studentId={selectedStudentId}
           onClose={() => setSelectedStudentId(null)}
-          onStudentDeleted={fetchDashboard}
-          onStudentUpdated={fetchDashboard}
+          onStudentDeleted={() => fetchDashboard({ silent: true })}
+          onStudentUpdated={() => fetchDashboard({ silent: true })}
         />
       )}
     </div>
