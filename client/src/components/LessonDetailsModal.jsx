@@ -21,6 +21,7 @@ export default function LessonDetailsModal({
   onClose,
   onCancel,
   onUncancel,
+  onUnreschedule,
   onOpenRescheduleChoice,
   onSelectRescheduleDate,
   onSyncWithCalendar,
@@ -29,23 +30,27 @@ export default function LessonDetailsModal({
   const [syncing, setSyncing] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [uncancelConfirmOpen, setUncancelConfirmOpen] = useState(false)
+  const [unrescheduleConfirmOpen, setUnrescheduleConfirmOpen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [uncancelling, setUncancelling] = useState(false)
+  const [unrescheduling, setUnrescheduling] = useState(false)
   useEffect(() => {
     setSyncing(false)
     setCancelConfirmOpen(false)
     setUncancelConfirmOpen(false)
+    setUnrescheduleConfirmOpen(false)
     setCancelling(false)
     setUncancelling(false)
+    setUnrescheduling(false)
   }, [lesson?.eventID])
   useEffect(() => {
     if (!lesson) return
     const onKey = (e) => {
-      if (e.key === 'Escape' && !cancelConfirmOpen && !uncancelConfirmOpen) onClose()
+      if (e.key === 'Escape' && !cancelConfirmOpen && !uncancelConfirmOpen && !unrescheduleConfirmOpen) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen])
+  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen])
 
   if (!lesson) return null
 
@@ -86,6 +91,11 @@ export default function LessonDetailsModal({
   const canReschedule =
     !isTransientBusy && !isUnscheduled && !isCancelled && calendarSyncStatus === 'synced'
   const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
+  const canUnreschedule =
+    !isTransientBusy &&
+    isCancelled &&
+    !!lesson?.rescheduledTo?.eventID &&
+    !lesson?.optimisticRescheduledTo
   const hasExtraNotes =
     !!lesson?.optimisticRescheduledTo ||
     !!lesson?.rescheduledTo ||
@@ -103,7 +113,7 @@ export default function LessonDetailsModal({
     ? lesson.time.replace(':', '：')
     : 'Not specified'
 
-  const confirmDialogOpen = cancelConfirmOpen || uncancelConfirmOpen
+  const confirmDialogOpen = cancelConfirmOpen || uncancelConfirmOpen || unrescheduleConfirmOpen
 
   const handleBackdropClick = (e) => {
     if (confirmDialogOpen) return
@@ -138,6 +148,18 @@ export default function LessonDetailsModal({
       }
     } finally {
       setUncancelling(false)
+    }
+  }
+  const runUnreschedule = async () => {
+    setUnrescheduling(true)
+    try {
+      const ok = await onUnreschedule?.(lesson, student)
+      if (ok !== false) {
+        setUnrescheduleConfirmOpen(false)
+        onClose()
+      }
+    } finally {
+      setUnrescheduling(false)
     }
   }
   const handleRemove = async () => {
@@ -254,6 +276,16 @@ export default function LessonDetailsModal({
                 Select date…
               </button>
             )}
+            {canUnreschedule && (
+              <button
+                type="button"
+                onClick={() => setUnrescheduleConfirmOpen(true)}
+                disabled={confirmDialogOpen || isTransientBusy}
+                className="rounded-md border border-violet-600 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Unreschedule
+              </button>
+            )}
             {canSyncWithCalendar && (
               <button
                 type="button"
@@ -317,6 +349,21 @@ export default function LessonDetailsModal({
         onConfirm={runUncancel}
         onClose={() => {
           if (!uncancelling) setUncancelConfirmOpen(false)
+        }}
+      />
+    )}
+    {unrescheduleConfirmOpen && (
+      <ConfirmActionModal
+        title="Undo reschedule"
+        message="Remove the new lesson slot and restore this lesson at its original time?"
+        confirmLabel="Unreschedule"
+        cancelLabel="Back"
+        destructive
+        confirming={unrescheduling}
+        busyConfirmLabel="Undoing…"
+        onConfirm={runUnreschedule}
+        onClose={() => {
+          if (!unrescheduling) setUnrescheduleConfirmOpen(false)
         }}
       />
     )}

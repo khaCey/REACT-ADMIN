@@ -270,18 +270,18 @@ function shouldSyncCalendarForRows(rows) {
 }
 
 /**
- * GAS calendar delete on remove: only when every active row explicitly says synced.
- * Uses .every (not .some) so group lessons do not delete from Calendar if any row is pending/failed.
- * Empty/null status is not synced.
+ * GAS calendar delete on remove: only when every row in the checked set explicitly says synced.
+ * Prefers non-cancelled rows (group lessons: do not delete shared Calendar unless all remaining students qualify).
+ * If every non-local row is cancelled (e.g. linked-reschedule source), fall back to those rows so remove still deletes Calendar.
  */
 function rowsIndicateExplicitCalendarSyncedForGasDelete(rows) {
-  const relevant = (rows || []).filter(
-    (r) =>
-      !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
-      String(r?.status || '').toLowerCase() !== 'cancelled'
+  const nonLocal = (rows || []).filter(
+    (r) => !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
   );
-  if (relevant.length === 0) return false;
-  return relevant.every(
+  if (nonLocal.length === 0) return false;
+  const active = nonLocal.filter((r) => String(r?.status || '').toLowerCase() !== 'cancelled');
+  const toCheck = active.length > 0 ? active : nonLocal;
+  return toCheck.every(
     (r) => String(r?.calendar_sync_status || '').trim().toLowerCase() === CALENDAR_SYNC_STATUS_SYNCED
   );
 }
@@ -1998,6 +1998,210 @@ router.post('/reschedule-linked', async (req, res) => {
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
       ...(shouldStyleSourceCalendar && calendarSourceGraphiteOk ? { calendar_source_graphite_ok: true } : {}),
       ...(calendarSourceStyleError ? { calendar_source_style_error: calendarSourceStyleError } : {}),
+    });
+  } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+/** Undo linked reschedule: remove destination row(s), delete link, restore source to scheduled; Calendar: delete dest event if synced, restore source styling. */
+router.post('/unreschedule-linked', async (req, res) => {
+  let client;
+  try {
+    const { source_event_id, student_id, source_student_name } = req.body || {};
+    const sourceEventId = String(source_event_id || '').trim();
+    const studentIdNum = Number(student_id);
+    if (!sourceEventId) return res.status(400).json({ error: 'source_event_id is required' });
+    if (!Number.isFinite(studentIdNum)) return res.status(400).json({ error: 'student_id must be a number' });
+
+    const studentResult = await query('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
+    if (studentResult.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
+    const studentName = String(studentResult.rows[0].name || '').trim();
+    const normalizedStudentName = studentName.replace(/\s+/g, ' ').trim();
+    const normalizedSourceName = String(source_student_name || '').replace(/\s+/g, ' ').trim();
+    const studentParts = normalizedStudentName.split(' ').filter(Boolean);
+    const swappedStudentName =
+      studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
+    const candidateRows = (
+      await query(
+        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
+                to_char(date, 'YYYY-MM-DD') AS src_date_str,
+                to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
+         FROM monthly_schedule
+         WHERE event_id = $1`,
+        [sourceEventId]
+      )
+    ).rows;
+    if (candidateRows.length === 0) {
+      return res.status(404).json({ error: 'Source lesson not found for student' });
+    }
+    const nameCandidates = [normalizedStudentName, swappedStudentName, normalizedSourceName].filter(Boolean);
+    const byStudentId = candidateRows.find((r) => Number(r.student_id) === studentIdNum);
+    const byName = candidateRows.find((r) => {
+      const n = String(r.student_name || '').replace(/\s+/g, ' ').trim();
+      return nameCandidates.includes(n);
+    });
+    const source = byStudentId || byName || (candidateRows.length === 1 ? candidateRows[0] : null);
+    if (!source) {
+      return res.status(404).json({ error: 'Source lesson not found for student' });
+    }
+    const sourceStudentName = String(source.student_name || source_student_name || '').trim();
+    if (!sourceStudentName) return res.status(400).json({ error: 'Source student name is missing' });
+
+    const linkRes = await query(
+      `SELECT * FROM reschedules WHERE from_event_id = $1 AND from_student_name = $2`,
+      [sourceEventId, sourceStudentName]
+    );
+    if (!linkRes.rows[0]) {
+      return res.status(400).json({ error: 'No linked reschedule found for this lesson' });
+    }
+    const link = linkRes.rows[0];
+    const toEventId = String(link.to_event_id || '').trim();
+    const toStudentName = String(link.to_student_name || '').trim();
+    if (!toEventId) return res.status(400).json({ error: 'Invalid reschedule link (missing destination)' });
+
+    const destRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [toEventId])).rows;
+    if (destRows.length === 0) {
+      return res.status(400).json({ error: 'Destination lesson not found; link may be stale' });
+    }
+    if (!destRows.some((r) => String(r.student_name || '').trim() === toStudentName)) {
+      return res.status(400).json({ error: 'Destination lesson does not match reschedule link' });
+    }
+
+    const sourceRowsFullBefore = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const shouldStyleSourceCalendar =
+      isBookingGasEnabled() &&
+      shouldSyncCalendarForRows(sourceRowsFullBefore) &&
+      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX);
+
+    if (isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(destRows)) {
+      const del = await deleteBookedLessonEventInGas(toEventId);
+      if (!del.ok) {
+        return res.status(502).json({
+          error: del.error || 'Failed to remove destination lesson from Google Calendar',
+          event_id: toEventId,
+        });
+      }
+    }
+
+    const sourceRowFull = (
+      await query('SELECT * FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
+        sourceEventId,
+        sourceStudentName,
+      ])
+    ).rows[0];
+    if (!sourceRowFull) return res.status(404).json({ error: 'Source row not found' });
+
+    const restoredTitle = stripRescheduleTitleMarker(sourceRowFull.title || '');
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('DELETE FROM monthly_schedule WHERE event_id = $1', [toEventId]);
+    await client.query(
+      `DELETE FROM reschedules WHERE from_event_id = $1 AND from_student_name = $2`,
+      [sourceEventId, sourceStudentName]
+    );
+    await client.query(
+      `UPDATE monthly_schedule SET
+         status = 'scheduled',
+         awaiting_reschedule_date = FALSE,
+         title = $3,
+         reschedule_snapshot_to_date = NULL,
+         reschedule_snapshot_to_time = NULL,
+         reschedule_snapshot_from_date = NULL,
+         reschedule_snapshot_from_time = NULL
+       WHERE event_id = $1 AND student_name = $2`,
+      [sourceEventId, sourceStudentName, restoredTitle]
+    );
+    await client.query('COMMIT');
+
+    for (const oldRow of destRows) {
+      await logChange(
+        {
+          entityType: 'monthly_schedule',
+          entityKey: `${toEventId}_${oldRow.student_name}`,
+          action: 'delete',
+          oldData: oldRow,
+          newData: null,
+        },
+        req
+      );
+    }
+    const srcAfter = (
+      await query(`SELECT * FROM monthly_schedule WHERE event_id = $1 AND student_name = $2`, [
+        sourceEventId,
+        sourceStudentName,
+      ])
+    ).rows[0];
+    if (srcAfter) {
+      await logChange(
+        {
+          entityType: 'monthly_schedule',
+          entityKey: `${sourceEventId}_${sourceStudentName}`,
+          action: 'update',
+          oldData: sourceRowFull,
+          newData: srcAfter,
+        },
+        req
+      );
+    }
+
+    let calendarSourceRestoreError = null;
+    if (shouldStyleSourceCalendar) {
+      try {
+        const activeForTitle = (
+          await query(
+            `SELECT m.*, s.name AS canonical_student_name, s.status AS student_status,
+                    s.payment AS student_payment, s.is_child AS student_is_child
+               FROM monthly_schedule m
+               LEFT JOIN students s ON s.id = m.student_id
+              WHERE m.event_id = $1
+                AND (m.status IS NULL OR LOWER(TRIM(m.status)) <> 'cancelled')
+              ORDER BY COALESCE(m.group_sort_order, 2147483647) ASC,
+                       LOWER(COALESCE(s.name, m.student_name)) ASC`,
+            [sourceEventId]
+          )
+        ).rows;
+        if (activeForTitle.length > 0) {
+          const orderedStudents = activeForTitle.map((entry, index) => ({
+            id: entry.student_id != null ? Number(entry.student_id) : null,
+            name: String(entry.canonical_student_name || entry.student_name || '').trim(),
+            status: entry.student_status,
+            payment: entry.student_payment,
+            is_child: !!entry.student_is_child,
+            sort_order: parseInt(entry.group_sort_order, 10) || index + 1,
+          }));
+          const gasTitle =
+            activeForTitle.length > 1
+              ? buildCanonicalLessonTitle(activeForTitle[0]?.title || '', orderedStudents)
+              : stripRescheduleTitleMarker(activeForTitle[0]?.title || '');
+          const lk = String(activeForTitle[0]?.lesson_kind || 'regular').toLowerCase();
+          const cid = bookingEventColorId(lk);
+          const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
+          const styleUpd = cid
+            ? await updateBookedLessonEventInGas(sourceEventId, { title: gasTitle, colorId: cid, ...merge })
+            : await updateBookedLessonEventInGas(sourceEventId, { title: gasTitle, clearColor: true, ...merge });
+          if (!styleUpd.ok) {
+            calendarSourceRestoreError = styleUpd.error || 'Calendar source restore failed';
+            console.error('[unreschedule-linked] source calendar restore failed:', calendarSourceRestoreError);
+          }
+        }
+      } catch (err) {
+        calendarSourceRestoreError = err?.message || String(err);
+        console.error('[unreschedule-linked] source calendar restore threw:', calendarSourceRestoreError);
+      }
+    }
+
+    res.status(200).json({
+      ok: true,
+      source_event_id: sourceEventId,
+      removed_event_id: toEventId,
+      ...(calendarSourceRestoreError ? { calendar_source_restore_error: calendarSourceRestoreError } : {}),
     });
   } catch (err) {
     if (client) {

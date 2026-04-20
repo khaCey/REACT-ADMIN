@@ -559,6 +559,58 @@ export default function LessonsThisMonth({
       return false
     }
   }
+  const handleUnreschedule = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return
+    if (studentId == null) return
+    setActionError(null)
+    applyOptimisticMutation({
+      type: 'patch_lesson',
+      eventID: lesson.eventID,
+      patch: {
+        transientStatus: 'sync_pending',
+        calendarSyncError: null,
+      },
+    })
+    try {
+      await api.unrescheduleLinkedLesson({
+        source_event_id: lesson.eventID,
+        student_id: studentId,
+        source_student_name: student?.Name || student?.name || '',
+      })
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: undefined,
+          status: 'scheduled',
+          awaitingRescheduleDate: false,
+          rescheduledTo: undefined,
+          optimisticRescheduledTo: undefined,
+          calendarSyncStatus: 'synced',
+          calendarSyncError: null,
+        },
+      })
+      success('Reschedule undone')
+      try {
+        await refetchSilent()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Undone, but refresh failed')
+      }
+      return true
+    } catch (e) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID: lesson.eventID,
+        patch: {
+          transientStatus: 'sync_failed',
+          calendarSyncStatus: 'failed',
+          calendarSyncError: e.message,
+        },
+      })
+      setActionError(e.message)
+      return false
+    }
+  }
   const handleUncancel = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
@@ -889,6 +941,7 @@ export default function LessonsThisMonth({
           onClose={() => { setSelectedLesson(null); setActionError(null) }}
           onCancel={handleCancel}
           onUncancel={handleUncancel}
+          onUnreschedule={handleUnreschedule}
           onOpenRescheduleChoice={handleOpenRescheduleChoice}
           onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
