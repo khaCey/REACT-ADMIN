@@ -36,6 +36,13 @@ function addOneMonthYyyyMm(yyyyMm) {
 
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
+  calendar_pending: {
+    accent: 'bg-sky-600',
+    bg: 'bg-sky-50',
+    dot: 'bg-sky-600',
+    hoverRing: 'hover:ring-sky-500/60',
+    label: 'Pending',
+  },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60', label: 'Cancelled' },
   reschedule_date_tbd: {
     accent: 'bg-orange-500',
@@ -44,12 +51,12 @@ const CARD_STYLES = {
     hoverRing: 'hover:ring-orange-500/60',
     label: 'Date TBD',
   },
-  rescheduled: { accent: 'bg-amber-500', bg: 'bg-slate-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
-  demo: { accent: 'bg-orange-500', bg: 'bg-orange-50', dot: 'bg-orange-500', hoverRing: 'hover:ring-orange-500/60', label: 'Demo' },
-  unscheduled: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Unscheduled' },
+  rescheduled: { accent: 'bg-amber-600', bg: 'bg-amber-50', dot: 'bg-amber-600', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
+  demo: { accent: 'bg-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-600', hoverRing: 'hover:ring-violet-500/60', label: 'Demo' },
+  unscheduled: { accent: 'bg-rose-600', bg: 'bg-rose-50', dot: 'bg-rose-600', hoverRing: 'hover:ring-rose-500/60', label: 'Unscheduled' },
   deleting: { accent: 'bg-slate-700', bg: 'bg-slate-100', dot: 'bg-slate-700', hoverRing: 'hover:ring-slate-600/60', label: 'Deleting...' },
-  sync_pending: { accent: 'bg-red-500', bg: 'bg-red-100', dot: 'bg-red-500', hoverRing: 'hover:ring-red-500/60', label: 'Syncing' },
-  sync_failed: { accent: 'bg-red-600', bg: 'bg-red-100', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
+  sync_pending: { accent: 'bg-indigo-600', bg: 'bg-indigo-50', dot: 'bg-indigo-600', hoverRing: 'hover:ring-indigo-500/60', label: 'Syncing' },
+  sync_failed: { accent: 'bg-red-600', bg: 'bg-red-50', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
 }
 
 const CARD_SIZES = {
@@ -73,6 +80,7 @@ function getLessonDisplayStatus(lesson) {
   if (lesson?.optimisticRescheduledTo || lesson?.rescheduledTo) return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
   if (syncStatus === 'failed') return 'sync_failed'
+  if (syncStatus === 'pending' && rawStatus === 'scheduled') return 'calendar_pending'
   if (isDemoLesson) return 'demo'
   return rawStatus || 'scheduled'
 }
