@@ -176,6 +176,13 @@ function findStaffMemberForRosterName(staffList, staffName) {
   return null
 }
 
+/** Same eligibility as shift-assignment dropdowns: Japanese / legacy staff only, not English teachers. */
+function isShiftRosterEligibleStaff(s) {
+  if (!s || s.active === false) return false
+  const t = s.staff_type
+  return t === 'japanese_staff' || t == null || t === ''
+}
+
 const SHIFT_DEFAULT_TIMES = {
   weekday_morning: { start: '10:00', end: '16:00' },
   weekday_evening: { start: '16:00', end: '21:00' },
@@ -373,7 +380,13 @@ export default function Staff() {
   }, [weekStart])
 
   const dates = weekDates()
-  const shiftRosterBlocks = useMemo(() => rosterBlocksFromWeekSlots(weekSlots), [weekSlots])
+  const shiftRosterBlocks = useMemo(() => {
+    const raw = rosterBlocksFromWeekSlots(weekSlots)
+    return raw.filter((b) => {
+      const s = findStaffMemberForRosterName(staffList, b.staff_name)
+      return s && isShiftRosterEligibleStaff(s)
+    })
+  }, [weekSlots, staffList])
   const rosterLegendNames = useMemo(() => {
     const set = new Set(shiftRosterBlocks.map((b) => b.staff_name))
     return [...set].sort((a, b) => a.localeCompare(b))
@@ -510,8 +523,8 @@ export default function Staff() {
                 <div className="mb-8">
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift roster (week)</h3>
                   <p className="text-sm text-gray-600 mb-3">
-                    Read-only view of who is assigned to each shift. Colors match each person&apos;s schedule color from
-                    Edit Staff. To change assignments, use the table below.
+                    Read-only view of staff on shift (same people as the assignment table: Japanese staff and legacy
+                    rows, not English teachers). Colors match each person&apos;s schedule color from Edit Staff.
                   </p>
                   {shiftRosterBlocks.length === 0 ? (
                     <div className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500">
