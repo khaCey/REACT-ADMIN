@@ -1879,14 +1879,56 @@ router.post('/reschedule-linked', async (req, res) => {
         ).rows
       : [];
     const sourceStudentById = new Map(sourceStudents.map((row) => [Number(row.id), row]));
+    const sourceStudentByName = new Map(
+      sourceStudents
+        .map((row) => [normalizePersonName(row.name), row])
+        .filter(([name]) => !!name)
+    );
+    const insertedDestinationStudentIds = new Set();
 
     for (const sourceRow of sourceRowsForReschedule) {
       const sourceRowStudentName = String(sourceRow.student_name || '').trim();
       if (!sourceRowStudentName) continue;
       const sid = Number(sourceRow.student_id);
-      const rowStudent = sourceStudentById.get(sid) || student;
-      const destinationStudentName = normalizePersonName(rowStudent?.name || sourceRowStudentName) || sourceRowStudentName;
-      const destinationLessonKind = deriveLessonKindFromStudent(rowStudent || student);
+      let rowStudent =
+        Number.isFinite(sid) && sid > 0 ? sourceStudentById.get(sid) || null : null;
+      const sourceNameNorm = normalizePersonName(sourceRowStudentName);
+      if (!rowStudent && sourceNameNorm) {
+        rowStudent = sourceStudentByName.get(sourceNameNorm) || null;
+      }
+      if (!rowStudent && sourceNameNorm) {
+        const byName = await client.query(
+          `SELECT id, name, is_child, status, payment
+             FROM students
+            WHERE REGEXP_REPLACE(TRIM(name), '\\s+', ' ', 'g') = $1
+            ORDER BY id ASC
+            LIMIT 1`,
+          [sourceNameNorm]
+        );
+        rowStudent = byName.rows[0] || null;
+        if (rowStudent) {
+          sourceStudentByName.set(sourceNameNorm, rowStudent);
+          const resolvedByNameId = Number(rowStudent.id);
+          if (Number.isFinite(resolvedByNameId) && resolvedByNameId > 0) {
+            sourceStudentById.set(resolvedByNameId, rowStudent);
+          }
+        }
+      }
+      if (!rowStudent) {
+        throw new Error(`Unable to resolve source student row for reschedule: ${sourceRowStudentName}`);
+      }
+      const resolvedStudentId = Number(rowStudent.id);
+      if (!Number.isFinite(resolvedStudentId) || resolvedStudentId <= 0) {
+        throw new Error(`Invalid resolved student id for reschedule row: ${sourceRowStudentName}`);
+      }
+      // Guard against duplicate destination rows for one student in a single fanout transaction.
+      if (insertedDestinationStudentIds.has(resolvedStudentId)) {
+        continue;
+      }
+      insertedDestinationStudentIds.add(resolvedStudentId);
+
+      const destinationStudentName = normalizePersonName(rowStudent.name || sourceRowStudentName) || sourceRowStudentName;
+      const destinationLessonKind = deriveLessonKindFromStudent(rowStudent);
       const destinationLessonMode =
         destinationLessonKind === 'demo'
           ? 'unknown'
@@ -1937,7 +1979,7 @@ router.post('/reschedule-linked', async (req, res) => {
           null,
           destinationLessonKind,
           destinationLessonMode,
-          Number.isFinite(sid) ? sid : null,
+          resolvedStudentId,
           CALENDAR_SYNC_STATUS_PENDING,
           calendarSyncKey,
           srcDateForSnap,
