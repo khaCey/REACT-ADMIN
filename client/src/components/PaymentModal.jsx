@@ -365,6 +365,11 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
             </label>
           </div>
         )}
+        {mode === 'edit' && (
+          <p className="px-4 pb-2 text-xs text-amber-700">
+            If this payment is linked to a replicated group batch, saving or deleting will apply to all linked payments.
+          </p>
+        )}
         {error && <p className="px-4 text-red-600 text-sm">{error}</p>}
         <footer className="flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">
           <div>
@@ -391,7 +396,11 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
       {showDeleteConfirm && (
         <ConfirmActionModal
           title="Delete Payment"
-          message="Are you sure you want to delete this payment?"
+          message={
+            mode === 'edit'
+              ? 'Are you sure? If this payment is linked to a replicated group batch, all linked payments will be deleted.'
+              : 'Are you sure you want to delete this payment?'
+          }
           confirmLabel="Delete"
           destructive
           confirming={deleting}

@@ -40,6 +40,27 @@ CREATE TABLE IF NOT EXISTS payments (
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_month ON payments(student_id, year, month);
 
+-- Linked payment batches for replicated group payments.
+CREATE TABLE IF NOT EXISTS payment_groups (
+  id VARCHAR(36) PRIMARY KEY,
+  source_group_id INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payment_group_items (
+  payment_group_id VARCHAR(36) NOT NULL REFERENCES payment_groups(id) ON DELETE CASCADE,
+  transaction_id VARCHAR(100) NOT NULL REFERENCES payments(transaction_id) ON DELETE CASCADE,
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (payment_group_id, transaction_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_group_items_transaction_unique
+  ON payment_group_items(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payment_group_items_group
+  ON payment_group_items(payment_group_id);
+
 -- Notes
 CREATE TABLE IF NOT EXISTS notes (
   id SERIAL PRIMARY KEY,
@@ -84,6 +105,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_student_group_members_sort_unique
   ON student_group_members(group_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_student_group_members_group
   ON student_group_members(group_id);
+
+-- Keep linkage metadata compatible with old/new schemas.
+ALTER TABLE payment_groups DROP CONSTRAINT IF EXISTS payment_groups_source_group_id_fkey;
 
 -- Monthly schedule (cached events). Composite PK allows group lessons: one row per student per event.
 CREATE TABLE IF NOT EXISTS monthly_schedule (

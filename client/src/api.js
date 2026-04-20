@@ -37,6 +37,7 @@ export const api = {
   getPayments: () => fetchApi('/payments'),
   /** POST body may include `replicate_to_linked_group: true` and optional `linked_group_id` (from getStudentGroup) so replication matches the UI group. */
   addPayment: (data) => fetchApi('/payments', { method: 'POST', body: JSON.stringify(data) }),
+  /** PUT/DELETE on a linked payment transaction auto-propagates to all rows in its linked payment batch. */
   updatePayment: (id, data) => fetchApi(`/payments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePayment: (id) => fetchApi(`/payments/${id}`, { method: 'DELETE' }),
 
