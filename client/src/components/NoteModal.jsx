@@ -19,6 +19,10 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [studentGroupMembers, setStudentGroupMembers] = useState(null)
+  const [linkedGroupId, setLinkedGroupId] = useState(null)
+  const [groupFetchDone, setGroupFetchDone] = useState(true)
+  const [replicateToLinkedGroup, setReplicateToLinkedGroup] = useState(false)
 
   const defaultStaffName = currentStaff?.name && String(currentStaff.name).trim()
     ? String(currentStaff.name).trim()
@@ -37,18 +41,69 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
     }
   }, [mode, note, defaultStaffName])
 
+  useEffect(() => {
+    if (mode !== 'add' || studentId == null) {
+      setStudentGroupMembers(null)
+      setLinkedGroupId(null)
+      setReplicateToLinkedGroup(false)
+      setGroupFetchDone(true)
+      return
+    }
+    setGroupFetchDone(false)
+    setLinkedGroupId(null)
+    setStudentGroupMembers(null)
+    let cancelled = false
+    api
+      .getStudentGroup(studentId)
+      .then((res) => {
+        if (!cancelled) {
+          const members = res?.members ?? null
+          setStudentGroupMembers(members)
+          const gid = res?.groupId
+          setLinkedGroupId(gid != null && Number.isFinite(Number(gid)) ? Number(gid) : null)
+          setReplicateToLinkedGroup(Array.isArray(members) && members.length > 1)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStudentGroupMembers(null)
+          setLinkedGroupId(null)
+          setReplicateToLinkedGroup(false)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGroupFetchDone(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, studentId])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
       if (mode === 'add') {
-        await api.addNote({
+        const payload = {
           'Student ID': studentId,
           Staff: staff,
           Note: noteText,
-        })
-        success('Note created')
+        }
+        if (replicateToLinkedGroup) {
+          payload.replicate_to_linked_group = true
+          if (linkedGroupId != null && Number.isFinite(linkedGroupId)) {
+            payload.linked_group_id = linkedGroupId
+          }
+        }
+        const result = await api.addNote(payload)
+        const replicated = result?.replicated_note_ids?.length ?? 0
+        const totalStudents = 1 + replicated
+        if (totalStudents > 1) {
+          success(`Note recorded for ${totalStudents} students.`)
+        } else {
+          success('Note created')
+        }
       } else {
         await api.updateNote(note.ID, {
           Staff: staff,
@@ -143,6 +198,30 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
             />
           </div>
         </div>
+        {mode === 'add' && studentId != null && !groupFetchDone && (
+          <p className="px-4 pb-2 text-sm text-gray-500">Loading linked group…</p>
+        )}
+        {mode === 'add' && groupFetchDone && Array.isArray(studentGroupMembers) && studentGroupMembers.length > 1 && (
+          <div className="px-4 pb-2">
+            <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-gray-300"
+                checked={replicateToLinkedGroup}
+                onChange={(e) => setReplicateToLinkedGroup(e.target.checked)}
+              />
+              <span>
+                Apply this note to all linked group members ({studentGroupMembers.length - 1}{' '}
+                {studentGroupMembers.length - 1 === 1 ? 'other' : 'others'})
+              </span>
+            </label>
+          </div>
+        )}
+        {mode === 'edit' && (
+          <p className="px-4 pb-2 text-xs text-amber-700">
+            If this note is linked to a duplicated group batch, saving or deleting will apply to all linked notes.
+          </p>
+        )}
         {error && <p className="px-4 text-red-600 text-sm">{error}</p>}
         <footer className="flex justify-between gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">
           <div>
@@ -159,7 +238,7 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
           </div>
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || (mode === 'add' && studentId != null && !groupFetchDone)}
             className="rounded-md bg-green-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 cursor-pointer"
           >
             {submitting ? 'Saving...' : 'Save'}
@@ -169,7 +248,11 @@ export default function NoteModal({ studentId, mode = 'add', note = null, onSave
       {showDeleteConfirm && (
         <ConfirmActionModal
           title="Delete Note"
-          message="Are you sure you want to delete this note?"
+          message={
+            mode === 'edit'
+              ? 'Are you sure? If this note is linked to a duplicated group batch, all linked notes will be deleted.'
+              : 'Are you sure you want to delete this note?'
+          }
           confirmLabel="Delete"
           destructive
           confirming={deleting}

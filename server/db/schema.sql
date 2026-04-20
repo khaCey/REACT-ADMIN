@@ -73,6 +73,27 @@ CREATE TABLE IF NOT EXISTS notes (
 
 CREATE INDEX IF NOT EXISTS idx_notes_student ON notes(student_id);
 
+-- Linked note batches for replicated group notes.
+CREATE TABLE IF NOT EXISTS note_groups (
+  id VARCHAR(36) PRIMARY KEY,
+  source_group_id INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS note_group_items (
+  note_group_id VARCHAR(36) NOT NULL REFERENCES note_groups(id) ON DELETE CASCADE,
+  note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (note_group_id, note_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_group_items_note_unique
+  ON note_group_items(note_id);
+CREATE INDEX IF NOT EXISTS idx_note_group_items_group
+  ON note_group_items(note_group_id);
+
 -- Lessons (monthly totals)
 CREATE TABLE IF NOT EXISTS lessons (
   student_id INTEGER REFERENCES students(id),
