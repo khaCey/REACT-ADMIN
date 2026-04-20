@@ -182,7 +182,10 @@ function countActiveLessonsInMonth(ym, latestByMonth) {
   const e = latestByMonth?.[ym]
   if (!e?.lessons) return 0
   return e.lessons.filter(
-    (l) => (l.status || '').toLowerCase() !== 'cancelled' && l.status !== 'unscheduled'
+    (l) => {
+      const status = String(l.status || '').toLowerCase()
+      return status !== 'cancelled' && status !== 'rescheduled' && status !== 'unscheduled'
+    }
   ).length
 }
 

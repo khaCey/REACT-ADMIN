@@ -58,7 +58,7 @@ export default function LessonDetailsModal({
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
   const transientStatus = String(lesson.transientStatus || '').toLowerCase()
-  const isAwaitingRescheduleDate = status === 'cancelled' && !!lesson.awaitingRescheduleDate
+  const isAwaitingRescheduleDate = status === 'rescheduled' && !!lesson.awaitingRescheduleDate
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   const displayStatus =
@@ -76,7 +76,9 @@ export default function LessonDetailsModal({
         ? 'reschedule_date_tbd'
         : lesson?.optimisticRescheduledTo || lesson?.rescheduledTo
           ? 'rescheduled'
-          : status === 'cancelled'
+          : status === 'rescheduled'
+            ? 'rescheduled'
+            : status === 'cancelled'
             ? 'cancelled'
             : calendarSyncStatus === 'failed'
               ? 'sync_failed'
@@ -88,15 +90,16 @@ export default function LessonDetailsModal({
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
+  const isRescheduled = status === 'rescheduled'
   const hasRescheduledTo = !!(lesson?.optimisticRescheduledTo || lesson?.rescheduledTo)
   const isTransientBusy = transientStatus === 'sync_pending' || transientStatus === 'deleting'
-  const canSyncWithCalendar = !isTransientBusy && !isUnscheduled && !isCancelled && calendarSyncStatus !== 'synced'
+  const canSyncWithCalendar = !isTransientBusy && !isUnscheduled && !isCancelled && !isRescheduled && calendarSyncStatus !== 'synced'
   const canReschedule =
-    !isTransientBusy && !isUnscheduled && !isCancelled && calendarSyncStatus === 'synced'
+    !isTransientBusy && !isUnscheduled && !isCancelled && !isRescheduled && calendarSyncStatus === 'synced'
   const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
   const canUnreschedule =
     !isTransientBusy &&
-    isCancelled &&
+    isRescheduled &&
     !!lesson?.rescheduledTo?.eventID &&
     !lesson?.optimisticRescheduledTo
   const hasExtraNotes =
@@ -231,7 +234,7 @@ export default function LessonDetailsModal({
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
               )}
               {isAwaitingRescheduleDate && (
-                <div className="text-amber-900">Awaiting a new date (cancelled in Google Calendar).</div>
+                <div className="text-amber-900">Awaiting a new date (rescheduled; shown in graphite in Google Calendar).</div>
               )}
               {!hasExtraNotes && 'No additional notes available.'}
             </div>
@@ -239,7 +242,7 @@ export default function LessonDetailsModal({
         </div>
         <footer className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-200">
           <div className="flex flex-wrap gap-2">
-            {!isCancelled && !isUnscheduled && (
+            {!isCancelled && !isRescheduled && !isUnscheduled && (
               <button
                 type="button"
                 onClick={() => setCancelConfirmOpen(true)}

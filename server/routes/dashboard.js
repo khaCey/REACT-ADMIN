@@ -18,7 +18,7 @@ router.get('/unpaid', async (req, res) => {
        INNER JOIN monthly_schedule m
          ON TRIM(m.student_name) = TRIM(s.name)
          AND to_char(m.date, 'YYYY-MM') = $1
-         AND (m.status IS NULL OR m.status <> 'cancelled')
+        AND (m.status IS NULL OR lower(trim(m.status)) NOT IN ('cancelled', 'rescheduled'))
        WHERE NOT EXISTS (
          SELECT 1 FROM payments p
          WHERE p.student_id = s.id AND p.month = $1
@@ -59,7 +59,7 @@ router.get('/unscheduled-lessons', async (req, res) => {
          SELECT 1 FROM monthly_schedule m
          WHERE TRIM(m.student_name) = TRIM(s.name)
          AND to_char(m.date, 'YYYY-MM') = $1
-         AND (m.status IS NULL OR m.status NOT IN ('cancelled'))
+        AND (m.status IS NULL OR lower(trim(m.status)) NOT IN ('cancelled', 'rescheduled'))
        )
        ORDER BY s.name`,
       [thisMonth]
@@ -126,7 +126,7 @@ router.get('/metrics', async (req, res) => {
       query(
         `SELECT to_char(date, 'YYYY-MM') as month, COUNT(DISTINCT student_name)::int as count
          FROM monthly_schedule
-         WHERE lesson_kind = 'regular' AND (status IS NULL OR status <> 'cancelled') AND date IS NOT NULL
+         WHERE lesson_kind = 'regular' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
          AND date >= $1::date AND date < $2::date
          GROUP BY to_char(date, 'YYYY-MM')`,
         [fromStart, toEnd]
@@ -134,7 +134,7 @@ router.get('/metrics', async (req, res) => {
       query(
         `SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)::int as count
          FROM monthly_schedule
-         WHERE lesson_kind = 'demo' AND (status IS NULL OR status <> 'cancelled') AND date IS NOT NULL
+         WHERE lesson_kind = 'demo' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
          AND date >= $1::date AND date < $2::date
          GROUP BY to_char(date, 'YYYY-MM')`,
         [fromStart, toEnd]
@@ -219,7 +219,7 @@ router.get('/today-lessons', async (_req, res) => {
            SELECT 1 FROM monthly_schedule m2
            WHERE m2.student_name = m.student_name
              AND to_char(m2.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
-             AND (m2.status IS NULL OR lower(trim(m2.status)) <> 'cancelled')
+            AND (m2.status IS NULL OR lower(trim(m2.status)) NOT IN ('cancelled', 'rescheduled'))
              AND (m2.date > m.date OR (m2.date = m.date AND m2.start > m.start))
          ) AS is_last_lesson_of_month
        FROM monthly_schedule m
@@ -232,7 +232,7 @@ router.get('/today-lessons', async (_req, res) => {
        ) sm ON m.student_id IS NULL
        LEFT JOIN students sg ON sg.id = COALESCE(m.student_id, sm.id)
        WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
-         AND (m.status IS NULL OR lower(trim(m.status)) <> 'cancelled')
+        AND (m.status IS NULL OR lower(trim(m.status)) NOT IN ('cancelled', 'rescheduled'))
        ORDER BY m.start NULLS LAST, m.student_name`
     );
 

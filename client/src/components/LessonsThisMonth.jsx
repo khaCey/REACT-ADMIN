@@ -76,8 +76,9 @@ function getLessonDisplayStatus(lesson) {
   if (transientStatus === 'rescheduled') return 'rescheduled'
   if (transientStatus === 'sync_pending') return 'sync_pending'
   if (rawStatus === 'unscheduled') return 'unscheduled'
-  if (rawStatus === 'cancelled' && lesson?.awaitingRescheduleDate) return 'reschedule_date_tbd'
+  if ((rawStatus === 'rescheduled' || rawStatus === 'cancelled') && lesson?.awaitingRescheduleDate) return 'reschedule_date_tbd'
   if (lesson?.optimisticRescheduledTo || lesson?.rescheduledTo) return 'rescheduled'
+  if (rawStatus === 'rescheduled') return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
   if (syncStatus === 'failed') return 'sync_failed'
   if (syncStatus === 'pending' && rawStatus === 'scheduled') return 'calendar_pending'
@@ -983,7 +984,7 @@ export default function LessonsThisMonth({
                 eventID: l.eventID,
                 patch: {
                   transientStatus: undefined,
-                  status: 'cancelled',
+                  status: 'rescheduled',
                   awaitingRescheduleDate: true,
                   calendarSyncStatus: 'synced',
                   calendarSyncError: null,
