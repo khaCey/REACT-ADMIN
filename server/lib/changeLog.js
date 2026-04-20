@@ -3,13 +3,15 @@
  */
 import { query } from '../db/index.js';
 
-export async function logChange({ entityType, entityKey, action, oldData, newData, sourceChangeId = null }, req) {
+/** @param {import('pg').PoolClient} [client] When set, run inserts on this client (same transaction as caller). */
+export async function logChange({ entityType, entityKey, action, oldData, newData, sourceChangeId = null }, req, client = null) {
   const staff = req?.staff || {};
   const staffId = staff.id ?? null;
   const staffName = staff.name ?? null;
+  const run = client ? (text, params) => client.query(text, params) : query;
 
   try {
-    await query(
+    await run(
       `INSERT INTO change_log (entity_type, entity_key, action, old_data, new_data, source_change_id, staff_id, staff_name)
        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8)`,
       [
@@ -26,7 +28,7 @@ export async function logChange({ entityType, entityKey, action, oldData, newDat
   } catch (err) {
     // Backward compatibility for databases that haven't added source_change_id yet.
     if (err?.code !== '42703') throw err;
-    await query(
+    await run(
       `INSERT INTO change_log (entity_type, entity_key, action, old_data, new_data, staff_id, staff_name)
        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)`,
       [

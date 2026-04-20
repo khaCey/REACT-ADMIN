@@ -1,9 +1,42 @@
 import { Router } from 'express';
-import { query } from '../db/index.js';
+import { query, pool } from '../db/index.js';
 import { randomUUID } from 'crypto';
 import { logChange } from '../lib/changeLog.js';
 
 const router = Router();
+
+function newTransactionId() {
+  return `TXN_${randomUUID().slice(0, 8)}`;
+}
+
+function paymentInsertParams(body, transactionId) {
+  return [
+    transactionId,
+    body['Student ID'] ?? body.student_id,
+    body.Year ?? body.year,
+    body.Month ?? body.month,
+    body.Amount ?? body.amount ?? 0,
+    body.Discount ?? body.discount ?? 0,
+    body.Total ?? body.total ?? 0,
+    body.Date ?? body.date,
+    body.Method ?? body.method ?? '',
+    body.Staff ?? body.staff ?? '',
+  ];
+}
+
+/** Other members of the payer's linked group (same group_id), excluding the payer. */
+async function getOtherGroupMemberStudentIds(payerStudentId) {
+  const g = await query(`SELECT group_id FROM student_group_members WHERE student_id = $1 LIMIT 1`, [
+    payerStudentId,
+  ]);
+  if (g.rows.length === 0) return [];
+  const groupId = g.rows[0].group_id;
+  const m = await query(
+    `SELECT student_id FROM student_group_members WHERE group_id = $1 AND student_id <> $2 ORDER BY student_id`,
+    [groupId, payerStudentId]
+  );
+  return m.rows.map((r) => r.student_id);
+}
 
 router.get('/', async (req, res) => {
   try {
@@ -31,36 +64,100 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const body = req.body;
-    const transactionId = body['Transaction ID'] || body.transaction_id || `TXN_${randomUUID().slice(0, 8)}`;
-    const insertResult = await query(
-      `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        transactionId,
-        body['Student ID'] ?? body.student_id,
-        body.Year ?? body.year,
-        body.Month ?? body.month,
-        body.Amount ?? body.amount ?? 0,
-        body.Discount ?? body.discount ?? 0,
-        body.Total ?? body.total ?? 0,
-        body.Date ?? body.date,
-        body.Method ?? body.method ?? '',
-        body.Staff ?? body.staff ?? '',
-      ]
-    );
-    const newRow = insertResult.rows[0];
-    await logChange(
-      {
-        entityType: 'payments',
-        entityKey: transactionId,
-        action: 'create',
-        oldData: null,
-        newData: newRow,
-      },
-      req
-    );
-    res.status(201).json({ transaction_id: transactionId });
+    const replicate =
+      body.replicate_to_linked_group === true || body.replicateToLinkedGroup === true;
+    const payerIdRaw = body['Student ID'] ?? body.student_id;
+    const payerId = typeof payerIdRaw === 'number' ? payerIdRaw : Number(payerIdRaw);
+
+    const transactionId = body['Transaction ID'] || body.transaction_id || newTransactionId();
+
+    const peerIds =
+      replicate && Number.isFinite(payerId) && Number.isInteger(payerId) && payerId >= 0
+        ? await getOtherGroupMemberStudentIds(payerId)
+        : [];
+
+    if (!replicate || peerIds.length === 0) {
+      const insertResult = await query(
+        `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        paymentInsertParams(body, transactionId)
+      );
+      const newRow = insertResult.rows[0];
+      await logChange(
+        {
+          entityType: 'payments',
+          entityKey: transactionId,
+          action: 'create',
+          oldData: null,
+          newData: newRow,
+        },
+        req
+      );
+      return res.status(201).json({
+        transaction_id: transactionId,
+        replicated_transaction_ids: [],
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const insertResult = await client.query(
+        `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        paymentInsertParams(body, transactionId)
+      );
+      const primaryRow = insertResult.rows[0];
+      await logChange(
+        {
+          entityType: 'payments',
+          entityKey: transactionId,
+          action: 'create',
+          oldData: null,
+          newData: primaryRow,
+        },
+        req,
+        client
+      );
+
+      const replicatedIds = [];
+      for (const otherStudentId of peerIds) {
+        const tid = newTransactionId();
+        const replicaBody = { ...body, student_id: otherStudentId, 'Student ID': otherStudentId };
+        const replicaResult = await client.query(
+          `INSERT INTO payments (transaction_id, student_id, year, month, amount, discount, total, date, method, staff)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING *`,
+          paymentInsertParams(replicaBody, tid)
+        );
+        const repRow = replicaResult.rows[0];
+        await logChange(
+          {
+            entityType: 'payments',
+            entityKey: tid,
+            action: 'create',
+            oldData: null,
+            newData: repRow,
+          },
+          req,
+          client
+        );
+        replicatedIds.push(tid);
+      }
+
+      await client.query('COMMIT');
+      return res.status(201).json({
+        transaction_id: transactionId,
+        replicated_transaction_ids: replicatedIds,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

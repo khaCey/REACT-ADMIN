@@ -43,6 +43,8 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [error, setError] = useState(null)
+  const [studentGroupMembers, setStudentGroupMembers] = useState(null)
+  const [replicateToLinkedGroup, setReplicateToLinkedGroup] = useState(false)
 
   const monthFromValue = (val) => {
     if (!val) return MONTHS[new Date().getMonth()]
@@ -86,6 +88,26 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
     }
   }, [mode, payment, defaultStaffName])
 
+  useEffect(() => {
+    if (mode !== 'add' || studentId == null) {
+      setStudentGroupMembers(null)
+      setReplicateToLinkedGroup(false)
+      return
+    }
+    let cancelled = false
+    api
+      .getStudentGroup(studentId)
+      .then((res) => {
+        if (!cancelled) setStudentGroupMembers(res?.members ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setStudentGroupMembers(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, studentId])
+
   const discountNum = Number(form.discount) || 0
   const priceNum = Number(form.price) || 0
   const totalValue = Math.round(priceNum * (1 - discountNum / 100))
@@ -120,9 +142,18 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
         Method: form.method,
         Staff: form.staff,
       }
+      if (mode === 'add' && replicateToLinkedGroup) {
+        payload.replicate_to_linked_group = true
+      }
       if (mode === 'add') {
-        await api.addPayment(payload)
-        success('Payment created')
+        const result = await api.addPayment(payload)
+        const replicated = result?.replicated_transaction_ids?.length ?? 0
+        const totalStudents = 1 + replicated
+        if (totalStudents > 1) {
+          success(`Payment recorded for ${totalStudents} students.`)
+        } else {
+          success('Payment created')
+        }
       } else {
         await api.updatePayment(form.transactionId, payload)
         success('Payment updated')
@@ -291,6 +322,22 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
             </select>
           </div>
         </div>
+        {mode === 'add' && Array.isArray(studentGroupMembers) && studentGroupMembers.length > 1 && (
+          <div className="px-4 pb-2">
+            <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-gray-300"
+                checked={replicateToLinkedGroup}
+                onChange={(e) => setReplicateToLinkedGroup(e.target.checked)}
+              />
+              <span>
+                Apply this payment to all linked group members ({studentGroupMembers.length - 1}{' '}
+                {studentGroupMembers.length - 1 === 1 ? 'other' : 'others'})
+              </span>
+            </label>
+          </div>
+        )}
         {error && <p className="px-4 text-red-600 text-sm">{error}</p>}
         <footer className="flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">
           <div>
