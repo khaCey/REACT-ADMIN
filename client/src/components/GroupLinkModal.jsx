@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom'
 import { api } from '../api'
 
 function normalizeMemberId(value) {
+  if (value === '' || value === null || value === undefined) return null
   const num = Number(value)
-  return Number.isFinite(num) && num > 0 ? num : null
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) return null
+  return num
 }
 
 export default function GroupLinkModal({
@@ -54,12 +56,14 @@ export default function GroupLinkModal({
     const initialMembers = Array.from({ length: expectedSize }, () => '')
     const orderedExisting = Array.isArray(initialGroup?.members) ? [...initialGroup.members] : []
     orderedExisting
-      .sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0))
+      .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
       .slice(0, expectedSize)
       .forEach((member, index) => {
-        initialMembers[index] = String(member?.id || '')
+        if (member != null && member.id !== undefined && member.id !== null) {
+          initialMembers[index] = String(member.id)
+        }
       })
-    if (currentStudentId && !initialMembers.includes(String(currentStudentId))) {
+    if (currentStudentId !== null && !initialMembers.includes(String(currentStudentId))) {
       const firstEmpty = initialMembers.findIndex((value) => !value)
       if (firstEmpty >= 0) initialMembers[firstEmpty] = String(currentStudentId)
       else initialMembers[0] = String(currentStudentId)
@@ -72,6 +76,7 @@ export default function GroupLinkModal({
 
   const studentOptions = useMemo(() => {
     return (students || []).filter((row) => {
+      if (row?.Group !== 'Group') return false
       if ((student?.子 || '') === '子') return (row?.子 || '') === '子'
       if ((student?.子 || '') !== '子') return (row?.子 || '') !== '子'
       return true
@@ -83,7 +88,7 @@ export default function GroupLinkModal({
       Array.from({ length: expectedSize }, (_, index) => {
         const selectedId = String(memberIds[index] || '')
         if (!selectedId) return prev[index] || ''
-        const matched = studentOptions.find((entry) => String(entry?.ID || '') === selectedId)
+        const matched = studentOptions.find((entry) => String(entry?.ID ?? '') === selectedId)
         return matched?.Name || prev[index] || ''
       })
     )
@@ -100,8 +105,8 @@ export default function GroupLinkModal({
         .trim()
         .toLowerCase()
       return studentOptions.filter((entry) => {
-        const entryId = String(entry?.ID || '')
-        if (!entryId) return false
+        if (entry?.ID === undefined || entry?.ID === null) return false
+        const entryId = String(entry.ID)
         if (selectedElsewhere.has(entryId)) return false
         if (!query) return true
         const searchable = `${entry?.Name || ''} ${entry?.ID || ''} ${entry?.Email || ''} ${entry?.Phone || ''}`.toLowerCase()
@@ -133,7 +138,7 @@ export default function GroupLinkModal({
     setMemberQueries((prev) => prev.map((entry, idx) => (idx === index ? value : entry)))
     const currentValue = String(memberIds[index] || '')
     if (currentValue) {
-      const matched = studentOptions.find((entry) => String(entry?.ID || '') === currentValue)
+      const matched = studentOptions.find((entry) => String(entry?.ID ?? '') === currentValue)
       const matchedName = matched?.Name || ''
       if (value !== matchedName) handleMemberChange(index, '')
     }
@@ -142,8 +147,8 @@ export default function GroupLinkModal({
   }
 
   const handleSuggestionSelect = (index, option) => {
-    const selectedId = String(option?.ID || '')
-    if (!selectedId) return
+    if (option?.ID === undefined || option?.ID === null) return
+    const selectedId = String(option.ID)
     handleMemberChange(index, selectedId)
     setMemberQueries((prev) => prev.map((entry, idx) => (idx === index ? option?.Name || '' : entry)))
     setActivePickerIndex(null)
@@ -196,7 +201,7 @@ export default function GroupLinkModal({
       setError('Each student can only appear once.')
       return
     }
-    if (currentStudentId && !ids.includes(currentStudentId)) {
+    if (currentStudentId !== null && !ids.includes(currentStudentId)) {
       setError('The current student must be included.')
       return
     }
