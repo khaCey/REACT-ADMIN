@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Clock, Calendar, Plus, Trash2 } from 'lucide-react'
 import { api } from '../api'
 import { useAuth } from '../context/AuthContext'
@@ -149,6 +149,31 @@ function cascadeIndicesForBlocks(blocks) {
     out[meta[i].origIdx] = maxC + 1
   }
   return out
+}
+
+/** Read-only roster: assigned shift slots only (no unassigned “open” blocks). */
+function rosterBlocksFromWeekSlots(weekSlots) {
+  if (!Array.isArray(weekSlots)) return []
+  const out = []
+  for (const s of weekSlots) {
+    const name = s?.staff_name != null ? String(s.staff_name).trim() : ''
+    if (!name) continue
+    const date = s?.date != null ? String(s.date).trim().slice(0, 10) : ''
+    const start_time = s?.start_time != null ? String(s.start_time).trim().slice(0, 5) : ''
+    const end_time = s?.end_time != null ? String(s.end_time).trim().slice(0, 5) : ''
+    if (!date || !start_time || !end_time) continue
+    out.push({ date, staff_name: name, start_time, end_time })
+  }
+  return out
+}
+
+function findStaffMemberForRosterName(staffList, staffName) {
+  const key = teacherNameMatchKey(staffName)
+  if (!key) return null
+  for (const s of staffList || []) {
+    if (teacherNameMatchKey(s?.name) === key) return s
+  }
+  return null
 }
 
 const SHIFT_DEFAULT_TIMES = {
@@ -348,6 +373,11 @@ export default function Staff() {
   }, [weekStart])
 
   const dates = weekDates()
+  const shiftRosterBlocks = useMemo(() => rosterBlocksFromWeekSlots(weekSlots), [weekSlots])
+  const rosterLegendNames = useMemo(() => {
+    const set = new Set(shiftRosterBlocks.map((b) => b.staff_name))
+    return [...set].sort((a, b) => a.localeCompare(b))
+  }, [shiftRosterBlocks])
   const calendarStaffOptions = staffList.filter(
     (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
   )
@@ -440,11 +470,7 @@ export default function Staff() {
           </section>
 
           <section className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift management (week view)</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Cell tint follows each staff member&apos;s Google Calendar color (set in Edit Staff). Unassigned slots stay white.
-            </p>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <button
                 type="button"
                 onClick={() => {
@@ -480,6 +506,148 @@ export default function Staff() {
                 <p className="text-sm text-gray-500">Loading shifts…</p>
               </div>
             ) : (
+              <>
+                <div className="mb-8">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift roster (week)</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Read-only view of who is assigned to each shift. Colors match each person&apos;s schedule color from
+                    Edit Staff. To change assignments, use the table below.
+                  </p>
+                  {shiftRosterBlocks.length === 0 ? (
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500">
+                      No shifts assigned for this week.
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
+                      {(() => {
+                        const rosterByDate = {}
+                        for (const b of shiftRosterBlocks) {
+                          if (!rosterByDate[b.date]) rosterByDate[b.date] = []
+                          rosterByDate[b.date].push({
+                            staff_name: b.staff_name,
+                            start_time: b.start_time,
+                            end_time: b.end_time,
+                          })
+                        }
+                        const rosterColorIndex = {}
+                        rosterLegendNames.forEach((name, idx) => {
+                          const st = findStaffMemberForRosterName(staffList, name)
+                          const listIdx = st ? staffList.findIndex((s) => s.id === st.id) : -1
+                          rosterColorIndex[name] = staffScheduleColorChipClass(
+                            st || {},
+                            listIdx >= 0 ? listIdx : idx
+                          )
+                        })
+                        const hourLabels = Array.from(
+                          { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
+                          (_, i) => `${String(TEACHER_CALENDAR_START_HOUR + i).padStart(2, '0')}:00`
+                        )
+                        const timelineHeight = hourLabels.length * TEACHER_CALENDAR_ROW_HEIGHT
+                        const dateList = Array.isArray(dates) ? dates : []
+                        return (
+                          <>
+                            <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
+                              {rosterLegendNames.map((name) => (
+                                <span
+                                  key={name}
+                                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${rosterColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="flex min-w-[600px] border-b border-gray-200">
+                              <div className="w-14 shrink-0" />
+                              {dateList.map((date) => (
+                                <div
+                                  key={date}
+                                  className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                                >
+                                  {formatDayHeaderJapan(date)}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex min-w-[600px]">
+                              <div
+                                className="w-14 shrink-0 flex flex-col border-r border-gray-100"
+                                style={{ height: timelineHeight }}
+                              >
+                                {hourLabels.map((label) => (
+                                  <div
+                                    key={label}
+                                    className="text-xs font-medium text-gray-500 flex items-center pr-1 justify-end border-b border-gray-50"
+                                    style={{ height: TEACHER_CALENDAR_ROW_HEIGHT }}
+                                  >
+                                    {label}
+                                  </div>
+                                ))}
+                              </div>
+                              {dateList.map((date) => {
+                                const blocks = rosterByDate[date] || []
+                                const cascadeIndices = cascadeIndicesForBlocks(blocks)
+                                return (
+                                  <div
+                                    key={date}
+                                    className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
+                                    style={{ height: timelineHeight }}
+                                  >
+                                    {blocks.map((block, i) => {
+                                      const startMin = minutesFromTimelineStart(block.start_time)
+                                      const endMin = minutesFromTimelineStart(block.end_time)
+                                      const duration = Math.max(1, endMin - startMin)
+                                      const topPct =
+                                        TEACHER_CALENDAR_TOTAL_MINUTES > 0
+                                          ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
+                                          : 0
+                                      const heightPct =
+                                        TEACHER_CALENDAR_TOTAL_MINUTES > 0
+                                          ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
+                                          : 0
+                                      const colorClass =
+                                        rosterColorIndex[block.staff_name] ||
+                                        'bg-gray-100 border-gray-300 text-gray-800'
+                                      const cascadeIndex = cascadeIndices[i] ?? 0
+                                      return (
+                                        <div
+                                          key={`${block.staff_name}-${block.start_time}-${i}`}
+                                          className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                          style={{
+                                            top: `${topPct}%`,
+                                            height: `${heightPct}%`,
+                                            minHeight: 20,
+                                            width: '80%',
+                                            left: `${cascadeIndex * 10}px`,
+                                            right: 'auto',
+                                            zIndex: 10 + cascadeIndex,
+                                          }}
+                                          title={`${block.staff_name}: ${block.start_time} – ${block.end_time}`}
+                                        >
+                                          <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
+                                            {block.staff_name}
+                                          </span>
+                                          <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
+                                            {block.start_time}–{block.end_time}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift management (week view)</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Cell tint follows each staff member&apos;s Google Calendar color (set in Edit Staff). Unassigned
+                    slots stay white.
+                  </p>
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
                 <table className="min-w-full border-collapse">
                   <thead>
@@ -590,6 +758,8 @@ export default function Staff() {
                   </tbody>
                 </table>
               </div>
+                </div>
+              </>
             )}
           </section>
 
@@ -907,7 +1077,7 @@ export default function Staff() {
                     )
                   }
                 })()}
-              </div>
+        </div>
             )}
           </section>
 
@@ -922,22 +1092,22 @@ export default function Staff() {
                 ) : (
                   <ul className="space-y-1.5">
                     {shiftLog.slice(0, 20).map((s) => (
-                      <li
-                        key={s.id ?? `${s.staff_id}-${s.started_at}`}
+              <li
+                key={s.id ?? `${s.staff_id}-${s.started_at}`}
                         className="text-sm text-gray-600"
-                      >
+              >
                         <span className="font-medium text-gray-900">{s.staff_name}</span>{' '}
-                        {formatShiftDate(s.started_at)} {formatShiftTime(s.started_at)}
-                        {s.ended_at ? (
-                          <> → {formatShiftTime(s.ended_at)}</>
-                        ) : (
-                          <span className="text-green-600 ml-1">(in progress)</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  {formatShiftDate(s.started_at)} {formatShiftTime(s.started_at)}
+                  {s.ended_at ? (
+                    <> → {formatShiftTime(s.ended_at)}</>
+                  ) : (
+                    <span className="text-green-600 ml-1">(in progress)</span>
+                  )}
+              </li>
+            ))}
+          </ul>
                 )}
-              </div>
+        </div>
             </details>
           </section>
         </>
