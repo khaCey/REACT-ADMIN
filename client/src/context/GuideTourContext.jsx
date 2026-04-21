@@ -25,11 +25,7 @@ export function GuideTourProvider({ children }) {
   const activeGuide = activeGuideSlug ? getGuideBySlug(activeGuideSlug) : null
   const activeStep = activeGuide?.steps?.[stepIndex] || null
   const walkthroughPlacement =
-    activeStep?.action === 'students.delete'
-      ? 'top-right'
-      : activeStep?.action === 'students.edit'
-      ? 'bottom-left'
-      : 'bottom-right'
+    activeStep?.tooltip?.placement || activeStep?.target?.placement || 'bottom-right'
 
   const endGuide = useCallback(() => {
     setActiveGuideSlug(null)
@@ -79,7 +75,7 @@ export function GuideTourProvider({ children }) {
     if (!activeStep?.route) return
     navigate(activeStep.route, {
       state: {
-        guideAction: activeStep.action || null,
+        guideAction: activeStep?.completion?.payload?.action || null,
         guideNonce: runNonce || Date.now(),
       },
     })
