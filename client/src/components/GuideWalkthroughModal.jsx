@@ -1,4 +1,8 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+
+const VIEWPORT_PADDING = 16
+const INITIAL_DRAG = { x: 0, y: 0 }
 
 export default function GuideWalkthroughModal({
   open,
@@ -12,7 +16,19 @@ export default function GuideWalkthroughModal({
   onClose,
   placement = 'bottom-right',
 }) {
-  if (!open || !step) return null
+  const cardRef = useRef(null)
+  const dragStateRef = useRef({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+  })
+
+  const [isDragging, setIsDragging] = useState(false)
+  const [offsetsByStep, setOffsetsByStep] = useState({})
+
+  const dragOffset = offsetsByStep[stepIndex] ?? INITIAL_DRAG
 
   const placementClass =
     placement === 'bottom-left'
@@ -23,10 +39,165 @@ export default function GuideWalkthroughModal({
       ? 'items-start justify-end'
       : 'items-end justify-end'
 
+  const clampOffset = useCallback((candidateOffset, currentOffset = dragOffset) => {
+    const cardEl = cardRef.current
+    if (!cardEl) return candidateOffset
+
+    const rect = cardEl.getBoundingClientRect()
+    const baseLeft = rect.left - currentOffset.x
+    const baseTop = rect.top - currentOffset.y
+
+    const minX = VIEWPORT_PADDING - baseLeft
+    const maxX = window.innerWidth - VIEWPORT_PADDING - rect.width - baseLeft
+    const minY = VIEWPORT_PADDING - baseTop
+    const maxY = window.innerHeight - VIEWPORT_PADDING - rect.height - baseTop
+
+    return {
+      x: Math.min(Math.max(candidateOffset.x, minX), maxX),
+      y: Math.min(Math.max(candidateOffset.y, minY), maxY),
+    }
+  }, [dragOffset])
+
+  const setCurrentStepOffset = useCallback((nextOffsetOrUpdater) => {
+    setOffsetsByStep((prev) => {
+      const previousOffset = prev[stepIndex] ?? INITIAL_DRAG
+      const nextOffset =
+        typeof nextOffsetOrUpdater === 'function'
+          ? nextOffsetOrUpdater(previousOffset)
+          : nextOffsetOrUpdater
+
+      return {
+        ...prev,
+        [stepIndex]: nextOffset,
+      }
+    })
+  }, [stepIndex])
+
+  const stopDragging = useCallback(() => {
+    setIsDragging(false)
+    dragStateRef.current.pointerId = null
+  }, [])
+
+  useEffect(() => {
+    if (!open || !isDragging) return undefined
+
+    const handlePointerMove = (event) => {
+      if (event.pointerId !== dragStateRef.current.pointerId) return
+
+      const deltaX = event.clientX - dragStateRef.current.startX
+      const deltaY = event.clientY - dragStateRef.current.startY
+      const candidateOffset = {
+        x: dragStateRef.current.originX + deltaX,
+        y: dragStateRef.current.originY + deltaY,
+      }
+
+      setCurrentStepOffset((prevOffset) => clampOffset(candidateOffset, prevOffset))
+    }
+
+    const handlePointerEnd = (event) => {
+      if (event.pointerId !== dragStateRef.current.pointerId) return
+      stopDragging()
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerEnd)
+    window.addEventListener('pointercancel', handlePointerEnd)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+    }
+  }, [clampOffset, isDragging, open, setCurrentStepOffset, stopDragging])
+
+  useEffect(() => {
+    if (!open) {
+      stopDragging()
+    }
+  }, [open, stopDragging])
+
+  useEffect(() => {
+    if (!open || !cardRef.current) return
+
+    setCurrentStepOffset((prevOffset) => clampOffset(prevOffset, prevOffset))
+  }, [clampOffset, open, setCurrentStepOffset])
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    const handleResize = () => {
+      setCurrentStepOffset((prevOffset) => clampOffset(prevOffset, prevOffset))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [clampOffset, open, setCurrentStepOffset])
+
+  const handleDragStart = useCallback((event) => {
+    if (event.button !== 0) return
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: dragOffset.x,
+      originY: dragOffset.y,
+    }
+
+    setIsDragging(true)
+  }, [dragOffset.x, dragOffset.y])
+
+  const handleResetPosition = useCallback(() => {
+    setCurrentStepOffset(INITIAL_DRAG)
+  }, [setCurrentStepOffset])
+
+  const handleDragKeyDown = useCallback((event) => {
+    const distance = event.shiftKey ? 20 : 10
+    let nextOffset = null
+
+    if (event.key === 'ArrowLeft') {
+      nextOffset = { x: dragOffset.x - distance, y: dragOffset.y }
+    } else if (event.key === 'ArrowRight') {
+      nextOffset = { x: dragOffset.x + distance, y: dragOffset.y }
+    } else if (event.key === 'ArrowUp') {
+      nextOffset = { x: dragOffset.x, y: dragOffset.y - distance }
+    } else if (event.key === 'ArrowDown') {
+      nextOffset = { x: dragOffset.x, y: dragOffset.y + distance }
+    } else if (event.key === 'Escape') {
+      nextOffset = INITIAL_DRAG
+    }
+
+    if (!nextOffset) return
+
+    event.preventDefault()
+    setCurrentStepOffset((prevOffset) => clampOffset(nextOffset, prevOffset))
+  }, [clampOffset, dragOffset.x, dragOffset.y, setCurrentStepOffset])
+
+  const cardStyle = useMemo(
+    () => ({
+      transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0)`,
+      touchAction: 'none',
+    }),
+    [dragOffset.x, dragOffset.y]
+  )
+
+  if (!open || !step) return null
+
   return createPortal(
     <div className={`fixed inset-0 z-[10001] pointer-events-none flex p-4 ${placementClass}`}>
-      <div className="pointer-events-auto w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-200">
+      <div
+        ref={cardRef}
+        style={cardStyle}
+        className="pointer-events-auto w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden"
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onPointerDown={handleDragStart}
+          onKeyDown={handleDragKeyDown}
+          aria-label="Drag interactive guide dialog"
+          className={`px-4 py-3 border-b border-gray-200 cursor-grab select-none ${isDragging ? 'cursor-grabbing' : ''}`}
+        >
           <p className="text-xs uppercase tracking-wide text-gray-500">Interactive Guide</p>
           <h3 className="text-base font-semibold text-gray-900">{guideTitle}</h3>
           <p className="text-xs text-gray-500 mt-0.5">
@@ -38,7 +209,7 @@ export default function GuideWalkthroughModal({
           <p className="text-sm text-gray-700">{step.description}</p>
         </div>
         <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={onPrev}
@@ -53,6 +224,13 @@ export default function GuideWalkthroughModal({
               className="px-3 py-1.5 rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50 cursor-pointer"
             >
               Re-open step
+            </button>
+            <button
+              type="button"
+              onClick={handleResetPosition}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer"
+            >
+              Reset position
             </button>
           </div>
           <div className="flex items-center gap-2">
