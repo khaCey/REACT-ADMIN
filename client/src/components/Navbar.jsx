@@ -7,15 +7,12 @@ import CreateNotificationModal from './CreateNotificationModal'
 import NotificationDetailsModal from './NotificationDetailsModal'
 import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
-import { useGuideTour } from '../context/GuideTourContext'
-import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
   const { success } = useToast()
-  const { startGuideBySlug } = useGuideTour()
   const navigate = useNavigate()
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -23,7 +20,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const [editingNotification, setEditingNotification] = useState(null)
   const [readingId, setReadingId] = useState(null)
   const dropdownRef = useRef(null)
-  const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const guidesOn = areGuidesAvailable()
   const {
@@ -77,24 +73,13 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
 
   useEffect(() => {
     const handleGuideEnded = async () => {
-      const id = guideStartedFromNotificationIdRef.current
-      if (id && !notificationsDisabled) {
-        guideStartedFromNotificationIdRef.current = null
-        try {
-          await markAsRead(id)
-          success('Notification marked as read')
-          await refreshUnread()
-        } catch {
-          // ignore
-        }
-      }
       setIsNotificationOpen(false)
       setShowCreateModal(false)
       setSelectedNotification(null)
     }
     window.addEventListener('guide:ended', handleGuideEnded)
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
-  }, [notificationsDisabled, markAsRead, success, refreshUnread])
+  }, [])
 
   useEffect(() => {
     if (!notificationsDisabled) return
@@ -280,19 +265,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             setEditingNotification(target)
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
-          canStartGuide={
-            guidesOn &&
-            !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
-          }
-          onStartGuide={(n) => {
-            const slug = resolveGuideSlug(n)
-            if (slug && startGuideBySlug(slug)) {
-              guideStartedFromNotificationIdRef.current = n.id
-              setSelectedNotification(null)
-              setIsNotificationOpen(false)
-              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
-            }
-          }}
         />
         )
       )}
