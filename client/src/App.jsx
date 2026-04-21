@@ -11,6 +11,7 @@ import ChangeHistory from './pages/ChangeHistory'
 import Admin from './pages/Admin'
 import Notifications from './pages/Notifications'
 import Login from './pages/Login'
+import Guides, { GuidesLauncherPage } from './pages/Guides'
 import { GuideTourProvider } from './context/GuideTourContext'
 
 function App() {
@@ -33,6 +34,12 @@ function App() {
         <Route path="students/:id" element={<StudentDetail />} />
         <Route path="staff" element={<StaffRoute><Staff /></StaffRoute>} />
         <Route path="notifications" element={<Notifications />} />
+        <Route path="guides" element={<Guides />} />
+        <Route path="guides/students" element={<GuidesLauncherPage slug="guide.students" />} />
+        <Route path="guides/payments" element={<GuidesLauncherPage slug="guide.payments" />} />
+        <Route path="guides/notes" element={<GuidesLauncherPage slug="guide.notes" />} />
+        <Route path="guides/notifications" element={<GuidesLauncherPage slug="guide.notifications" />} />
+        <Route path="guides/change-history" element={<GuidesLauncherPage slug="guide.change-history" />} />
         <Route path="change-history" element={<ChangeHistory />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
       </Route>
