@@ -7,15 +7,12 @@ import CreateNotificationModal from './CreateNotificationModal'
 import NotificationDetailsModal from './NotificationDetailsModal'
 import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
-import { useGuideTour } from '../context/GuideTourContext'
-import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
   const { staff, logout } = useAuth()
   const { success } = useToast()
-  const { startGuideBySlug } = useGuideTour()
   const navigate = useNavigate()
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -23,7 +20,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const [editingNotification, setEditingNotification] = useState(null)
   const [readingId, setReadingId] = useState(null)
   const dropdownRef = useRef(null)
-  const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const guidesOn = areGuidesAvailable()
   const {
@@ -35,7 +31,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     markAsRead,
   } = useNotificationsPolling({
     enabled: !!staff && !notificationsDisabled,
-    excludeGuideNotifications: !guidesOn,
   })
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
@@ -77,24 +72,13 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
 
   useEffect(() => {
     const handleGuideEnded = async () => {
-      const id = guideStartedFromNotificationIdRef.current
-      if (id && !notificationsDisabled) {
-        guideStartedFromNotificationIdRef.current = null
-        try {
-          await markAsRead(id)
-          success('Notification marked as read')
-          await refreshUnread()
-        } catch {
-          // ignore
-        }
-      }
       setIsNotificationOpen(false)
       setShowCreateModal(false)
       setSelectedNotification(null)
     }
     window.addEventListener('guide:ended', handleGuideEnded)
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
-  }, [notificationsDisabled, markAsRead, success, refreshUnread])
+  }, [])
 
   useEffect(() => {
     if (!notificationsDisabled) return
@@ -273,7 +257,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
           markingRead={readingId === selectedNotification.id}
-          canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
+          canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system)}
           onEdit={(id) => {
             const target = notifications.find((n) => n.id === id) || (selectedNotification?.id === id ? selectedNotification : null)
             if (!target) return
@@ -282,7 +266,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           canStartGuide={
             guidesOn &&
-            !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
+            !!resolveGuideSlug(selectedNotification)
           }
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)

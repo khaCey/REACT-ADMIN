@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bell } from 'lucide-react'
 import { api } from '../api'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
@@ -10,7 +10,6 @@ import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { areGuidesAvailable, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -31,7 +30,7 @@ function formatDateTime(value) {
 export default function Notifications() {
   const { success } = useToast()
   const { staff } = useAuth()
-  const { startGuideBySlug, activeGuideSlug } = useGuideTour()
+  const { activeGuideSlug } = useGuideTour()
   const guidesOn = areGuidesAvailable()
   const preventDelete = guidesOn && !!activeGuideSlug
   const location = useLocation()
@@ -48,7 +47,6 @@ export default function Notifications() {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [editingNotification, setEditingNotification] = useState(null)
   const [guideFocusAction, setGuideFocusAction] = useState(null)
-  const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
   const {
     unreadCount,
@@ -64,12 +62,12 @@ export default function Notifications() {
   const canEditNotification = useCallback((n) => {
     if (!n) return false
     if (isAdminUser) return true
-    return staff?.id === n.created_by_staff_id && !n.is_system && n.kind !== 'guide'
+    return staff?.id === n.created_by_staff_id && !n.is_system
   }, [staff?.id, isAdminUser])
   const canDeleteNotification = useCallback((n) => {
     if (!n) return false
     if (isAdminUser) return true
-    if (n.is_system || n.kind === 'guide') return false
+    if (n.is_system) return false
     return staff?.id === n.created_by_staff_id
   }, [staff?.id, isAdminUser])
 
@@ -125,20 +123,6 @@ export default function Notifications() {
 
   useEffect(() => {
     const handleGuideEnded = async () => {
-      const id = guideStartedFromNotificationIdRef.current
-      if (id && !notificationsDisabled) {
-        guideStartedFromNotificationIdRef.current = null
-        try {
-          await markAsRead(id)
-          success('Notification marked as read')
-          await loadPage(offset)
-          if (selectedNotification?.id === id) {
-            setSelectedNotification((prev) => (prev ? { ...prev, is_read: true, read_at: new Date().toISOString() } : null))
-          }
-        } catch {
-          // ignore
-        }
-      }
       setShowCreateModal(false)
       setSelectedNotification(null)
       setPendingDelete(null)
@@ -148,7 +132,7 @@ export default function Notifications() {
     }
     window.addEventListener('guide:ended', handleGuideEnded)
     return () => window.removeEventListener('guide:ended', handleGuideEnded)
-  }, [notificationsDisabled, markAsRead, success, loadPage, offset, selectedNotification?.id])
+  }, [])
 
   useEffect(() => {
     if (notificationsDisabled) return
@@ -359,7 +343,9 @@ export default function Notifications() {
 
       {!notificationsDisabled && !error && items.length > 0 && (
         <div className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
-          {items.map((item) => (
+          {items.map((item) => {
+            const isGuideNotification = !!resolveGuideSlug(item)
+            return (
             <div key={item.id} className="p-4 bg-white hover:bg-gray-50 transition-colors">
               <div className="flex items-start justify-between gap-3">
                 <button
@@ -370,6 +356,7 @@ export default function Notifications() {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-gray-900">{item.title}</p>
                     {(item.is_system || item.kind === 'guide') && (
+                    {guidesOn && isGuideNotification && (
                       <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                         Guide
                       </span>
@@ -426,7 +413,8 @@ export default function Notifications() {
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -481,7 +469,7 @@ export default function Notifications() {
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
           canStartGuide={
-            guidesOn && !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
+            guidesOn && !!resolveGuideSlug(selectedNotification)
           }
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)

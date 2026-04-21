@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { X, BookOpen } from 'lucide-react'
+import { areGuidesAvailable } from '../guides/wipFlags'
+import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 
 function formatDateTime(value) {
   if (!value) return 'Unknown time'
@@ -44,6 +46,11 @@ export default function NotificationDetailsModal({
 
   if (!notification) return null
 
+  const guidesOn = areGuidesAvailable()
+  const guideSlug = resolveGuideSlug(notification)
+  const isGuideNotification = !!guideSlug
+  const hideGuideMeta = !guidesOn && isGuideNotification
+
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50"
@@ -71,6 +78,7 @@ export default function NotificationDetailsModal({
             <div className="flex items-center gap-2">
               <p className="text-sm text-gray-500">Title</p>
               {(notification.is_system || notification.kind === 'guide') && (
+              {guidesOn && isGuideNotification && (
                 <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                   Guide
                 </span>
@@ -94,7 +102,7 @@ export default function NotificationDetailsModal({
             {notification.read_at && <p>Read: {formatDateTime(notification.read_at)}</p>}
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            {canStartGuide && onStartGuide && (notification.is_system || notification.kind === 'guide') && (
+            {canStartGuide && onStartGuide && isGuideNotification && (
               <button
                 type="button"
                 onClick={() => onStartGuide(notification)}
