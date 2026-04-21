@@ -68,6 +68,7 @@ export default function Students() {
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [guideAction, setGuideAction] = useState(null)
+  const [guideNonce, setGuideNonce] = useState(null)
   const [highlightAddButton, setHighlightAddButton] = useState(false)
   const [guideTargetStudentId, setGuideTargetStudentId] = useState(null)
 
@@ -84,6 +85,7 @@ export default function Students() {
       setSelectedStudentId(null)
       setGuideTargetStudentId(null)
       setGuideAction(null)
+      setGuideNonce(null)
       setHighlightAddButton(false)
     }
     window.addEventListener('guide:ended', handleGuideEnded)
@@ -92,6 +94,7 @@ export default function Students() {
 
   useEffect(() => {
     const action = location.state?.guideAction
+    const nonce = location.state?.guideNonce ?? Date.now()
     if (!action) return
     if (!areGuidesAvailable()) {
       navigate(location.pathname, { replace: true, state: {} })
@@ -106,6 +109,7 @@ export default function Students() {
     // Reset transient highlight state each step.
     setGuideTargetStudentId(null)
     setGuideAction(null)
+    setGuideNonce(null)
     setHighlightAddButton(false)
 
     if (action === 'students.create') {
@@ -113,6 +117,7 @@ export default function Students() {
       setShowAddModal(false)
       setSelectedStudentId(null)
       setHighlightAddButton(true)
+      setGuideNonce(nonce)
       navigate(location.pathname, { replace: true, state: {} })
       return
     }
@@ -126,6 +131,7 @@ export default function Students() {
         setSelectedStudentId(null)
       }
       setGuideAction(action)
+      setGuideNonce(nonce)
       navigate(location.pathname, { replace: true, state: {} })
     }
   }, [location.state?.guideAction, location.state?.guideNonce, location.pathname, navigate, selectedStudentId])
@@ -305,6 +311,7 @@ export default function Students() {
           onStudentDeleted={fetchStudents}
           onStudentUpdated={fetchStudents}
           guideAction={guideAction}
+          guideNonce={guideNonce}
           onGuideActionHandled={() => setGuideAction(null)}
         />
       )}
