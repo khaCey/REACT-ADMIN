@@ -131,9 +131,8 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (lastGuideActionRef.current === guideAction) return
     lastGuideActionRef.current = guideAction
     if (guideAction === 'students.edit') {
-      if (!editStudentModal) {
-        setEditStudentModal(true)
-      }
+      const shouldOpenEditModal = !editStudentModal
+      if (shouldOpenEditModal) setEditStudentModal(true)
       // Guide step auto-opens EditStudentModal, so keep modal content as the focus target.
       setGuideFocusKey(null)
       setGuideHighlightDeleteInEdit(false)
@@ -141,9 +140,8 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       return
     }
     if (guideAction === 'students.delete') {
-      if (!editStudentModal) {
-        setEditStudentModal(true)
-      }
+      const shouldOpenEditModal = !editStudentModal
+      if (shouldOpenEditModal) setEditStudentModal(true)
       setGuideFocusKey(null)
       setGuideHighlightDeleteInEdit(true)
       onGuideActionHandled?.()
