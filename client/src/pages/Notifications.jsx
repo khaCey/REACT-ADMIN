@@ -122,6 +122,7 @@ export default function Notifications() {
   }, [notificationsDisabled, guidesOn, location.state?.guideAction, location.pathname, navigate])
 
   useEffect(() => {
+    const handleGuideEnded = () => {
     const handleGuideEnded = async () => {
       setShowCreateModal(false)
       setSelectedNotification(null)

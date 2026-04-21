@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, BookOpen } from 'lucide-react'
+import { X } from 'lucide-react'
 import { areGuidesAvailable } from '../guides/wipFlags'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 
@@ -29,8 +29,6 @@ export default function NotificationDetailsModal({
   onEdit,
   editing = false,
   highlightAction = null,
-  canStartGuide = false,
-  onStartGuide,
 }) {
   useEffect(() => {
     const onKey = (e) => {
