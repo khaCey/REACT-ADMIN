@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Users, UserCheck, History, Bell, Shield, LayoutDashboard } from 'lucide-react'
+import { Users, UserCheck, History, Bell, Shield, LayoutDashboard, BookOpen } from 'lucide-react'
 import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
 
@@ -76,6 +76,19 @@ export default function Sidebar({ collapsed }) {
             </Link>
           </li>
           )}
+          <li>
+            <Link
+              to="/guides"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${
+                path === '/guides' || path.startsWith('/guides/')
+                  ? 'bg-green-600 text-white'
+                  : 'text-gray-700 hover:bg-green-100 hover:text-green-700'
+              }`}
+            >
+              <BookOpen className="w-5 h-5" />
+              <span>Guides</span>
+            </Link>
+          </li>
           <li>
             <Link
               to="/change-history"

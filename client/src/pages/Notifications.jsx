@@ -56,19 +56,18 @@ export default function Notifications() {
     intervalMs: 45000,
     enabled: !notificationsDisabled,
     unreadLimit: 20,
-    excludeGuideNotifications: !guidesOn,
   })
   const [guideActionPending, setGuideActionPending] = useState(null)
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const canEditNotification = useCallback((n) => {
     if (!n) return false
     if (isAdminUser) return true
-    return staff?.id === n.created_by_staff_id && !n.is_system && n.kind !== 'guide'
+    return staff?.id === n.created_by_staff_id && !n.is_system
   }, [staff?.id, isAdminUser])
   const canDeleteNotification = useCallback((n) => {
     if (!n) return false
     if (isAdminUser) return true
-    if (n.is_system || n.kind === 'guide') return false
+    if (n.is_system) return false
     return staff?.id === n.created_by_staff_id
   }, [staff?.id, isAdminUser])
 
@@ -87,7 +86,6 @@ export default function Notifications() {
       const data = await api.getNotifications({
         limit: PAGE_SIZE,
         offset: nextOffset,
-        excludeGuides: !guidesOn,
       })
       setItems(Array.isArray(data.notifications) ? data.notifications : [])
       setTotal(data.total || 0)
@@ -97,7 +95,7 @@ export default function Notifications() {
     } finally {
       setLoading(false)
     }
-  }, [notificationsDisabled, guidesOn])
+  }, [notificationsDisabled])
 
   useEffect(() => {
     loadPage(0)
@@ -337,7 +335,9 @@ export default function Notifications() {
 
       {!notificationsDisabled && !error && items.length > 0 && (
         <div className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
-          {items.map((item) => (
+          {items.map((item) => {
+            const isGuideNotification = !!resolveGuideSlug(item)
+            return (
             <div key={item.id} className="p-4 bg-white hover:bg-gray-50 transition-colors">
               <div className="flex items-start justify-between gap-3">
                 <button
@@ -347,7 +347,7 @@ export default function Notifications() {
                 >
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-gray-900">{item.title}</p>
-                    {guidesOn && (item.is_system || item.kind === 'guide') && (
+                    {guidesOn && isGuideNotification && (
                       <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                         Guide
                       </span>
@@ -404,7 +404,8 @@ export default function Notifications() {
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -458,6 +459,18 @@ export default function Notifications() {
           }}
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           highlightAction={guideFocusAction}
+          canStartGuide={
+            guidesOn && !!resolveGuideSlug(selectedNotification)
+          }
+          onStartGuide={(n) => {
+            const slug = resolveGuideSlug(n)
+            if (slug && startGuideBySlug(slug)) {
+              guideStartedFromNotificationIdRef.current = n.id
+              setGuideFocusAction(null)
+              setSelectedNotification(null)
+              navigate('/notifications', { state: { guideAction: 'notifications.view' } })
+            }
+          }}
         />
       )}
       {!notificationsDisabled && pendingDelete && (
