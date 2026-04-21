@@ -23,19 +23,25 @@ export default function GuideWalkthroughModal({
       ? 'items-start justify-end'
       : 'items-end justify-end'
 
+  const tooltipTitle = step?.tooltip?.title || step.title
+  const tooltipBody = step?.tooltip?.body || step.description
+  const showProgress = step?.tooltip?.showProgress ?? true
+
   return createPortal(
     <div className={`fixed inset-0 z-[10001] pointer-events-none flex p-4 ${placementClass}`}>
       <div className="pointer-events-auto w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-200">
           <p className="text-xs uppercase tracking-wide text-gray-500">Interactive Guide</p>
           <h3 className="text-base font-semibold text-gray-900">{guideTitle}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Step {stepIndex + 1} of {totalSteps}
-          </p>
+          {showProgress && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              Step {stepIndex + 1} of {totalSteps}
+            </p>
+          )}
         </div>
         <div className="px-4 py-3 space-y-2">
-          <h4 className="text-sm font-semibold text-gray-900">{step.title}</h4>
-          <p className="text-sm text-gray-700">{step.description}</p>
+          <h4 className="text-sm font-semibold text-gray-900">{tooltipTitle}</h4>
+          <p className="text-sm text-gray-700">{tooltipBody}</p>
         </div>
         <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
