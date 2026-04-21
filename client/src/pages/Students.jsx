@@ -47,6 +47,17 @@ function pickGuideStudent(students) {
   return students[0]
 }
 
+function requiresGuideDetailsContext(action) {
+  if (!action) return false
+  return (
+    action === 'students.view' ||
+    action === 'students.edit' ||
+    action === 'students.delete' ||
+    action.startsWith('payments.') ||
+    action.startsWith('notes.')
+  )
+}
+
 export default function Students() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -133,6 +144,9 @@ export default function Students() {
     }
     const target = pickGuideStudent(students)
     setGuideTargetStudentId(target?.ID ?? null)
+    if (requiresGuideDetailsContext(guideAction)) {
+      setSelectedStudentId(target?.ID ?? null)
+    }
   }, [guideAction, selectedStudentId, students, loading])
 
   useEffect(() => {
