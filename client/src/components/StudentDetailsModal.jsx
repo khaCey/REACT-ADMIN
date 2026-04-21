@@ -131,25 +131,20 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (lastGuideActionRef.current === guideAction) return
     lastGuideActionRef.current = guideAction
     if (guideAction === 'students.edit') {
-      // If edit modal is already open, don't push user back to the Edit button.
-      if (editStudentModal) {
-        setGuideFocusKey(null)
-      } else {
-        setGuideFocusKey('student-edit')
+      if (!editStudentModal) {
+        setEditStudentModal(true)
       }
+      // Guide step auto-opens EditStudentModal, so keep modal content as the focus target.
+      setGuideFocusKey(null)
       setGuideHighlightDeleteInEdit(false)
       onGuideActionHandled?.()
       return
     }
     if (guideAction === 'students.delete') {
-      // Step 3 -> 4 behavior:
-      // - Keep edit modal open if already open and highlight Delete there.
-      // - Otherwise, highlight Edit first so user can open the edit modal.
-      if (editStudentModal) {
-        setGuideFocusKey(null)
-      } else {
-        setGuideFocusKey('student-delete')
+      if (!editStudentModal) {
+        setEditStudentModal(true)
       }
+      setGuideFocusKey(null)
       setGuideHighlightDeleteInEdit(true)
       onGuideActionHandled?.()
       return
