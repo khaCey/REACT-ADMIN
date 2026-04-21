@@ -26,6 +26,6 @@ export function areGuidesAvailable() {
   return !GUIDES_WIP_HIDDEN
 }
 
-// Notifications are always enabled so staff can create and view notifications (and guide notifications when guides are used).
-export const NOTIFICATIONS_WIP_DISABLED = false
+// Keep notifications flag separate from guides so notification behavior is independent.
+export const NOTIFICATIONS_WIP_DISABLED = _NOTIFICATIONS_WIP_DISABLED
 

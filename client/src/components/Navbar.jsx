@@ -71,6 +71,16 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   }, [isNotificationOpen])
 
   useEffect(() => {
+    const handleGuideEnded = async () => {
+      setIsNotificationOpen(false)
+      setShowCreateModal(false)
+      setSelectedNotification(null)
+    }
+    window.addEventListener('guide:ended', handleGuideEnded)
+    return () => window.removeEventListener('guide:ended', handleGuideEnded)
+  }, [])
+
+  useEffect(() => {
     if (!notificationsDisabled) return
     setIsNotificationOpen(false)
     setShowCreateModal(false)

@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { X, Bell } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
-import { areGuidesAvailable } from '../guides/wipFlags'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 const UNREAD_LIMIT = 20
@@ -54,9 +53,7 @@ export default function PostLoginUnreadModal({ open, onClose }) {
       setError(null)
       setVisible(false)
       try {
-        const data = await api.getUnreadNotifications(UNREAD_LIMIT, {
-          excludeGuides: !areGuidesAvailable(),
-        })
+        const data = await api.getUnreadNotifications(UNREAD_LIMIT)
         if (cancelled) return
         const list = Array.isArray(data.notifications) ? data.notifications : []
         const count = Number(data.unreadCount) || 0
