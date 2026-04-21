@@ -77,6 +77,7 @@ export default function NotificationDetailsModal({
           <div>
             <div className="flex items-center gap-2">
               <p className="text-sm text-gray-500">Title</p>
+              {(notification.is_system || notification.kind === 'guide') && (
               {guidesOn && isGuideNotification && (
                 <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                   Guide
@@ -94,9 +95,7 @@ export default function NotificationDetailsModal({
             {(notification.kind || notification.slug) && (
               <p>
                 Type:{' '}
-                {hideGuideMeta
-                  ? 'system'
-                  : `${notification.kind || 'general'}${notification.slug ? ` · ${notification.slug}` : ''}`}
+                {`${notification.kind || 'general'}${notification.slug ? ` · ${notification.slug}` : ''}`}
               </p>
             )}
             <p>Created: {formatDateTime(notification.created_at)}</p>

@@ -329,6 +329,14 @@ export default function Notifications() {
 
       {!notificationsDisabled && error && <p className="text-sm text-red-600">{error}</p>}
 
+
+      {!notificationsDisabled && !guidesOn && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Interactive guides are currently disabled. Guide notifications are still shown for historical context,
+          but you cannot start a walkthrough until guides are re-enabled.
+        </div>
+      )}
+
       {!notificationsDisabled && !error && items.length === 0 && (
         <p className="text-sm text-gray-500">No notifications yet.</p>
       )}
@@ -347,6 +355,7 @@ export default function Notifications() {
                 >
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                    {(item.is_system || item.kind === 'guide') && (
                     {guidesOn && isGuideNotification && (
                       <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-800">
                         Guide
