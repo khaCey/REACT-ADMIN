@@ -35,7 +35,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     markAsRead,
   } = useNotificationsPolling({
     enabled: !!staff && !notificationsDisabled,
-    excludeGuideNotifications: !guidesOn,
   })
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
@@ -273,7 +272,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
           markingRead={readingId === selectedNotification.id}
-          canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
+          canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system)}
           onEdit={(id) => {
             const target = notifications.find((n) => n.id === id) || (selectedNotification?.id === id ? selectedNotification : null)
             if (!target) return
@@ -282,7 +281,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           editing={!!editingNotification && editingNotification.id === selectedNotification.id}
           canStartGuide={
             guidesOn &&
-            !!(selectedNotification?.is_system || selectedNotification?.kind === 'guide')
+            !!resolveGuideSlug(selectedNotification)
           }
           onStartGuide={(n) => {
             const slug = resolveGuideSlug(n)
