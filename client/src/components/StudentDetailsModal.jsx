@@ -41,7 +41,15 @@ class ModalErrorBoundary extends Component {
   }
 }
 
-export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated, guideAction = null, onGuideActionHandled }) {
+export default function StudentDetailsModal({
+  studentId,
+  onClose,
+  onStudentDeleted,
+  onStudentUpdated,
+  guideAction = null,
+  guideNonce = null,
+  onGuideActionHandled,
+}) {
   const { success } = useToast()
   const [student, setStudent] = useState(null)
   const [payments, setPayments] = useState([])
@@ -128,8 +136,9 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
 
   useEffect(() => {
     if (!guideAction || !student || loading || lessonsLoading) return
-    if (lastGuideActionRef.current === guideAction) return
-    lastGuideActionRef.current = guideAction
+    const guideActionRunKey = `${guideAction}:${guideNonce ?? 'none'}`
+    if (lastGuideActionRef.current === guideActionRunKey) return
+    lastGuideActionRef.current = guideActionRunKey
     if (guideAction === 'students.edit') {
       const shouldOpenEditModal = !editStudentModal
       if (shouldOpenEditModal) setEditStudentModal(true)
@@ -170,7 +179,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     if (guideAction === 'students.view') {
       onGuideActionHandled?.()
     }
-  }, [guideAction, student, loading, lessonsLoading, payments, notes, editStudentModal, onGuideActionHandled])
+  }, [guideAction, guideNonce, student, loading, lessonsLoading, payments, notes, editStudentModal, onGuideActionHandled])
 
   useEffect(() => {
     if (!guideFocusKey) return
