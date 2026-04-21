@@ -1,13 +1,13 @@
 // npm start: hide WIP. npm run dev: show WIP. Production build: always hide.
 // No need to change these until a feature is finished.
 // true = hide all interactive guides in dev too (whitelist empty below also disables every slug).
-const _GUIDES_WIP_HIDDEN = true
+const _GUIDES_WIP_HIDDEN = false
 const _NOTIFICATIONS_WIP_DISABLED = false
 
 // When set, only these guide slugs are enabled. Enables them even in production.
 // Use null to allow all guides (subject to GUIDES_WIP_HIDDEN).
 // Use [] to hide every guide (no walkthroughs, no "Start guide" UI).
-export const ENABLED_GUIDE_SLUGS = []
+export const ENABLED_GUIDE_SLUGS = ['guide.students' , 'guide.notifications', 'guide.payments', 'guide.notes', 'guide.change-history']
 
 const forceHideWip = import.meta.env.PRODUCTION || import.meta.env.VITE_WIP_HIDDEN === 'true'
 export const GUIDES_WIP_HIDDEN = forceHideWip ? true : _GUIDES_WIP_HIDDEN
