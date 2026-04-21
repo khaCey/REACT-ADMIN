@@ -17,18 +17,17 @@ export default function GuideWalkthroughModal({
   placement = 'bottom-right',
 }) {
   const cardRef = useRef(null)
-  const dragStateRef = useRef({
-    pointerId: null,
-    startX: 0,
-    startY: 0,
-    originX: 0,
-    originY: 0,
-  })
+  const pointerIdRef = useRef(null)
 
   const [isDragging, setIsDragging] = useState(false)
   const [offsetsByStep, setOffsetsByStep] = useState({})
-
-  const dragOffset = offsetsByStep[stepIndex] ?? INITIAL_DRAG
+  const [dragOffset, setDragOffset] = useState(INITIAL_DRAG)
+  const [dragStart, setDragStart] = useState({
+    pointerX: 0,
+    pointerY: 0,
+    originX: 0,
+    originY: 0,
+  })
 
   const placementClass =
     placement === 'bottom-left'
@@ -59,43 +58,49 @@ export default function GuideWalkthroughModal({
   }, [dragOffset])
 
   const setCurrentStepOffset = useCallback((nextOffsetOrUpdater) => {
-    setOffsetsByStep((prev) => {
-      const previousOffset = prev[stepIndex] ?? INITIAL_DRAG
+    setDragOffset((prevOffset) => {
       const nextOffset =
         typeof nextOffsetOrUpdater === 'function'
-          ? nextOffsetOrUpdater(previousOffset)
+          ? nextOffsetOrUpdater(prevOffset)
           : nextOffsetOrUpdater
 
-      return {
+      setOffsetsByStep((prev) => ({
         ...prev,
         [stepIndex]: nextOffset,
-      }
+      }))
+
+      return nextOffset
     })
   }, [stepIndex])
 
   const stopDragging = useCallback(() => {
     setIsDragging(false)
-    dragStateRef.current.pointerId = null
+    pointerIdRef.current = null
   }, [])
+
+  useEffect(() => {
+    if (!open) return
+    setDragOffset(offsetsByStep[stepIndex] ?? INITIAL_DRAG)
+  }, [offsetsByStep, open, stepIndex])
 
   useEffect(() => {
     if (!open || !isDragging) return undefined
 
     const handlePointerMove = (event) => {
-      if (event.pointerId !== dragStateRef.current.pointerId) return
+      if (event.pointerId !== pointerIdRef.current) return
 
-      const deltaX = event.clientX - dragStateRef.current.startX
-      const deltaY = event.clientY - dragStateRef.current.startY
+      const deltaX = event.clientX - dragStart.pointerX
+      const deltaY = event.clientY - dragStart.pointerY
       const candidateOffset = {
-        x: dragStateRef.current.originX + deltaX,
-        y: dragStateRef.current.originY + deltaY,
+        x: dragStart.originX + deltaX,
+        y: dragStart.originY + deltaY,
       }
 
       setCurrentStepOffset((prevOffset) => clampOffset(candidateOffset, prevOffset))
     }
 
     const handlePointerEnd = (event) => {
-      if (event.pointerId !== dragStateRef.current.pointerId) return
+      if (event.pointerId !== pointerIdRef.current) return
       stopDragging()
     }
 
@@ -108,7 +113,7 @@ export default function GuideWalkthroughModal({
       window.removeEventListener('pointerup', handlePointerEnd)
       window.removeEventListener('pointercancel', handlePointerEnd)
     }
-  }, [clampOffset, isDragging, open, setCurrentStepOffset, stopDragging])
+  }, [clampOffset, dragStart.originX, dragStart.originY, dragStart.pointerX, dragStart.pointerY, isDragging, open, setCurrentStepOffset, stopDragging])
 
   useEffect(() => {
     if (!open) {
@@ -136,13 +141,13 @@ export default function GuideWalkthroughModal({
   const handleDragStart = useCallback((event) => {
     if (event.button !== 0) return
 
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
+    pointerIdRef.current = event.pointerId
+    setDragStart({
+      pointerX: event.clientX,
+      pointerY: event.clientY,
       originX: dragOffset.x,
       originY: dragOffset.y,
-    }
+    })
 
     setIsDragging(true)
   }, [dragOffset.x, dragOffset.y])
@@ -198,11 +203,23 @@ export default function GuideWalkthroughModal({
           aria-label="Drag interactive guide dialog"
           className={`px-4 py-3 border-b border-gray-200 cursor-grab select-none ${isDragging ? 'cursor-grabbing' : ''}`}
         >
-          <p className="text-xs uppercase tracking-wide text-gray-500">Interactive Guide</p>
-          <h3 className="text-base font-semibold text-gray-900">{guideTitle}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Step {stepIndex + 1} of {totalSteps}
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-500">Interactive Guide</p>
+              <h3 className="text-base font-semibold text-gray-900">{guideTitle}</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Step {stepIndex + 1} of {totalSteps}
+              </p>
+            </div>
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={handleResetPosition}
+              className="mt-0.5 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 cursor-pointer"
+            >
+              Reset position
+            </button>
+          </div>
         </div>
         <div className="px-4 py-3 space-y-2">
           <h4 className="text-sm font-semibold text-gray-900">{step.title}</h4>
@@ -224,13 +241,6 @@ export default function GuideWalkthroughModal({
               className="px-3 py-1.5 rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50 cursor-pointer"
             >
               Re-open step
-            </button>
-            <button
-              type="button"
-              onClick={handleResetPosition}
-              className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer"
-            >
-              Reset position
             </button>
           </div>
           <div className="flex items-center gap-2">
