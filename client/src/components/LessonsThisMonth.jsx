@@ -334,7 +334,7 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
     <button
       type="button"
       onClick={() => onClick?.(lesson)}
-      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-inset ${styles.hoverRing} cursor-pointer overflow-hidden`}
+      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-0 focus-visible:ring-0 ${styles.hoverRing} cursor-pointer overflow-hidden`}
       data-status={displayStatus}
       aria-label={`Lesson ${dayStr} ${timeStr} (${title})`}
     >

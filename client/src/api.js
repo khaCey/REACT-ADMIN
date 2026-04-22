@@ -3,7 +3,7 @@ import { clearStoredSession, getStoredToken } from './utils/authSession';
 const API_BASE = '/api';
 
 async function fetchApi(path, options = {}) {
-  await new Promise((r) => setTimeout(r, 500)); // 0.5s delay for CRUD
+  // await new Promise((r) => setTimeout(r, 500)); // 0.5s delay for CRUD
   const url = `${API_BASE}${path}`;
   const token = getStoredToken();
   const headers = { 'Content-Type': 'application/json', ...options.headers };

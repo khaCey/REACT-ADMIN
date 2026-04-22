@@ -651,9 +651,19 @@ router.get('/week', async (req, res) => {
         [weekStart, excludedStudentIds]
       ),
       query(
-        `SELECT date, teacher_name, start_time, end_time FROM teacher_schedules
-         WHERE date >= $1::date AND date < $1::date + interval '7 days'
-         ORDER BY date, teacher_name, start_time`,
+        `SELECT
+           t.date,
+           t.teacher_name,
+           t.start_time,
+           t.end_time
+         FROM teacher_schedules t
+         INNER JOIN staff s
+           ON LOWER(TRIM(s.name)) = LOWER(TRIM(t.teacher_name))
+         WHERE t.date >= $1::date
+           AND t.date < $1::date + interval '7 days'
+           AND s.active = TRUE
+           AND s.staff_type = 'english_teacher'
+         ORDER BY t.date, t.teacher_name, t.start_time`,
         [weekStart]
       ),
       query(

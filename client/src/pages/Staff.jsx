@@ -9,6 +9,7 @@ import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
 import {
+  GOOGLE_CALENDAR_EVENT_COLORS,
   googleCalendarColorLabel,
   staffScheduleCellTintClass,
   staffScheduleColorChipClass,
@@ -181,6 +182,78 @@ function isShiftRosterEligibleStaff(s) {
   if (!s || s.active === false) return false
   const t = s.staff_type
   return t === 'japanese_staff' || t == null || t === ''
+}
+
+function getStaffCalendarSwatchHex(staff, fallbackIndex = 0) {
+  const raw = staff?.calendar_color_id
+  const id = raw != null && String(raw).trim() !== '' ? String(raw).trim() : null
+
+  if (id) {
+    const found = GOOGLE_CALENDAR_EVENT_COLORS.find((c) => c.id === id)
+    if (found?.swatchHex) return found.swatchHex
+  }
+
+  const fallback = [
+    '#dbeafe',
+    '#fef3c7',
+    '#d1fae5',
+    '#ede9fe',
+    '#ffe4e6',
+    '#cffafe',
+    '#ffedd5',
+    '#e5e7eb',
+  ]
+
+  const i = Number.isFinite(fallbackIndex) ? Math.max(0, Math.floor(fallbackIndex)) : 0
+  return fallback[i % fallback.length]
+}
+
+function getContrastTextColor(hex) {
+  const safe = String(hex || '').replace('#', '')
+  if (safe.length !== 6) return '#111827'
+
+  const r = parseInt(safe.slice(0, 2), 16)
+  const g = parseInt(safe.slice(2, 4), 16)
+  const b = parseInt(safe.slice(4, 6), 16)
+
+  if ([r, g, b].some((v) => Number.isNaN(v))) return '#111827'
+
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return luminance > 0.68 ? '#111827' : '#ffffff'
+}
+
+function getStaffSelectStyle(staff, fallbackIndex = 0) {
+  if (!staff) {
+    return {
+      backgroundColor: '#ffffff',
+      color: '#111827',
+      borderColor: '#d1d5db',
+    }
+  }
+
+  const backgroundColor = getStaffCalendarSwatchHex(staff, fallbackIndex)
+
+  return {
+    backgroundColor,
+    color: getContrastTextColor(backgroundColor),
+    borderColor: backgroundColor,
+  }
+}
+
+function parseClockToMinutes(timeStr) {
+  const match = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10)
+}
+
+function timeRangesOverlap(startA, endA, startB, endB) {
+  const a0 = parseClockToMinutes(startA)
+  const a1 = parseClockToMinutes(endA)
+  const b0 = parseClockToMinutes(startB)
+  const b1 = parseClockToMinutes(endB)
+
+  if ([a0, a1, b0, b1].some((v) => v == null || Number.isNaN(v))) return false
+  return a0 < b1 && b0 < a1
 }
 
 const SHIFT_DEFAULT_TIMES = {
@@ -382,20 +455,62 @@ export default function Staff() {
   }, [weekStart])
 
   const dates = weekDates()
+  const calendarStaffOptions = staffList.filter(
+    (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
+  )
   const shiftRosterBlocks = useMemo(() => {
-    const raw = rosterBlocksFromWeekSlots(weekSlots)
+    const raw = Array.isArray(teacherCalendarEvents)
+      ? teacherCalendarEvents
+          .filter((ev) => String(ev?.kind || 'shift') === 'shift')
+          .map((ev) => ({
+            date: String(ev?.date || '').slice(0, 10),
+            staff_name: String(ev?.teacher_name || '').trim(),
+            start_time: String(ev?.start_time || '').slice(0, 5),
+            end_time: String(ev?.end_time || '').slice(0, 5),
+          }))
+      : []
+
     return raw.filter((b) => {
+      if (!b.date || !b.staff_name || !b.start_time || !b.end_time) return false
       const s = findStaffMemberForRosterName(staffList, b.staff_name)
       return s && isShiftRosterEligibleStaff(s)
     })
-  }, [weekSlots, staffList])
+  }, [teacherCalendarEvents, staffList])
+
+  const shiftCalendarMatchesByKey = useMemo(() => {
+    const out = {}
+    for (const block of shiftRosterBlocks) {
+      const dow = getDayOfWeekJapan(block.date)
+      const possibleShiftTypes = [0, 1, 6].includes(dow)
+        ? ['weekend']
+        : ['weekday_morning', 'weekday_evening']
+
+      for (const shiftType of possibleShiftTypes) {
+        const defaults = SHIFT_DEFAULT_TIMES[shiftType]
+        if (!defaults) continue
+        if (!timeRangesOverlap(block.start_time, block.end_time, defaults.start, defaults.end)) continue
+
+        const key = `${block.date}:${shiftType}`
+        if (!out[key]) out[key] = []
+        out[key].push(block)
+      }
+    }
+
+    for (const key of Object.keys(out)) {
+      out[key].sort((a, b) => {
+        const byStart = String(a.start_time).localeCompare(String(b.start_time))
+        if (byStart !== 0) return byStart
+        return String(a.staff_name).localeCompare(String(b.staff_name))
+      })
+    }
+
+    return out
+  }, [shiftRosterBlocks])
+
   const rosterLegendNames = useMemo(() => {
     const set = new Set(shiftRosterBlocks.map((b) => b.staff_name))
     return [...set].sort((a, b) => a.localeCompare(b))
   }, [shiftRosterBlocks])
-  const calendarStaffOptions = staffList.filter(
-    (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
-  )
 
   if (loading) {
     return <FullPageLoading />
@@ -747,10 +862,30 @@ export default function Staff() {
                           const staffOptIdx = assignedStaff
                             ? calendarStaffOptions.findIndex((x) => x.id === assignedStaff.id)
                             : 0
+                          const calendarMatchKey = shiftType ? `${date}:${shiftType}` : ''
+                          const matchingCalendarStaff = calendarMatchKey
+                            ? shiftCalendarMatchesByKey[calendarMatchKey] || []
+                            : []
+                          const primaryCalendarMatch = matchingCalendarStaff.length > 0
+                            ? findStaffMemberForRosterName(staffList, matchingCalendarStaff[0].staff_name)
+                            : null
+                          const primaryCalendarMatchIdx = primaryCalendarMatch
+                            ? calendarStaffOptions.findIndex((x) => x.id === primaryCalendarMatch.id)
+                            : 0
+                          const tintStaff = assignedStaff || primaryCalendarMatch
+                          const tintStaffIdx = assignedStaff != null
+                            ? (staffOptIdx >= 0 ? staffOptIdx : 0)
+                            : (primaryCalendarMatchIdx >= 0 ? primaryCalendarMatchIdx : 0)
                           const shiftCellTint =
-                            assignedStaff != null
-                              ? staffScheduleCellTintClass(assignedStaff, staffOptIdx >= 0 ? staffOptIdx : 0)
+                            tintStaff != null
+                              ? staffScheduleCellTintClass(tintStaff, tintStaffIdx)
                               : 'bg-white border-gray-100'
+                          const selectStyle = getStaffSelectStyle(
+                            assignedStaff || primaryCalendarMatch,
+                            assignedStaff != null
+                              ? (staffOptIdx >= 0 ? staffOptIdx : 0)
+                              : (primaryCalendarMatchIdx >= 0 ? primaryCalendarMatchIdx : 0)
+                          )
 
                           if (!shiftType) {
                             return (
@@ -775,15 +910,58 @@ export default function Staff() {
                                     const s = calendarStaffOptions.find((x) => x.name === v)
                                     handleAssignShift(slotData, s ? s.id : v)
                                   }}
-                                  className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
+                                  className="w-full text-sm border rounded px-2 py-1.5"
+                                  style={selectStyle}
                                 >
-                                  <option value="">— Select staff —</option>
-                                  {calendarStaffOptions.map((x) => (
-                                    <option key={x.id} value={x.name}>
-                                      {x.name}
-                                    </option>
-                                  ))}
+                                  <option
+                                    value=""
+                                    style={{
+                                      backgroundColor: '#ffffff',
+                                      color: '#111827',
+                                    }}
+                                  >
+                                    — Select staff —
+                                  </option>
+                                  {calendarStaffOptions.map((x, idx) => {
+                                    const optionBg = getStaffCalendarSwatchHex(x, idx)
+                                    const optionColor = getContrastTextColor(optionBg)
+
+                                    return (
+                                      <option
+                                        key={x.id}
+                                        value={x.name}
+                                        style={{
+                                          backgroundColor: optionBg,
+                                          color: optionColor,
+                                        }}
+                                      >
+                                        {x.name}
+                                      </option>
+                                    )
+                                  })}
                                 </select>
+                                {matchingCalendarStaff.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {matchingCalendarStaff.map((match, matchIdx) => {
+                                      const matchStaff = findStaffMemberForRosterName(staffList, match.staff_name)
+                                      const matchStaffIdx = matchStaff
+                                        ? calendarStaffOptions.findIndex((x) => x.id === matchStaff.id)
+                                        : matchIdx
+                                      return (
+                                        <span
+                                          key={`${match.staff_name}-${match.start_time}-${match.end_time}-${matchIdx}`}
+                                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${staffScheduleColorChipClass(
+                                            matchStaff || {},
+                                            matchStaffIdx >= 0 ? matchStaffIdx : matchIdx
+                                          )}`}
+                                          title={`${match.staff_name}: ${match.start_time}–${match.end_time}`}
+                                        >
+                                          {match.staff_name}
+                                        </span>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                   <Clock className="w-3.5 h-3.5 shrink-0" />
                                   <span>
