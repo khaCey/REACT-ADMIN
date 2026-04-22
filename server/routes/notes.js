@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import { logChange } from '../lib/changeLog.js';
 
 const router = Router();
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseBodyStudentId(raw) {
   if (raw == null || raw === '') return NaN;
@@ -69,6 +71,136 @@ async function getNotesByGroupId(noteGroupId, db = query) {
   );
   return result.rows;
 }
+
+function normalizeLessonUuid(raw) {
+  const value = String(raw || '').trim();
+  return UUID_RE.test(value) ? value.toLowerCase() : '';
+}
+
+router.get('/lessons/:lessonUuid', async (req, res) => {
+  try {
+    const lessonUuid = normalizeLessonUuid(req.params.lessonUuid);
+    if (!lessonUuid) return res.status(400).json({ error: 'Invalid lesson UUID' });
+    const result = await query(
+      `SELECT id, lesson_uuid, staff, note, created_at, updated_at
+         FROM lesson_notes
+        WHERE lesson_uuid = $1
+        ORDER BY created_at DESC, id DESC`,
+      [lessonUuid]
+    );
+    res.json(
+      result.rows.map((r) => ({
+        id: r.id,
+        lesson_uuid: r.lesson_uuid,
+        staff: r.staff || '',
+        note: r.note || '',
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/lessons', async (req, res) => {
+  try {
+    const lessonUuid = normalizeLessonUuid(req.body?.lesson_uuid ?? req.body?.lessonUUID);
+    const note = String(req.body?.note ?? req.body?.Note ?? '').trim();
+    const staff = String(req.body?.staff ?? req.body?.Staff ?? '').trim();
+    if (!lessonUuid) return res.status(400).json({ error: 'lesson_uuid is required' });
+    if (!note) return res.status(400).json({ error: 'note is required' });
+    const result = await query(
+      `INSERT INTO lesson_notes (lesson_uuid, staff, note, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       RETURNING *`,
+      [lessonUuid, staff, note]
+    );
+    const newRow = result.rows[0];
+    await logChange(
+      {
+        entityType: 'lesson_notes',
+        entityKey: String(newRow.id),
+        action: 'create',
+        oldData: null,
+        newData: newRow,
+      },
+      req
+    );
+    res.status(201).json({
+      id: newRow.id,
+      lesson_uuid: newRow.lesson_uuid,
+      staff: newRow.staff || '',
+      note: newRow.note || '',
+      created_at: newRow.created_at,
+      updated_at: newRow.updated_at,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/lessons/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid lesson note id' });
+    }
+    const oldResult = await query('SELECT * FROM lesson_notes WHERE id = $1', [id]);
+    if (oldResult.rows.length === 0) return res.status(404).json({ error: 'Lesson note not found' });
+    const oldRow = oldResult.rows[0];
+    const note = req.body?.note ?? req.body?.Note;
+    const staff = req.body?.staff ?? req.body?.Staff;
+    await query(
+      `UPDATE lesson_notes
+          SET note = COALESCE($2, note),
+              staff = COALESCE($3, staff),
+              updated_at = NOW()
+        WHERE id = $1`,
+      [id, note, staff]
+    );
+    const newRow = (await query('SELECT * FROM lesson_notes WHERE id = $1', [id])).rows[0];
+    await logChange(
+      {
+        entityType: 'lesson_notes',
+        entityKey: String(id),
+        action: 'update',
+        oldData: oldRow,
+        newData: newRow,
+      },
+      req
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/lessons/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid lesson note id' });
+    }
+    const oldResult = await query('SELECT * FROM lesson_notes WHERE id = $1', [id]);
+    if (oldResult.rows.length === 0) return res.status(404).json({ error: 'Lesson note not found' });
+    const oldRow = oldResult.rows[0];
+    await query('DELETE FROM lesson_notes WHERE id = $1', [id]);
+    await logChange(
+      {
+        entityType: 'lesson_notes',
+        entityKey: String(id),
+        action: 'delete',
+        oldData: oldRow,
+        newData: null,
+      },
+      req
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get('/', async (req, res) => {
   try {

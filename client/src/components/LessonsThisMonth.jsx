@@ -129,6 +129,13 @@ function findLessonMonthKey(monthDataObj, eventID) {
   return null
 }
 
+function getLessonIdentityKey(lesson) {
+  const lessonUUID = String(lesson?.lessonUUID || '').trim()
+  if (lessonUUID) return `uuid:${lessonUUID}`
+  const eventID = String(lesson?.eventID || '').trim()
+  return eventID ? `event:${eventID}` : ''
+}
+
 function hasRealLessonAtDateTime(monthDataObj, monthKey, date, time, optimisticEventID = '') {
   if (!monthDataObj || !monthKey || !date || !time) return false
   const day = String(date).slice(8, 10)
@@ -317,7 +324,6 @@ function isOptimisticMutationResolved(serverData, mutation) {
 
 function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const displayStatus = getLessonDisplayStatus(lesson)
-  const rawStatus = String(lesson.status || '').toLowerCase()
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -329,6 +335,7 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const styles = CARD_STYLES[displayStatus] || CARD_STYLES.cancelled
   const title = styles.label || (displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1))
   const sz = CARD_SIZES[size] || CARD_SIZES.normal
+  const hasLessonNote = !!lesson?.hasNote
 
   return (
     <button
@@ -348,6 +355,13 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
         <span className={`lr-status inline-flex items-center ${sz.status} text-gray-500 mt-0.5 truncate gap-1`}>
           <span className={`mr-0.5 ${sz.dot} rounded-full shrink-0 ${styles.dot}`} />
           {title}
+          {hasLessonNote && (
+            <span
+              className="ml-1 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-slate-700"
+              title="Has lesson note"
+              aria-label="Has lesson note"
+            />
+          )}
         </span>
       </span>
     </button>
@@ -419,7 +433,7 @@ function findLessonInMonthData(monthDataObj, eventID) {
   if (!monthDataObj || !eventID) return null
   for (const key of Object.keys(monthDataObj)) {
     const lessons = monthDataObj[key]?.lessons || []
-    const found = lessons.find((l) => l.eventID === eventID)
+    const found = lessons.find((l) => l.eventID === eventID || l.lessonUUID === eventID)
     if (found) return found
   }
   return null
@@ -437,7 +451,7 @@ export default function LessonsThisMonth({
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
-  const { data: serverData, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
+  const { data: serverData, setData, loading, error, activeMonth, setActiveMonth, refetch, refetchSilent } = useLatestByMonth(
     studentId,
     lastSynced,
     scheduleRefreshKey
@@ -508,14 +522,23 @@ export default function LessonsThisMonth({
     return () => clearInterval(id)
   }, [hasPendingCalendarSync, studentId, refetchSilent])
 
+  const selectedLessonKey = getLessonIdentityKey(selectedLesson)
+
   useEffect(() => {
-    if (!data || !selectedLesson?.eventID) return
-    const id = selectedLesson.eventID
-    const fresh = findLessonInMonthData(data, id)
-    if (fresh) {
-      setSelectedLesson((prev) => (prev && prev.eventID === id ? fresh : prev))
+    if (!data || !selectedLessonKey) return
+    let fresh = null
+    for (const monthKey of Object.keys(data)) {
+      const lessons = data[monthKey]?.lessons || []
+      fresh = lessons.find((lesson) => getLessonIdentityKey(lesson) === selectedLessonKey)
+      if (fresh) break
     }
-  }, [data, selectedLesson?.eventID])
+    if (!fresh && selectedLesson?.eventID) {
+      fresh = findLessonInMonthData(data, selectedLesson.eventID)
+    }
+    if (fresh) {
+      setSelectedLesson((prev) => (prev && getLessonIdentityKey(prev) === selectedLessonKey ? fresh : prev))
+    }
+  }, [data, selectedLessonKey, selectedLesson?.eventID])
   const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [removing, setRemoving] = useState(false)
@@ -777,6 +800,33 @@ export default function LessonsThisMonth({
     }
   }
 
+  const handleLessonNotesChanged = useCallback(({ lessonUUID, hasNote, lessonNotes = [] } = {}) => {
+    if (!lessonUUID) return
+    setData((prev) => {
+      if (!prev) return prev
+      const next = { ...prev }
+      for (const monthKey of Object.keys(next)) {
+        const monthEntry = next[monthKey]
+        if (!monthEntry?.lessons?.length) continue
+        let touched = false
+        const lessons = monthEntry.lessons.map((lesson) => {
+          if (String(lesson?.lessonUUID || '') !== String(lessonUUID)) return lesson
+          touched = true
+          return { ...lesson, hasNote: !!hasNote }
+        })
+        if (touched) {
+          next[monthKey] = { ...monthEntry, lessons }
+        }
+      }
+      return next
+    })
+    setSelectedLesson((prev) => {
+      if (!prev) return prev
+      if (String(prev.lessonUUID || '') !== String(lessonUUID)) return prev
+      return { ...prev, hasNote: !!hasNote, lessonNotes }
+    })
+  }, [setData])
+
   const openChangeLessonCount = (monthKey) => {
     if (studentId == null || !monthKey) return
     setActionError(null)
@@ -955,6 +1005,7 @@ export default function LessonsThisMonth({
           onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
           onRemove={handleRemove}
+          onLessonNotesChanged={handleLessonNotesChanged}
         />
       )}
       {rescheduleChoiceLesson && (

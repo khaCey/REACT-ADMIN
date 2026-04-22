@@ -175,11 +175,16 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
     for (const yyyyMm of allYyyyMm) {
       const studentIdForJoin = Number(id) || id;
       const scheduleResult = await query(
-        `SELECT m.event_id, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
+        `SELECT m.event_id, m.lesson_uuid, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
                 m.awaiting_reschedule_date,
                 m.calendar_sync_status, m.calendar_sync_error,
                 m.reschedule_snapshot_to_date, m.reschedule_snapshot_to_time,
                 m.reschedule_snapshot_from_date, m.reschedule_snapshot_from_time,
+                EXISTS (
+                  SELECT 1
+                  FROM lesson_notes ln
+                  WHERE ln.lesson_uuid = m.lesson_uuid
+                ) AS has_lesson_note,
                 COALESCE(
                   mt.event_id,
                   (SELECT x.event_id FROM monthly_schedule x
@@ -285,6 +290,8 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           time,
           status: (r.status || 'scheduled').toLowerCase(),
           eventID: r.event_id,
+          lessonUUID: r.lesson_uuid || null,
+          hasNote: !!r.has_lesson_note,
           awaitingRescheduleDate: !!r.awaiting_reschedule_date,
           calendarSyncStatus: (r.calendar_sync_status || 'synced').toLowerCase(),
           calendarSyncError: r.calendar_sync_error || null,

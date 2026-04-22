@@ -1,5 +1,6 @@
 -- Student Admin - PostgreSQL Schema
 -- Canonical month key: YYYY-MM
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Students
 CREATE TABLE IF NOT EXISTS students (
@@ -94,6 +95,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_note_group_items_note_unique
 CREATE INDEX IF NOT EXISTS idx_note_group_items_group
   ON note_group_items(note_group_id);
 
+-- Lesson-linked notes (separate from student general notes)
+CREATE TABLE IF NOT EXISTS lesson_notes (
+  id SERIAL PRIMARY KEY,
+  lesson_uuid UUID NOT NULL,
+  staff VARCHAR(255),
+  note TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lesson_notes_lesson_uuid
+  ON lesson_notes(lesson_uuid);
+CREATE INDEX IF NOT EXISTS idx_lesson_notes_created_at
+  ON lesson_notes(created_at DESC);
+
 -- Lessons (monthly totals)
 CREATE TABLE IF NOT EXISTS lessons (
   student_id INTEGER REFERENCES students(id),
@@ -133,6 +149,7 @@ ALTER TABLE payment_groups DROP CONSTRAINT IF EXISTS payment_groups_source_group
 -- Monthly schedule (cached events). Composite PK allows group lessons: one row per student per event.
 CREATE TABLE IF NOT EXISTS monthly_schedule (
   event_id VARCHAR(255) NOT NULL,
+  lesson_uuid UUID NOT NULL DEFAULT gen_random_uuid(),
   title VARCHAR(500),
   date DATE,
   start TIMESTAMPTZ,
@@ -152,6 +169,22 @@ ALTER TABLE monthly_schedule ADD CONSTRAINT monthly_schedule_pkey PRIMARY KEY (e
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NOT NULL DEFAULT 'regular';
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_uuid UUID;
+-- Backfill one stable lesson UUID per logical event, reused by all rows sharing event_id.
+WITH seeded AS (
+  SELECT event_id, gen_random_uuid() AS generated_uuid
+  FROM (
+    SELECT DISTINCT event_id
+    FROM monthly_schedule
+    WHERE lesson_uuid IS NULL
+  ) dedup
+)
+UPDATE monthly_schedule m
+SET lesson_uuid = seeded.generated_uuid
+FROM seeded
+WHERE m.lesson_uuid IS NULL
+  AND m.event_id = seeded.event_id;
+ALTER TABLE monthly_schedule ALTER COLUMN lesson_uuid SET NOT NULL;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES students(id);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_mode VARCHAR(20) NOT NULL DEFAULT 'unknown';
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_sync_status VARCHAR(20) NOT NULL DEFAULT 'synced';
@@ -173,6 +206,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   WHERE calendar_sync_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_group_id
   ON monthly_schedule(group_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_schedule_lesson_uuid
+  ON monthly_schedule(lesson_uuid);
 
 -- Optional manual migration after app no longer reads monthly_schedule.group_id:
 -- DROP INDEX IF EXISTS idx_monthly_schedule_group_id;
