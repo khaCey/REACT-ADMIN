@@ -360,6 +360,13 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
         <span className={`lr-status inline-flex items-center ${sz.status} text-gray-500 mt-0.5 truncate gap-1`}>
           <span className={`mr-0.5 ${sz.dot} rounded-full shrink-0 ${styles.dot}`} />
           {title}
+          {hasLessonNote && (
+            <span
+              className="ml-1 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-slate-700"
+              title="Has lesson note"
+              aria-label="Has lesson note"
+            />
+          )}
         </span>
       </span>
     </button>
