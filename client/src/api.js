@@ -43,6 +43,14 @@ export const api = {
 
   getNotes: (studentId) =>
     fetchApi(`/notes${studentId != null ? `?student_id=${encodeURIComponent(studentId)}` : ''}`),
+  getLessonNotes: (lessonUuid) =>
+    fetchApi(`/notes/lessons/${encodeURIComponent(lessonUuid)}`),
+  addLessonNote: (data) =>
+    fetchApi('/notes/lessons', { method: 'POST', body: JSON.stringify(data) }),
+  updateLessonNote: (id, data) =>
+    fetchApi(`/notes/lessons/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLessonNote: (id) =>
+    fetchApi(`/notes/lessons/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** POST body may include `replicate_to_linked_group: true` and optional `linked_group_id` to duplicate note rows for linked members. */
   addNote: (data) => fetchApi('/notes', { method: 'POST', body: JSON.stringify(data) }),
   /** PUT/DELETE on a linked note id auto-propagates to all rows in its linked note batch. */
