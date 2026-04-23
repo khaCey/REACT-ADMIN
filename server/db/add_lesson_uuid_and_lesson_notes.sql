@@ -2,6 +2,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 ALTER TABLE monthly_schedule
   ADD COLUMN IF NOT EXISTS lesson_uuid UUID;
+ALTER TABLE monthly_schedule
+  ALTER COLUMN lesson_uuid SET DEFAULT gen_random_uuid();
 
 WITH seeded AS (
   SELECT event_id, gen_random_uuid() AS generated_uuid

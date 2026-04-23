@@ -170,6 +170,7 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_date ON monthly_schedule(date);
 
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_kind VARCHAR(20) NOT NULL DEFAULT 'regular';
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS lesson_uuid UUID;
+ALTER TABLE monthly_schedule ALTER COLUMN lesson_uuid SET DEFAULT gen_random_uuid();
 -- Backfill one stable lesson UUID per logical event, reused by all rows sharing event_id.
 WITH seeded AS (
   SELECT event_id, gen_random_uuid() AS generated_uuid
