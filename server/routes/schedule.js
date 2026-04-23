@@ -1434,6 +1434,7 @@ router.post('/book', async (req, res) => {
       });
     }
     const lessonKind = lessonKindForBooking;
+    const lessonUuid = randomUUID();
     const localEventId = buildLocalBookingEventId();
     for (let index = 0; index < orderedStudents.length; index += 1) {
       const studentEntry = orderedStudents[index];
@@ -1441,15 +1442,16 @@ router.post('/book', async (req, res) => {
       const calendarSyncKey = buildCalendarSyncKey();
       await query(
         `INSERT INTO monthly_schedule
-          (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+          (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
            calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
            group_id, group_sort_order,
            reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
          VALUES
-          ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
-           $14, $15, NULL, NULL, NULL, NULL)
+          ($1, $2, $3, $4::date, $5::timestamptz, $6::timestamptz, 'scheduled', $7, $8, $9, $10, $11, $12, $13, NULL, $14, NULL, NULL,
+           $15, $16, NULL, NULL, NULL, NULL)
          ON CONFLICT (event_id, student_name)
          DO UPDATE SET
+           lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
            title = EXCLUDED.title,
            date = EXCLUDED.date,
            start = EXCLUDED.start,
@@ -1473,6 +1475,7 @@ router.post('/book', async (req, res) => {
            reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
         [
           localEventId,
+          lessonUuid,
           title,
           dateStr,
           startDate.toISOString(),
@@ -1790,7 +1793,7 @@ router.post('/reschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date, group_id, group_sort_order,
+        `SELECT event_id, lesson_uuid, student_name, student_id, status, title, awaiting_reschedule_date, group_id, group_sort_order,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
@@ -1883,6 +1886,14 @@ router.post('/reschedule-linked', async (req, res) => {
     const canonicalDestinationTitle = applyRescheduleTitleMarker(canonicalBaseTitle, 'from', movedFromLabel);
 
     const localEventId = buildLocalBookingEventId();
+    const destinationLessonUuid = randomUUID();
+    const sourceLessonUuids = [
+      ...new Set(
+        sourceRowsForReschedule
+          .map((row) => String(row.lesson_uuid || '').trim())
+          .filter(Boolean)
+      ),
+    ];
     const lessonKind = lessonKindForBooking;
     const lessonModeVal =
       lessonKind === 'demo'
@@ -1989,15 +2000,16 @@ router.post('/reschedule-linked', async (req, res) => {
 
       await client.query(
         `INSERT INTO monthly_schedule
-          (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+          (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
            calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
            group_id, group_sort_order,
            reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
          VALUES
-          ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, 'scheduled', $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL,
-           $14, $15, NULL, NULL, $16::date, $17)
+          ($1, $2, $3, $4::date, $5::timestamptz, $6::timestamptz, 'scheduled', $7, $8, $9, $10, $11, $12, $13, NULL, $14, NULL, NULL,
+           $15, $16, NULL, NULL, $17::date, $18)
          ON CONFLICT (event_id, student_name)
          DO UPDATE SET
+           lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
            title = EXCLUDED.title,
            date = EXCLUDED.date,
            start = EXCLUDED.start,
@@ -2021,6 +2033,7 @@ router.post('/reschedule-linked', async (req, res) => {
            reschedule_snapshot_from_time = COALESCE(monthly_schedule.reschedule_snapshot_from_time, EXCLUDED.reschedule_snapshot_from_time)`,
         [
           localEventId,
+          destinationLessonUuid,
           destinationTitle,
           dateStrRaw,
           startDate.toISOString(),
@@ -2069,6 +2082,15 @@ router.post('/reschedule-linked', async (req, res) => {
       { direction: 'from', label: movedFromLabel },
       client.query.bind(client)
     );
+    if (sourceLessonUuids.length > 0) {
+      await client.query(
+        `UPDATE lesson_notes
+            SET lesson_uuid = $2::uuid,
+                updated_at = NOW()
+          WHERE lesson_uuid = ANY($1::uuid[])`,
+        [sourceLessonUuids, destinationLessonUuid]
+      );
+    }
     await client.query('COMMIT');
 
     const startIso = startDate.toISOString();
@@ -2174,7 +2196,7 @@ router.post('/unreschedule-linked', async (req, res) => {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, student_name, student_id, status, title, awaiting_reschedule_date,
+        `SELECT event_id, lesson_uuid, student_name, student_id, status, title, awaiting_reschedule_date,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
@@ -2197,6 +2219,7 @@ router.post('/unreschedule-linked', async (req, res) => {
     }
     const sourceStudentName = String(source.student_name || source_student_name || '').trim();
     if (!sourceStudentName) return res.status(400).json({ error: 'Source student name is missing' });
+    const sourceLessonUuid = String(source.lesson_uuid || '').trim();
 
     const linkRes = await query(
       `SELECT * FROM reschedules WHERE from_event_id = $1`,
@@ -2235,6 +2258,18 @@ router.post('/unreschedule-linked', async (req, res) => {
 
     client = await pool.connect();
     await client.query('BEGIN');
+    const destinationLessonUuids = [
+      ...new Set(destRows.map((row) => String(row.lesson_uuid || '').trim()).filter(Boolean)),
+    ];
+    if (sourceLessonUuid && destinationLessonUuids.length > 0) {
+      await client.query(
+        `UPDATE lesson_notes
+            SET lesson_uuid = $2::uuid,
+                updated_at = NOW()
+          WHERE lesson_uuid = ANY($1::uuid[])`,
+        [destinationLessonUuids, sourceLessonUuid]
+      );
+    }
     await client.query('DELETE FROM monthly_schedule WHERE event_id = $1', [toEventId]);
     await client.query(
       `DELETE FROM reschedules WHERE from_event_id = $1`,

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2 } from 'lucide-react'
+import { Loader2, StickyNote } from 'lucide-react'
+import { api } from '../api'
+import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
@@ -27,7 +29,9 @@ export default function LessonDetailsModal({
   onSelectRescheduleDate,
   onSyncWithCalendar,
   onRemove,
+  onLessonNotesChanged,
 }) {
+  const { success } = useToast()
   const [syncing, setSyncing] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [uncancelConfirmOpen, setUncancelConfirmOpen] = useState(false)
@@ -35,6 +39,17 @@ export default function LessonDetailsModal({
   const [cancelling, setCancelling] = useState(false)
   const [uncancelling, setUncancelling] = useState(false)
   const [unrescheduling, setUnrescheduling] = useState(false)
+  const [lessonNotes, setLessonNotes] = useState([])
+  const [lessonNotesLoading, setLessonNotesLoading] = useState(false)
+  const [lessonNotesError, setLessonNotesError] = useState('')
+  const [lessonNoteDraft, setLessonNoteDraft] = useState('')
+  const [savingLessonNote, setSavingLessonNote] = useState(false)
+  const [deletingLessonNoteId, setDeletingLessonNoteId] = useState(null)
+
+  const lessonUuid = String(lesson?.lessonUUID || '').trim()
+
+  const hasLessonIdentity = lessonUuid !== ''
+
   useEffect(() => {
     setSyncing(false)
     setCancelConfirmOpen(false)
@@ -43,7 +58,38 @@ export default function LessonDetailsModal({
     setCancelling(false)
     setUncancelling(false)
     setUnrescheduling(false)
-  }, [lesson?.eventID])
+    setLessonNotes([])
+    setLessonNotesLoading(false)
+    setLessonNotesError('')
+    setLessonNoteDraft('')
+    setSavingLessonNote(false)
+    setDeletingLessonNoteId(null)
+  }, [lesson?.lessonUUID, lesson?.eventID])
+
+  useEffect(() => {
+    if (!hasLessonIdentity) return
+    let cancelled = false
+    setLessonNotesLoading(true)
+    setLessonNotesError('')
+    api
+      .getLessonNotes(lessonUuid)
+      .then((rows) => {
+        if (cancelled) return
+        setLessonNotes(Array.isArray(rows) ? rows : [])
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setLessonNotesError(err?.message || 'Failed to load lesson notes')
+      })
+      .finally(() => {
+        if (cancelled) return
+        setLessonNotesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hasLessonIdentity, lessonUuid])
+
   useEffect(() => {
     if (!lesson) return
     const onKey = (e) => {
@@ -52,6 +98,17 @@ export default function LessonDetailsModal({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen])
+
+  const lessonNoteCount = lessonNotes.length
+
+  useEffect(() => {
+    if (!hasLessonIdentity) return
+    onLessonNotesChanged?.({
+      lessonUUID: lessonUuid,
+      hasNote: lessonNoteCount > 0,
+      lessonNotes,
+    })
+  }, [hasLessonIdentity, lessonUuid, lessonNoteCount, lessonNotes, onLessonNotesChanged])
 
   if (!lesson) return null
 
@@ -102,7 +159,7 @@ export default function LessonDetailsModal({
     isRescheduled &&
     !!lesson?.rescheduledTo?.eventID &&
     !lesson?.optimisticRescheduledTo
-  const hasExtraNotes =
+  const hasSystemNotes =
     !!lesson?.optimisticRescheduledTo ||
     !!lesson?.rescheduledTo ||
     !!lesson?.rescheduledFrom ||
@@ -182,6 +239,50 @@ export default function LessonDetailsModal({
     }
   }
 
+  const saveLessonNote = async () => {
+    if (!hasLessonIdentity) return
+    const note = lessonNoteDraft.trim()
+    if (!note || savingLessonNote) return
+    setSavingLessonNote(true)
+    setLessonNotesError('')
+    try {
+      const created = await api.addLessonNote({
+        lesson_uuid: lessonUuid,
+        note,
+        staff: '',
+      })
+      setLessonNotes((prev) => [created, ...prev])
+      setLessonNoteDraft('')
+      success('Lesson note saved')
+    } catch (err) {
+      setLessonNotesError(err?.message || 'Failed to save lesson note')
+    } finally {
+      setSavingLessonNote(false)
+    }
+  }
+
+  const removeLessonNote = async (noteId) => {
+    if (!noteId || deletingLessonNoteId != null) return
+    setDeletingLessonNoteId(noteId)
+    setLessonNotesError('')
+    try {
+      await api.deleteLessonNote(noteId)
+      setLessonNotes((prev) => prev.filter((n) => Number(n.id) !== Number(noteId)))
+      success('Lesson note deleted')
+    } catch (err) {
+      setLessonNotesError(err?.message || 'Failed to delete lesson note')
+    } finally {
+      setDeletingLessonNoteId(null)
+    }
+  }
+
+  const noteHeader = useMemo(() => {
+    if (!hasLessonIdentity) return 'Lesson Notes'
+    if (lessonNoteCount === 0) return 'Lesson Notes'
+    if (lessonNoteCount === 1) return 'Lesson Notes (1)'
+    return `Lesson Notes (${lessonNoteCount})`
+  }, [hasLessonIdentity, lessonNoteCount])
+
   return createPortal(
     <>
     <div
@@ -215,8 +316,67 @@ export default function LessonDetailsModal({
               <div className="font-medium">{timeStr}</div>
             </div>
           </div>
+
           <div>
-            <label className="block text-gray-600 mb-1">Notes</label>
+            <div className="mb-1 flex items-center gap-1 text-gray-700">
+              <StickyNote className="h-4 w-4" />
+              <label className="block text-sm font-medium">{noteHeader}</label>
+            </div>
+            <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px] space-y-2">
+              {!hasLessonIdentity && (
+                <div className="text-amber-700">This lesson does not have a stable lesson UUID yet, so lesson notes cannot be saved.</div>
+              )}
+              {lessonNotesLoading && <div>Loading lesson notes…</div>}
+              {!lessonNotesLoading && hasLessonIdentity && lessonNotes.length === 0 && (
+                <div className="text-gray-500">No lesson notes yet.</div>
+              )}
+              {!lessonNotesLoading && lessonNotes.length > 0 && (
+                <ul className="space-y-2">
+                  {lessonNotes.map((n) => (
+                    <li key={n.id} className="rounded border border-gray-200 bg-white p-2">
+                      <div className="whitespace-pre-wrap break-words">{n.note}</div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                        <span>{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</span>
+                        <button
+                          type="button"
+                          disabled={deletingLessonNoteId === n.id}
+                          onClick={() => removeLessonNote(n.id)}
+                          className="rounded border border-red-300 px-2 py-0.5 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          {deletingLessonNoteId === n.id ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {hasLessonIdentity && (
+                <div className="space-y-2 pt-1">
+                  <textarea
+                    value={lessonNoteDraft}
+                    onChange={(e) => setLessonNoteDraft(e.target.value)}
+                    rows={3}
+                    placeholder="Add a lesson note…"
+                    className="w-full rounded border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={saveLessonNote}
+                      disabled={savingLessonNote || !lessonNoteDraft.trim()}
+                      className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {savingLessonNote ? 'Saving…' : 'Save lesson note'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {lessonNotesError && <div className="text-red-600">{lessonNotesError}</div>}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-600 mb-1">System Notes</label>
             <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px]">
               {lesson?.optimisticRescheduledTo && (
                 <div>Moving to: {lesson.optimisticRescheduledTo.date || '--'} {lesson.optimisticRescheduledTo.time || '--'}</div>
@@ -236,7 +396,7 @@ export default function LessonDetailsModal({
               {isAwaitingRescheduleDate && (
                 <div className="text-amber-900">Awaiting a new date (rescheduled; shown in graphite in Google Calendar).</div>
               )}
-              {!hasExtraNotes && 'No additional notes available.'}
+              {!hasSystemNotes && 'No system notes.'}
             </div>
           </div>
         </div>
