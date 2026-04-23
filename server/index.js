@@ -95,6 +95,27 @@ function yyyyMmAddOne(yyyyMm) {
   return `${ny}-${String(nm).padStart(2, '0')}`;
 }
 
+/** Node fetch often throws TypeError("fetch failed") with real reason in err.cause */
+function formatFetchError(err) {
+  if (!err) return 'Unknown error';
+  if (err.name === 'AbortError') {
+    return 'Request timed out (GAS did not respond in time)';
+  }
+  const parts = [];
+  const msg = err.message || String(err);
+  if (msg && msg !== 'fetch failed') parts.push(msg);
+  let c = err.cause;
+  let depth = 0;
+  while (c && depth < 4) {
+    const cm = c.message || c.code || String(c);
+    if (cm) parts.push(cm);
+    c = c.cause;
+    depth += 1;
+  }
+  if (parts.length === 0) return 'fetch failed';
+  return parts.join(' — ');
+}
+
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
   try {
     const { id } = req.params;
@@ -799,8 +820,18 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
     } else {
       return res.status(400).json({ error: 'Body must include month (YYYY-MM) or year (YYYY)' });
     }
-    const fetchRes = await fetch(gasUrl);
+    let fetchRes;
+    try {
+      fetchRes = await fetch(gasUrl);
+    } catch (err) {
+      const detail = formatFetchError(err);
+      throw new Error(`Failed to reach Calendar GAS: ${detail}`);
+    }
     const json = await fetchRes.json().catch(() => ({}));
+    if (!fetchRes.ok) {
+      const msg = json?.error || `GAS responded with ${fetchRes.status}`;
+      return res.status(502).json({ error: msg });
+    }
     if (json.error) {
       return res.status(400).json({ error: json.error });
     }
@@ -829,8 +860,9 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
       teacherSchedulesRefresh,
     });
   } catch (err) {
-    console.error('[calendar-poll/backfill] error:', err.message);
-    res.status(500).json({ error: err.message });
+    const detail = formatFetchError(err);
+    console.error('[calendar-poll/backfill] error:', detail);
+    res.status(500).json({ error: detail });
   }
 });
 
