@@ -360,13 +360,6 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
         <span className={`lr-status inline-flex items-center ${sz.status} text-gray-500 mt-0.5 truncate gap-1`}>
           <span className={`mr-0.5 ${sz.dot} rounded-full shrink-0 ${styles.dot}`} />
           {title}
-          {hasLessonNote && (
-            <span
-              className="ml-1 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-slate-700"
-              title="Has lesson note"
-              aria-label="Has lesson note"
-            />
-          )}
         </span>
       </span>
     </button>
@@ -975,7 +968,7 @@ export default function LessonsThisMonth({
                   className="flex flex-col min-h-0 overflow-hidden flex-1"
                 >
                   <div
-                    className="lr-cards grid gap-1 py-1 pr-1 h-full w-full overflow-hidden grid-cols-[repeat(auto-fill,minmax(98px,1fr))]"
+                    className="lr-cards grid gap-1 py-1 px-1 h-full w-full grid-cols-[repeat(auto-fill,minmax(98px,1fr))]"
                     style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
                   >
                     {monthData.lessons.map((lesson, i) => (

@@ -43,6 +43,7 @@ export default function LessonDetailsModal({
   const [lessonNotesLoading, setLessonNotesLoading] = useState(false)
   const [lessonNotesError, setLessonNotesError] = useState('')
   const [lessonNoteDraft, setLessonNoteDraft] = useState('')
+  const [lessonNoteModalOpen, setLessonNoteModalOpen] = useState(false)
   const [savingLessonNote, setSavingLessonNote] = useState(false)
   const [deletingLessonNoteId, setDeletingLessonNoteId] = useState(null)
 
@@ -62,6 +63,7 @@ export default function LessonDetailsModal({
     setLessonNotesLoading(false)
     setLessonNotesError('')
     setLessonNoteDraft('')
+    setLessonNoteModalOpen(false)
     setSavingLessonNote(false)
     setDeletingLessonNoteId(null)
   }, [lesson?.lessonUUID, lesson?.eventID])
@@ -93,11 +95,11 @@ export default function LessonDetailsModal({
   useEffect(() => {
     if (!lesson) return
     const onKey = (e) => {
-      if (e.key === 'Escape' && !cancelConfirmOpen && !uncancelConfirmOpen && !unrescheduleConfirmOpen) onClose()
+      if (e.key === 'Escape' && !cancelConfirmOpen && !uncancelConfirmOpen && !unrescheduleConfirmOpen && !lessonNoteModalOpen) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen])
+  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen, lessonNoteModalOpen])
 
   const lessonNoteCount = lessonNotes.length
 
@@ -177,9 +179,10 @@ export default function LessonDetailsModal({
     : 'Not specified'
 
   const confirmDialogOpen = cancelConfirmOpen || uncancelConfirmOpen || unrescheduleConfirmOpen
+  const hasBlockingDialog = confirmDialogOpen || lessonNoteModalOpen
 
   const handleBackdropClick = (e) => {
-    if (confirmDialogOpen) return
+    if (hasBlockingDialog) return
     if (e.target === e.currentTarget) onClose()
   }
 
@@ -253,6 +256,7 @@ export default function LessonDetailsModal({
       })
       setLessonNotes((prev) => [created, ...prev])
       setLessonNoteDraft('')
+      setLessonNoteModalOpen(false)
       success('Lesson note saved')
     } catch (err) {
       setLessonNotesError(err?.message || 'Failed to save lesson note')
@@ -351,24 +355,15 @@ export default function LessonDetailsModal({
                 </ul>
               )}
               {hasLessonIdentity && (
-                <div className="space-y-2 pt-1">
-                  <textarea
-                    value={lessonNoteDraft}
-                    onChange={(e) => setLessonNoteDraft(e.target.value)}
-                    rows={3}
-                    placeholder="Add a lesson note…"
-                    className="w-full rounded border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={saveLessonNote}
-                      disabled={savingLessonNote || !lessonNoteDraft.trim()}
-                      className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {savingLessonNote ? 'Saving…' : 'Save lesson note'}
-                    </button>
-                  </div>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setLessonNoteModalOpen(true)}
+                    disabled={savingLessonNote}
+                    className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Add note
+                  </button>
                 </div>
               )}
               {lessonNotesError && <div className="text-red-600">{lessonNotesError}</div>}
@@ -489,6 +484,42 @@ export default function LessonDetailsModal({
         </footer>
       </div>
     </div>
+    {lessonNoteModalOpen && (
+      <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50">
+        <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+          <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <h3 className="text-lg font-semibold">Add lesson note</h3>
+            <button
+              type="button"
+              onClick={() => setLessonNoteModalOpen(false)}
+              disabled={savingLessonNote}
+              className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium hover:bg-gray-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              Close
+            </button>
+          </header>
+          <div className="p-4 space-y-2">
+            <textarea
+              value={lessonNoteDraft}
+              onChange={(e) => setLessonNoteDraft(e.target.value)}
+              rows={4}
+              placeholder="Add a lesson note…"
+              className="w-full rounded border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={saveLessonNote}
+                disabled={savingLessonNote || !lessonNoteDraft.trim()}
+                className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {savingLessonNote ? 'Saving…' : 'Save lesson note'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     {cancelConfirmOpen && (
       <ConfirmActionModal
         title="Cancel lesson"
