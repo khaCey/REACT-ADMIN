@@ -317,11 +317,12 @@ async function applyCreate(entity_type, data) {
       `INSERT INTO monthly_schedule
         (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, student_id, lesson_mode,
          calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at, awaiting_reschedule_date,
-         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
+         reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time, lesson_uuid)
        VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $17::timestamptz, COALESCE($18::boolean, FALSE),
-         NULL, NULL, NULL, NULL)
+         NULL, NULL, NULL, NULL, COALESCE($19::uuid, gen_random_uuid()))
        ON CONFLICT (event_id, student_name) DO UPDATE SET
-         title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED.end,
+         lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
+         title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind,
          student_id = EXCLUDED.student_id, lesson_mode = EXCLUDED.lesson_mode, calendar_sync_status = EXCLUDED.calendar_sync_status,
          calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_sync_key = EXCLUDED.calendar_sync_key,
@@ -350,6 +351,7 @@ async function applyCreate(entity_type, data) {
         o.calendar_sync_attempted_at ?? null,
         o.calendar_synced_at ?? null,
         o.awaiting_reschedule_date ?? false,
+        o.lesson_uuid ?? null,
       ]
     );
   }

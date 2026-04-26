@@ -339,12 +339,15 @@ export async function upsertMonthlySchedule(data, options = {}) {
     }
     await query(
       `INSERT INTO monthly_schedule
-        (event_id, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+        (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
          calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date,
          reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
-       VALUES ($1, $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), COALESCE($13::boolean, FALSE),
+       VALUES ($1,
+         COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $1 LIMIT 1), gen_random_uuid()),
+         $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), COALESCE($13::boolean, FALSE),
          NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
+         lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
          calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
