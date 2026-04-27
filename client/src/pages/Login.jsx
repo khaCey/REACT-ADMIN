@@ -11,7 +11,7 @@ export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = location.state?.from?.pathname || '/students'
+  const from = location.state?.from?.pathname || '/dashboard'
 
   useEffect(() => {
     api.getStaffList()
