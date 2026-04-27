@@ -265,6 +265,7 @@ export default function Dashboard() {
                           <div key={segIdx} className="grid grid-cols-4 gap-1 w-full">
                             {seg.lessons.map((lesson, li) => {
                               const colSpan = seg.layout === 'full' ? 'col-span-4' : 'col-span-2'
+                              const hasNote = !!(lesson?.has_note ?? lesson?.hasNote)
                               return (
                             <article
                               key={`${lesson.event_id ?? 'ev'}-${lesson.student_id ?? 's'}-${segIdx}-${li}-${lesson.student_name ?? ''}`}
@@ -278,8 +279,13 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden px-2 ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card relative h-[50px] rounded border flex items-center justify-between overflow-hidden px-2 ${colSpan} border-gray-200 bg-gray-50 ${hasNote ? 'ring-1 ring-amber-200' : ''} ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
+                              {hasNote && (
+                                <span className="absolute top-1 right-1 inline-grid h-5 w-5 place-items-center rounded-full border border-amber-300 bg-amber-50 text-[10px] font-bold text-amber-700 shadow-sm">
+                                  <span className="block leading-[1]">!</span>
+                                </span>
+                              )}
                               <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0 truncate">
                                 {lesson.student_name}
                               </span>

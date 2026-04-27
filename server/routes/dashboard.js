@@ -215,6 +215,11 @@ router.get('/today-lessons', async (_req, res) => {
                )
              )
          ) AS paid_this_month,
+         EXISTS (
+           SELECT 1
+           FROM lesson_notes ln
+           WHERE ln.lesson_uuid = m.lesson_uuid
+         ) AS has_note,
          NOT EXISTS (
            SELECT 1 FROM monthly_schedule m2
            WHERE m2.student_name = m.student_name
