@@ -343,7 +343,7 @@ export async function upsertMonthlySchedule(data, options = {}) {
          calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date,
          reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
        VALUES ($1,
-         COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $1 LIMIT 1), gen_random_uuid()),
+         COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $14::text LIMIT 1), gen_random_uuid()),
          $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), COALESCE($13::boolean, FALSE),
          NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
@@ -359,7 +359,7 @@ export async function upsertMonthlySchedule(data, options = {}) {
          reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
          reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
          reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
-      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId, awaitingReschedulePollMerge]
+      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId, awaitingReschedulePollMerge, eventId]
     );
     upserted++;
   }
