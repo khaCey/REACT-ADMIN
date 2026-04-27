@@ -361,6 +361,51 @@ CREATE TABLE IF NOT EXISTS notification_reads (
 
 CREATE INDEX IF NOT EXISTS idx_notification_reads_staff_id ON notification_reads(staff_id);
 
+-- Staff threaded messages (separate from notifications).
+CREATE TABLE IF NOT EXISTS message_conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject VARCHAR(255),
+  created_by_staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  archived_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS message_conversation_participants (
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  left_at TIMESTAMPTZ,
+  PRIMARY KEY (conversation_id, staff_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_items (
+  id BIGSERIAL PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  sender_staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE RESTRICT,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS message_participant_reads (
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  last_read_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, staff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_items_conversation_created
+  ON message_items(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_items_sender
+  ON message_items(sender_staff_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_conversation_participants_staff
+  ON message_conversation_participants(staff_id);
+CREATE INDEX IF NOT EXISTS idx_message_participant_reads_staff_updated
+  ON message_participant_reads(staff_id, updated_at DESC);
+
 -- Staff shift log: login = shift start, logout = shift end
 CREATE TABLE IF NOT EXISTS staff_shifts (
   id SERIAL PRIMARY KEY,

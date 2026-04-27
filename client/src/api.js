@@ -149,6 +149,34 @@ export const api = {
   deleteNotification: (id) =>
     fetchApi(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  getMessageStaff: () => fetchApi('/messages/staff'),
+  getMessageConversations: ({ limit = 50, offset = 0 } = {}) => {
+    const q = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    })
+    return fetchApi(`/messages/conversations?${q}`)
+  },
+  createMessageConversation: (data) =>
+    fetchApi('/messages/conversations', { method: 'POST', body: JSON.stringify(data) }),
+  getMessageConversation: (conversationId) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}`),
+  getMessageItems: (conversationId, { limit = 50, before = null } = {}) => {
+    const q = new URLSearchParams({ limit: String(limit) })
+    if (before != null && before !== '') q.set('before', String(before))
+    return fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/items?${q.toString()}`)
+  },
+  sendMessageItem: (conversationId, body) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  markMessageConversationRead: (conversationId, lastReadMessageId = null) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ last_read_message_id: lastReadMessageId }),
+    }),
+
   getUnpaidStudents: (month) =>
     fetchApi(month ? `/dashboard/unpaid?month=${encodeURIComponent(month)}` : '/dashboard/unpaid'),
   getUnscheduledLessonsStudents: () => fetchApi('/dashboard/unscheduled-lessons'),

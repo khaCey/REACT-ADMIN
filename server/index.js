@@ -34,6 +34,7 @@ import authRouter from './routes/auth.js';
 import staffRouter from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
+import messagesRouter from './routes/messages.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import {
   bulkSyncCalendarsFromGasForStaffType,
@@ -400,6 +401,7 @@ app.use('/api/shifts', shiftsRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/change-log', changeLogRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/messages', messagesRouter);
 
 /** Admin: create backup (pg_dump + Drive upload). Admin only. */
 app.post('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
