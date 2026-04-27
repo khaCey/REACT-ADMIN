@@ -471,7 +471,7 @@ async function importMonthlySchedule() {
         await pool.query(
           `INSERT INTO monthly_schedule (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id)
            VALUES ($1,
-             COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $1 LIMIT 1), gen_random_uuid()),
+             COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $13::text LIMIT 1), gen_random_uuid()),
              $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT (event_id, student_name) DO UPDATE SET
              lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
@@ -491,6 +491,7 @@ async function importMonthlySchedule() {
             lessonKind,
             lessonMode,
             studentId,
+            eventId,
           ]
         );
         imported++;
