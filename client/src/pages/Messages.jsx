@@ -199,17 +199,47 @@ export default function Messages() {
     return visit('root', 0)
   }
   const tree = buildTree(items)
-  const renderNode = (entry) => {
+  const renderNode = (entry, ancestorsHasNext = [], isLast = true) => {
     const { node, depth, children } = entry
     const clampedDepth = Math.min(depth, 6)
-    const indentPx = clampedDepth * 18
+    const railStep = 18
+    const railOffset = 8
+    const elbowTop = 20
+    const elbowWidth = 10
+    const currentRailX = (Math.max(clampedDepth - 1, 0) * railStep) + railOffset
+    const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 2 : 0
     return (
-      <div key={node.id} className="space-y-2" style={{ marginLeft: `${indentPx}px` }}>
-        <div className="relative pl-4">
-          {depth > 0 && (
+      <div key={node.id} className="space-y-2">
+        <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
+          {ancestorsHasNext.map((showRail, idx) =>
+            showRail ? (
+              <span
+                key={`ancestor-rail-${node.id}-${idx}`}
+                aria-hidden="true"
+                className="absolute top-0 bottom-0 w-px bg-gray-300"
+                style={{ left: `${(idx * railStep) + railOffset}px` }}
+              />
+            ) : null
+          )}
+          {clampedDepth > 0 && (
             <>
-              <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-px bg-gray-200" />
-              <span aria-hidden="true" className="absolute left-0 top-5 h-px w-3 bg-gray-300" />
+              <span
+                aria-hidden="true"
+                className="absolute w-px bg-gray-300"
+                style={{ left: `${currentRailX}px`, top: 0, height: `${elbowTop}px` }}
+              />
+              {!isLast && (
+                <span
+                  aria-hidden="true"
+                  className="absolute w-px bg-gray-300"
+                  style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, bottom: 0 }}
+                />
+              )}
+              <span
+                aria-hidden="true"
+                className="absolute h-px bg-gray-300"
+                style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, width: `${elbowWidth}px` }}
+              />
             </>
           )}
           <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
@@ -235,7 +265,7 @@ export default function Messages() {
         </div>
         {children.length > 0 && (
           <div className="space-y-2 mt-1">
-            {children.map((child) => renderNode(child))}
+            {children.map((child, idx) => renderNode(child, [...ancestorsHasNext, !isLast], idx === children.length - 1))}
           </div>
         )}
       </div>
@@ -411,7 +441,7 @@ export default function Messages() {
                     No messages yet.
                   </p>
                 ) : (
-                  tree.map((entry) => renderNode(entry))
+                  tree.map((entry, idx) => renderNode(entry, [], idx === tree.length - 1))
                 )}
               </div>
               <div className="border-t border-gray-200 p-3">
