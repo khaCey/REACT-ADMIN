@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Send, Plus } from 'lucide-react'
+import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox } from 'lucide-react'
 import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -208,15 +208,19 @@ export default function Messages() {
         <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
-            <span className="text-[11px] text-gray-500">{formatDateTime(node.created_at)}</span>
+            <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+              <Clock3 className="w-3 h-3 text-gray-400" />
+              {formatDateTime(node.created_at)}
+            </span>
           </div>
           <p className="text-sm whitespace-pre-wrap text-gray-900">{node.body}</p>
           <div className="mt-2">
             <button
               type="button"
               onClick={() => setReplyParentId(node.id)}
-              className="text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
             >
+              <Reply className="w-3 h-3" />
               Reply
             </button>
           </div>
@@ -338,10 +342,16 @@ export default function Messages() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
         <section className="rounded-lg border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col">
-          <div className="px-3 py-2 border-b border-gray-200 text-sm font-semibold text-gray-800">Threads</div>
+          <div className="px-3 py-2 border-b border-gray-200 text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5">
+            <Inbox className="w-4 h-4 text-gray-500" />
+            Threads
+          </div>
           <div className="overflow-y-auto flex-1 min-h-0">
             {conversations.length === 0 ? (
-              <p className="px-3 py-3 text-sm text-gray-500">No conversations yet.</p>
+              <p className="px-3 py-3 text-sm text-gray-500 inline-flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-gray-400" />
+                No conversations yet.
+              </p>
             ) : (
               conversations.map((conv) => (
                 <button
@@ -361,7 +371,8 @@ export default function Messages() {
                     )}
                   </div>
                   <p className="text-xs text-gray-600 truncate mt-0.5">{conv.last_message_body || 'No messages yet'}</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5">
+                  <p className="text-[11px] text-gray-500 mt-0.5 inline-flex items-center gap-1">
+                    <Clock3 className="w-3 h-3 text-gray-400" />
                     {conv.last_message_sender_name ? `${conv.last_message_sender_name} · ` : ''}
                     {formatDateTime(conv.last_message_at || conv.updated_at || conv.created_at)}
                   </p>
@@ -380,13 +391,17 @@ export default function Messages() {
                 <p className="text-sm font-semibold text-gray-900">
                   {selectedConversation?.subject || selectedConversationPreview?.subject || 'Untitled conversation'}
                 </p>
-                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                <p className="text-xs text-gray-500 mt-0.5 truncate inline-flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-gray-400" />
                   Participants: {participants.map((p) => p.name).join(', ') || 'Loading…'}
                 </p>
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2">
                 {tree.length === 0 ? (
-                  <p className="text-sm text-gray-500">No messages yet.</p>
+                  <p className="text-sm text-gray-500 inline-flex items-center gap-1.5">
+                    <MessageSquare className="w-4 h-4 text-gray-400" />
+                    No messages yet.
+                  </p>
                 ) : (
                   tree.map((entry) => renderNode(entry))
                 )}
