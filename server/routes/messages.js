@@ -111,9 +111,9 @@ router.post('/conversations', async (req, res) => {
     );
 
     const messageResult = await client.query(
-      `INSERT INTO message_items (conversation_id, sender_staff_id, body)
-       VALUES ($1::uuid, $2, $3)
-       RETURNING id, conversation_id, sender_staff_id, body, created_at`,
+      `INSERT INTO message_items (conversation_id, sender_staff_id, parent_message_id, body)
+       VALUES ($1::uuid, $2, NULL, $3)
+       RETURNING id, conversation_id, sender_staff_id, parent_message_id, body, created_at`,
       [conversation.id, staffId, body]
     );
     const firstMessage = messageResult.rows[0];
@@ -283,13 +283,13 @@ router.get('/conversations/:id/items', async (req, res) => {
     const hasBefore = Number.isFinite(before) && before > 0;
 
     const itemsResult = await query(
-      `SELECT mi.id, mi.conversation_id, mi.sender_staff_id, mi.body, mi.created_at, mi.edited_at, mi.deleted_at,
+      `SELECT mi.id, mi.conversation_id, mi.sender_staff_id, mi.parent_message_id, mi.body, mi.created_at, mi.edited_at, mi.deleted_at,
               s.name AS sender_name
        FROM message_items mi
        INNER JOIN staff s ON s.id = mi.sender_staff_id
        WHERE mi.conversation_id = $1::uuid
          AND ($2::bigint IS NULL OR mi.id < $2::bigint)
-       ORDER BY mi.id DESC
+       ORDER BY mi.created_at DESC, mi.id DESC
        LIMIT $3`,
       [conversationId, hasBefore ? before : null, limit]
     );
@@ -315,12 +315,32 @@ router.post('/conversations/:id/items', async (req, res) => {
 
     const body = String(req.body?.body || '').trim();
     if (!body) return res.status(400).json({ error: 'Message body is required' });
+    const parentMessageIdRaw = req.body?.parent_message_id;
+    const parentMessageId =
+      parentMessageIdRaw == null || parentMessageIdRaw === ''
+        ? null
+        : Number.parseInt(parentMessageIdRaw, 10);
+    if (parentMessageId != null && (!Number.isFinite(parentMessageId) || parentMessageId <= 0)) {
+      return res.status(400).json({ error: 'Invalid parent_message_id' });
+    }
+    if (parentMessageId != null) {
+      const parentResult = await query(
+        `SELECT id
+         FROM message_items
+         WHERE id = $1
+           AND conversation_id = $2::uuid`,
+        [parentMessageId, conversationId]
+      );
+      if (parentResult.rows.length === 0) {
+        return res.status(400).json({ error: 'parent_message_id must belong to this conversation' });
+      }
+    }
 
     const itemResult = await query(
-      `INSERT INTO message_items (conversation_id, sender_staff_id, body)
-       VALUES ($1::uuid, $2, $3)
-       RETURNING id, conversation_id, sender_staff_id, body, created_at, edited_at, deleted_at`,
-      [conversationId, staffId, body]
+      `INSERT INTO message_items (conversation_id, sender_staff_id, parent_message_id, body)
+       VALUES ($1::uuid, $2, $3, $4)
+       RETURNING id, conversation_id, sender_staff_id, parent_message_id, body, created_at, edited_at, deleted_at`,
+      [conversationId, staffId, parentMessageId, body]
     );
 
     await query(
@@ -361,7 +381,7 @@ router.post('/conversations/:id/items', async (req, res) => {
     });
 
     const withSender = await query(
-      `SELECT mi.id, mi.conversation_id, mi.sender_staff_id, mi.body, mi.created_at, mi.edited_at, mi.deleted_at,
+      `SELECT mi.id, mi.conversation_id, mi.sender_staff_id, mi.parent_message_id, mi.body, mi.created_at, mi.edited_at, mi.deleted_at,
               s.name AS sender_name
        FROM message_items mi
        INNER JOIN staff s ON s.id = mi.sender_staff_id

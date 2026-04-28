@@ -383,11 +383,14 @@ CREATE TABLE IF NOT EXISTS message_items (
   id BIGSERIAL PRIMARY KEY,
   conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
   sender_staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE RESTRICT,
+  parent_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL,
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   edited_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ
 );
+ALTER TABLE message_items
+  ADD COLUMN IF NOT EXISTS parent_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS message_participant_reads (
   conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
@@ -399,6 +402,8 @@ CREATE TABLE IF NOT EXISTS message_participant_reads (
 
 CREATE INDEX IF NOT EXISTS idx_message_items_conversation_created
   ON message_items(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_items_conversation_parent_created
+  ON message_items(conversation_id, parent_message_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_message_items_sender
   ON message_items(sender_staff_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_message_conversation_participants_staff
