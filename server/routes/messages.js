@@ -25,20 +25,50 @@ async function ensureParticipant(conversationId, staffId, db = query) {
 async function createMessageNotifications({
   senderStaffId,
   recipientStaffIds,
+  conversationId,
   subject,
   body,
 }, db = query) {
   const targets = [...new Set((recipientStaffIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0 && id !== Number(senderStaffId)))];
-  if (targets.length === 0) return 0;
+  const conversationKey = String(conversationId || '').trim();
+  if (targets.length === 0 || !conversationKey) return 0;
   const title = String(subject || '').trim() || 'New message';
   const preview = String(body || '').trim();
   const message = preview.length > 220 ? `${preview.slice(0, 217)}...` : preview;
   const result = await db(
-    `INSERT INTO notifications (title, message, kind, is_system, created_by_staff_id, target_staff_id)
-     SELECT $1, $2, 'message', FALSE, $3, unnest($4::int[])`,
-    [title, message, senderStaffId, targets]
+    `WITH target_staff AS (
+       SELECT unnest($4::int[]) AS target_staff_id
+     ),
+     upserted AS (
+       INSERT INTO notifications (title, message, kind, is_system, created_by_staff_id, target_staff_id, slug, created_at)
+       SELECT
+         $1,
+         $2,
+         'message',
+         FALSE,
+         $3,
+         ts.target_staff_id,
+         concat('message-thread:', $5::text, ':staff:', ts.target_staff_id::text),
+         NOW()
+       FROM target_staff ts
+       ON CONFLICT (slug) DO UPDATE
+       SET
+         title = EXCLUDED.title,
+         message = EXCLUDED.message,
+         kind = EXCLUDED.kind,
+         is_system = EXCLUDED.is_system,
+         created_by_staff_id = EXCLUDED.created_by_staff_id,
+         target_staff_id = EXCLUDED.target_staff_id,
+         created_at = NOW()
+       RETURNING id, target_staff_id
+     )
+     DELETE FROM notification_reads nr
+     USING upserted u
+     WHERE nr.notification_id = u.id
+       AND nr.staff_id = u.target_staff_id`,
+    [title, message, senderStaffId, targets, conversationKey]
   );
-  return result.rowCount || 0;
+  return targets.length;
 }
 
 router.get('/staff', async (req, res) => {
@@ -137,6 +167,7 @@ router.post('/conversations', async (req, res) => {
       {
         senderStaffId: staffId,
         recipientStaffIds: participantIds,
+        conversationId: conversation.id,
         subject,
         body,
       },
@@ -376,6 +407,7 @@ router.post('/conversations/:id/items', async (req, res) => {
     await createMessageNotifications({
       senderStaffId: staffId,
       recipientStaffIds: participantRows.rows.map((r) => r.staff_id),
+      conversationId,
       subject: conversationResult.rows[0]?.subject || '',
       body,
     });
