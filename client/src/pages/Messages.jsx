@@ -202,14 +202,14 @@ export default function Messages() {
   const renderNode = (entry, ancestorsHasNext = [], isLast = true) => {
     const { node, depth, children } = entry
     const clampedDepth = Math.min(depth, 6)
-    const railStep = 18
-    const railOffset = 8
+    const railStep = 16
+    const railOffset = 7
     const elbowTop = 20
-    const elbowWidth = 10
+    const elbowWidth = 9
     const currentRailX = (Math.max(clampedDepth - 1, 0) * railStep) + railOffset
-    const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 2 : 0
+    const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 4 : 0
     return (
-      <div key={node.id} className="space-y-2">
+      <div key={node.id} className="space-y-1.5">
         <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
           {ancestorsHasNext.map((showRail, idx) =>
             showRail ? (
@@ -242,7 +242,7 @@ export default function Messages() {
               />
             </>
           )}
-          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="border-b border-gray-100 px-1 py-2">
             <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
               <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
@@ -264,7 +264,7 @@ export default function Messages() {
           </div>
         </div>
         {children.length > 0 && (
-          <div className="space-y-2 mt-1">
+          <div className="space-y-1">
             {children.map((child, idx) => renderNode(child, [...ancestorsHasNext, !isLast], idx === children.length - 1))}
           </div>
         )}
