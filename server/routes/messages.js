@@ -22,6 +22,25 @@ async function ensureParticipant(conversationId, staffId, db = query) {
   return result.rows.length > 0;
 }
 
+async function createMessageNotifications({
+  senderStaffId,
+  recipientStaffIds,
+  subject,
+  body,
+}, db = query) {
+  const targets = [...new Set((recipientStaffIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0 && id !== Number(senderStaffId)))];
+  if (targets.length === 0) return 0;
+  const title = String(subject || '').trim() || 'New message';
+  const preview = String(body || '').trim();
+  const message = preview.length > 220 ? `${preview.slice(0, 217)}...` : preview;
+  const result = await db(
+    `INSERT INTO notifications (title, message, kind, is_system, created_by_staff_id, target_staff_id)
+     SELECT $1, $2, 'message', FALSE, $3, unnest($4::int[])`,
+    [title, message, senderStaffId, targets]
+  );
+  return result.rowCount || 0;
+}
+
 router.get('/staff', async (req, res) => {
   try {
     const staffId = req.staff?.id;
@@ -112,6 +131,16 @@ router.post('/conversations', async (req, res) => {
     await client.query(
       `UPDATE message_conversations SET updated_at = NOW() WHERE id = $1::uuid`,
       [conversation.id]
+    );
+
+    await createMessageNotifications(
+      {
+        senderStaffId: staffId,
+        recipientStaffIds: participantIds,
+        subject,
+        body,
+      },
+      client.query.bind(client)
     );
     await client.query('COMMIT');
 
@@ -310,6 +339,26 @@ router.post('/conversations/:id/items', async (req, res) => {
          updated_at = NOW()`,
       [conversationId, staffId, itemResult.rows[0].id]
     );
+
+    const participantRows = await query(
+      `SELECT staff_id
+       FROM message_conversation_participants
+       WHERE conversation_id = $1::uuid
+         AND left_at IS NULL`,
+      [conversationId]
+    );
+    const conversationResult = await query(
+      `SELECT subject
+       FROM message_conversations
+       WHERE id = $1::uuid`,
+      [conversationId]
+    );
+    await createMessageNotifications({
+      senderStaffId: staffId,
+      recipientStaffIds: participantRows.rows.map((r) => r.staff_id),
+      subject: conversationResult.rows[0]?.subject || '',
+      body,
+    });
 
     const withSender = await query(
       `SELECT mi.id, mi.conversation_id, mi.sender_staff_id, mi.body, mi.created_at, mi.edited_at, mi.deleted_at,

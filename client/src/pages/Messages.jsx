@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, RefreshCw, Send, Plus } from 'lucide-react'
+import { MessageSquare, Send, Plus } from 'lucide-react'
 import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -26,6 +26,21 @@ export default function Messages() {
   const [createBody, setCreateBody] = useState('')
   const [staffOptions, setStaffOptions] = useState([])
   const [selectedParticipantIds, setSelectedParticipantIds] = useState([])
+  const selectedParticipantIdNums = useMemo(
+    () =>
+      selectedParticipantIds
+        .map((v) => Number.parseInt(v, 10))
+        .filter((v) => Number.isFinite(v) && v > 0),
+    [selectedParticipantIds]
+  )
+  const allStaffIdStrings = useMemo(
+    () => staffOptions.map((s) => String(s.id)),
+    [staffOptions]
+  )
+  const isAllParticipantsSelected =
+    staffOptions.length > 0 &&
+    allStaffIdStrings.length > 0 &&
+    allStaffIdStrings.every((id) => selectedParticipantIds.includes(id))
 
   const selectedConversationPreview = useMemo(
     () => conversations.find((c) => String(c.id) === String(selectedConversationId)) || null,
@@ -119,13 +134,10 @@ export default function Messages() {
     setCreating(true)
     setError('')
     try {
-      const participantIds = selectedParticipantIds
-        .map((v) => Number.parseInt(v, 10))
-        .filter((v) => Number.isFinite(v) && v > 0)
       const created = await api.createMessageConversation({
         subject: createSubject.trim(),
         message: body,
-        participant_ids: participantIds,
+        participant_ids: selectedParticipantIdNums,
       })
       const conversationId = created?.conversation?.id
       setShowCreate(false)
@@ -157,23 +169,7 @@ export default function Messages() {
             className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            New thread
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setError('')
-              try {
-                await fetchConversations()
-                await fetchConversationDetails(selectedConversationId)
-              } catch (err) {
-                setError(err.message || 'Refresh failed')
-              }
-            }}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+            New Message
           </button>
         </div>
       </div>
@@ -185,34 +181,59 @@ export default function Messages() {
       )}
 
       {showCreate && (
-        <form onSubmit={handleCreateConversation} className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+        <form onSubmit={handleCreateConversation} className="mb-3 rounded-lg border border-gray-200 bg-white p-3 space-y-2">
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Subject (optional)</label>
             <input
               value={createSubject}
               onChange={(e) => setCreateSubject(e.target.value)}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-              placeholder="Thread subject"
+              placeholder="Message Subject"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Participants</label>
-            <select
-              multiple
-              value={selectedParticipantIds}
-              onChange={(e) => setSelectedParticipantIds(Array.from(e.target.selectedOptions).map((opt) => opt.value))}
-              className="w-full min-h-[88px] rounded border border-gray-300 px-2 py-1.5 text-sm bg-white"
-            >
-              {staffOptions.map((s) => (
-                <option key={s.id} value={String(s.id)}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <div className="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple.</div>
+            <div className="max-h-40 overflow-y-auto rounded border border-gray-300 bg-white px-2 py-1.5 space-y-1.5">
+              <label className="flex items-center gap-2 text-sm text-gray-900">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300"
+                  checked={isAllParticipantsSelected}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedParticipantIds(allStaffIdStrings)
+                    } else {
+                      setSelectedParticipantIds([])
+                    }
+                  }}
+                />
+                <span>All</span>
+              </label>
+              {staffOptions.map((s) => {
+                const value = String(s.id)
+                const checked = selectedParticipantIds.includes(value)
+                return (
+                  <label key={s.id} className="flex items-center gap-2 text-sm text-gray-900">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300"
+                      checked={checked}
+                      onChange={(e) => {
+                        setSelectedParticipantIds((prev) => {
+                          if (e.target.checked) {
+                            return [...new Set([...prev, value])]
+                          }
+                          return prev.filter((id) => id !== value)
+                        })
+                      }}
+                    />
+                    <span>{s.name}</span>
+                  </label>
+                )
+              })}
+            </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">First message</label>
             <textarea
               value={createBody}
               onChange={(e) => setCreateBody(e.target.value)}
