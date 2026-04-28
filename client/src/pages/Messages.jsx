@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox, PencilLine, ChevronUp, MoreHorizontal } from 'lucide-react'
+import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox, PencilLine, MoreHorizontal } from 'lucide-react'
 import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -219,9 +219,10 @@ export default function Messages() {
     const currentRailX = ((Math.max(clampedDepth - 1, 0)) * railStep) + railOffset
     const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 2 : 0
     const senderName = node.sender_name || `Staff #${node.sender_staff_id}`
+    const shouldExtendCurrentRail = !isLast || children.length > 0
     return (
       <div key={node.id} className="space-y-1.5">
-        <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
+        <div className="relative space-y-2" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
           {ancestorHasMore.map((showRail, idx) => (
             showRail ? (
               <span
@@ -239,7 +240,7 @@ export default function Messages() {
                 className="absolute w-px bg-gray-300"
                 style={{ left: `${currentRailX}px`, top: 0, height: `${elbowTop}px` }}
               />
-              {!isLast && (
+              {shouldExtendCurrentRail && (
                 <span
                   aria-hidden="true"
                   className="absolute w-px bg-gray-300"
@@ -266,13 +267,6 @@ export default function Messages() {
             <div className="mt-2 inline-flex items-center gap-3 text-xs text-gray-600">
               <button
                 type="button"
-                className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-              >
-                <ChevronUp className="h-3.5 w-3.5" />
-                Vote
-              </button>
-              <button
-                type="button"
                 onClick={() => setReplyParentId(node.id)}
                 className="inline-flex items-center gap-1 font-medium text-green-700 hover:text-green-900 cursor-pointer"
               >
@@ -285,12 +279,12 @@ export default function Messages() {
               </button>
             </div>
           </div>
-        </div>
-        {children.length > 0 && (
-          <div className="space-y-2">
+          {children.length > 0 && (
+            <div className="space-y-2">
             {children.map((child, idx) => renderNode(child, [...ancestorHasMore, !isLast], idx === children.length - 1))}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
     )
   }
