@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox, PencilLine } from 'lucide-react'
 import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -11,6 +12,8 @@ function formatDateTime(value) {
 }
 
 export default function Messages() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [conversations, setConversations] = useState([])
@@ -110,6 +113,13 @@ export default function Messages() {
     })
   }, [selectedConversationId, fetchConversationDetails])
 
+  useEffect(() => {
+    const targetConversationId = String(location.state?.conversationId || '').trim()
+    if (!targetConversationId) return
+    setSelectedConversationId(targetConversationId)
+    navigate(location.pathname, { replace: true, state: {} })
+  }, [location.pathname, location.state?.conversationId, navigate])
+
   const handleSendReply = async () => {
     if (!selectedConversationId) return
     const body = replyBody.trim()
@@ -199,73 +209,37 @@ export default function Messages() {
     return visit('root', 0)
   }
   const tree = buildTree(items)
-  const renderNode = (entry, ancestorsHasNext = [], isLast = true) => {
+  const renderNode = (entry) => {
     const { node, depth, children } = entry
     const clampedDepth = Math.min(depth, 6)
-    const railStep = 16
-    const railOffset = 7
-    const elbowTop = 20
-    const elbowWidth = 9
-    const currentRailX = (Math.max(clampedDepth - 1, 0) * railStep) + railOffset
-    const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 4 : 0
+    const indentPx = clampedDepth * 16
     return (
-      <div key={node.id} className="space-y-1.5">
-        <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
-          {ancestorsHasNext.map((showRail, idx) =>
-            showRail ? (
-              <span
-                key={`ancestor-rail-${node.id}-${idx}`}
-                aria-hidden="true"
-                className="absolute top-0 bottom-0 w-px bg-gray-300"
-                style={{ left: `${(idx * railStep) + railOffset}px` }}
-              />
-            ) : null
-          )}
-          {clampedDepth > 0 && (
-            <>
-              <span
-                aria-hidden="true"
-                className="absolute w-px bg-gray-300"
-                style={{ left: `${currentRailX}px`, top: 0, height: `${elbowTop}px` }}
-              />
-              {!isLast && (
-                <span
-                  aria-hidden="true"
-                  className="absolute w-px bg-gray-300"
-                  style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, bottom: 0 }}
-                />
-              )}
-              <span
-                aria-hidden="true"
-                className="absolute h-px bg-gray-300"
-                style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, width: `${elbowWidth}px` }}
-              />
-            </>
-          )}
-          <div className="border-b border-gray-100 px-1 py-2">
-            <div className="flex items-center justify-between gap-2 mb-1">
+      <div key={node.id} className="space-y-1.5" style={indentPx > 0 ? { marginLeft: `${indentPx}px` } : undefined}>
+        <div className={`relative ${clampedDepth > 0 ? 'border-l border-gray-300 pl-3' : ''}`}>
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+            <div className="mb-1 flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
-              <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
-                <Clock3 className="w-3 h-3 text-gray-400" />
+              <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                <Clock3 className="h-3 w-3 text-gray-400" />
                 {formatDateTime(node.created_at)}
               </span>
             </div>
-            <p className="text-sm whitespace-pre-wrap text-gray-900">{node.body}</p>
+            <p className="whitespace-pre-wrap text-sm text-gray-900">{node.body}</p>
             <div className="mt-2">
               <button
                 type="button"
                 onClick={() => setReplyParentId(node.id)}
                 className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
               >
-                <Reply className="w-3 h-3" />
+                <Reply className="h-3 w-3" />
                 Reply
               </button>
             </div>
           </div>
         </div>
         {children.length > 0 && (
-          <div className="space-y-1">
-            {children.map((child, idx) => renderNode(child, [...ancestorsHasNext, !isLast], idx === children.length - 1))}
+          <div className="space-y-2">
+            {children.map((child) => renderNode(child))}
           </div>
         )}
       </div>
@@ -298,19 +272,19 @@ export default function Messages() {
       )}
 
       {showCreate && (
-        <form onSubmit={handleCreateConversation} className="mb-3 rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+        <form onSubmit={handleCreateConversation} className="mb-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Subject (optional)</label>
             <input
               value={createSubject}
               onChange={(e) => setCreateSubject(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="w-full rounded-md border border-gray-300 px-2.5 py-2 text-sm"
               placeholder="Message Subject"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Participants</label>
-            <div className="max-h-40 overflow-y-auto rounded border border-gray-300 bg-white px-2 py-1.5 space-y-1.5">
+            <div className="max-h-40 overflow-y-auto rounded-md border border-gray-300 bg-gray-50 px-2.5 py-2 space-y-1.5">
               <label className="flex items-center gap-2 text-sm text-gray-900">
                 <input
                   type="checkbox"
@@ -354,7 +328,7 @@ export default function Messages() {
             <textarea
               value={createBody}
               onChange={(e) => setCreateBody(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="w-full rounded-md border border-gray-300 px-2.5 py-2 text-sm"
               rows={3}
               placeholder="Type your message..."
             />
@@ -379,7 +353,7 @@ export default function Messages() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
-        <section className="rounded-lg border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col">
+        <section className="rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col shadow-sm">
           <div className="px-3 py-2 border-b border-gray-200 text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5">
             <Inbox className="w-4 h-4 text-gray-500" />
             Threads
@@ -396,17 +370,22 @@ export default function Messages() {
                   key={conv.id}
                   type="button"
                   onClick={() => setSelectedConversationId(conv.id)}
-                  className={`w-full text-left px-3 py-2 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                    String(conv.id) === String(selectedConversationId) ? 'bg-green-50' : 'bg-white'
+                  className={`w-full text-left px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition ${
+                    String(conv.id) === String(selectedConversationId)
+                      ? 'bg-green-50 border-l-4 border-l-green-500'
+                      : 'bg-white border-l-4 border-l-transparent'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-gray-900 truncate">{conv.subject || 'Untitled conversation'}</p>
-                    {Number(conv.unread_count || 0) > 0 && (
-                      <span className="inline-flex min-w-5 justify-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700">
-                        {conv.unread_count}
-                      </span>
-                    )}
+                    <div className="inline-flex items-center gap-1.5">
+                      {Number(conv.unread_count || 0) > 0 && <span className="h-2 w-2 rounded-full bg-rose-500" />}
+                      {Number(conv.unread_count || 0) > 0 && (
+                        <span className="inline-flex min-w-5 justify-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700">
+                          {conv.unread_count}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-gray-600 truncate mt-0.5">{conv.last_message_body || 'No messages yet'}</p>
                   <p className="text-[11px] text-gray-500 mt-0.5 inline-flex items-center gap-1">
@@ -420,12 +399,12 @@ export default function Messages() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col">
+        <section className="rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col shadow-sm">
           {!selectedConversationId ? (
             <div className="flex-1 min-h-0 grid place-items-center text-sm text-gray-500">Select a thread to view messages.</div>
           ) : (
             <>
-              <div className="px-3 py-2 border-b border-gray-200">
+              <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
                 <p className="text-sm font-semibold text-gray-900">
                   {selectedConversation?.subject || selectedConversationPreview?.subject || 'Untitled conversation'}
                 </p>
@@ -434,19 +413,20 @@ export default function Messages() {
                   Participants: {participants.map((p) => p.name).join(', ') || 'Loading…'}
                 </p>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50/40">
                 {tree.length === 0 ? (
                   <p className="text-sm text-gray-500 inline-flex items-center gap-1.5">
                     <MessageSquare className="w-4 h-4 text-gray-400" />
                     No messages yet.
                   </p>
                 ) : (
-                  tree.map((entry, idx) => renderNode(entry, [], idx === tree.length - 1))
+                  tree.map((entry) => renderNode(entry))
                 )}
               </div>
-              <div className="border-t border-gray-200 p-3">
+              <div className="border-t border-gray-200 p-3 bg-white">
                 {selectedParentPreview && (
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs text-green-800">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-800">
+                    <PencilLine className="h-3 w-3" />
                     <span>
                       Replying to {selectedParentPreview.sender_name || `Staff #${selectedParentPreview.sender_staff_id}`}
                     </span>
@@ -464,14 +444,14 @@ export default function Messages() {
                     value={replyBody}
                     onChange={(e) => setReplyBody(e.target.value)}
                     rows={2}
-                    className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    className="flex-1 rounded-md border border-gray-300 px-2.5 py-2 text-sm"
                     placeholder="Message"
                   />
                   <button
                     type="button"
                     onClick={handleSendReply}
                     disabled={sendingReply || !replyBody.trim()}
-                    className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                    className="inline-flex items-center gap-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
                   >
                     <Send className="w-4 h-4" />
                     {sendingReply ? 'Sending…' : 'Send'}

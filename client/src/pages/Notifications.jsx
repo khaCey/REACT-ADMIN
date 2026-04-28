@@ -28,6 +28,13 @@ function formatDateTime(value) {
   })
 }
 
+function getMessageConversationIdFromNotification(notification) {
+  if (!notification || notification.kind !== 'message') return null
+  const slug = String(notification.slug || '')
+  const match = slug.match(/^message-thread:([^:]+):staff:\d+$/)
+  return match?.[1] || null
+}
+
 export default function Notifications() {
   const { success } = useToast()
   const { staff } = useAuth()
@@ -242,8 +249,31 @@ export default function Notifications() {
   const canPrev = offset > 0
   const canNext = offset + PAGE_SIZE < total
 
+  const handleOpenThreadFromNotification = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : items.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    if (!notification) return false
+    const conversationId = getMessageConversationIdFromNotification(notification)
+    if (!conversationId) return false
+    setReadingId(notification.id)
+    try {
+      await markAsRead(notification.id)
+      await refreshUnread()
+      navigate('/messages', { state: { conversationId } })
+      return true
+    } finally {
+      setReadingId(null)
+    }
+  }
+
   const handleMarkRead = async (id) => {
     if (notificationsDisabled) return
+    const opened = await handleOpenThreadFromNotification(id)
+    if (opened) {
+      setSelectedNotification(null)
+      return
+    }
     setReadingId(id)
     try {
       await markAsRead(id)
@@ -390,7 +420,9 @@ export default function Notifications() {
                     disabled={readingId === item.id}
                     className="text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-60"
                   >
-                    {readingId === item.id ? '処理中…' : '既読する'}
+                    {readingId === item.id
+                      ? '処理中…'
+                      : (item.kind === 'message' ? 'スレッドを開く' : '既読する')}
                   </button>
                 )}
                 {canEditNotification(item) && (
@@ -459,6 +491,7 @@ export default function Notifications() {
             setSelectedNotification(null)
           }}
           onMarkRead={handleMarkRead}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'スレッドを開く' : '既読にする'}
           onMarkUnread={handleMarkUnread}
           markingRead={readingId === selectedNotification.id}
           canDelete={canDeleteNotification(selectedNotification)}

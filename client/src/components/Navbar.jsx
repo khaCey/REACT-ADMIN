@@ -39,12 +39,41 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   })
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
+  const getMessageConversationIdFromNotification = (notification) => {
+    if (!notification || notification.kind !== 'message') return null
+    const slug = String(notification.slug || '')
+    const match = slug.match(/^message-thread:([^:]+):staff:\d+$/)
+    return match?.[1] || null
+  }
+
+  const openThreadFromNotification = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : notifications.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    if (!notification) return false
+    const conversationId = getMessageConversationIdFromNotification(notification)
+    if (!conversationId) return false
+    setReadingId(notification.id)
+    try {
+      await markAsRead(notification.id)
+      await refreshUnread()
+      setIsNotificationOpen(false)
+      setSelectedNotification(null)
+      navigate('/messages', { state: { conversationId } })
+      return true
+    } finally {
+      setReadingId(null)
+    }
+  }
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
   }
 
   const handleRead = async (id) => {
+    const opened = await openThreadFromNotification(id)
+    if (opened) return
     setReadingId(id)
     try {
       await markAsRead(id)
@@ -248,7 +277,9 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                         onClick={() => handleRead(item.id)}
                         disabled={readingId === item.id}
                       >
-                        {readingId === item.id ? '処理中…' : '既読する'}
+                        {readingId === item.id
+                          ? '処理中…'
+                          : (item.kind === 'message' ? 'スレッドを開く' : '既読する')}
                       </button>
                     </div>
                   </div>
@@ -272,6 +303,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           notification={selectedNotification}
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'スレッドを開く' : '既読にする'}
           markingRead={readingId === selectedNotification.id}
           canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
           onEdit={(id) => {
