@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox, PencilLine } from 'lucide-react'
+import { MessageSquare, Send, Plus, Users, Clock3, Reply, Inbox, PencilLine, ChevronUp, MoreHorizontal } from 'lucide-react'
 import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -209,37 +209,86 @@ export default function Messages() {
     return visit('root', 0)
   }
   const tree = buildTree(items)
-  const renderNode = (entry) => {
+  const renderNode = (entry, ancestorHasMore = [], isLast = true) => {
     const { node, depth, children } = entry
     const clampedDepth = Math.min(depth, 6)
-    const indentPx = clampedDepth * 16
+    const railStep = 15
+    const railOffset = 7
+    const elbowTop = 16
+    const elbowWidth = 10
+    const currentRailX = ((Math.max(clampedDepth - 1, 0)) * railStep) + railOffset
+    const rowPaddingLeft = clampedDepth > 0 ? (clampedDepth * railStep) + 2 : 0
+    const senderName = node.sender_name || `Staff #${node.sender_staff_id}`
     return (
-      <div key={node.id} className="space-y-1.5" style={indentPx > 0 ? { marginLeft: `${indentPx}px` } : undefined}>
-        <div className={`relative ${clampedDepth > 0 ? 'border-l border-gray-300 pl-3' : ''}`}>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
-              <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+      <div key={node.id} className="space-y-1.5">
+        <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
+          {ancestorHasMore.map((showRail, idx) => (
+            showRail ? (
+              <span
+                key={`rail-${node.id}-${idx}`}
+                aria-hidden="true"
+                className="absolute top-0 bottom-0 w-px bg-gray-300"
+                style={{ left: `${(idx * railStep) + railOffset}px` }}
+              />
+            ) : null
+          ))}
+          {clampedDepth > 0 && (
+            <>
+              <span
+                aria-hidden="true"
+                className="absolute w-px bg-gray-300"
+                style={{ left: `${currentRailX}px`, top: 0, height: `${elbowTop}px` }}
+              />
+              {!isLast && (
+                <span
+                  aria-hidden="true"
+                  className="absolute w-px bg-gray-300"
+                  style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, bottom: 0 }}
+                />
+              )}
+              <span
+                aria-hidden="true"
+                className="absolute h-px bg-gray-300"
+                style={{ left: `${currentRailX}px`, top: `${elbowTop}px`, width: `${elbowWidth}px` }}
+              />
+            </>
+          )}
+          <div className="rounded-md border border-gray-200 bg-white px-3 py-2">
+            <div className="mb-1 flex items-center gap-2 text-xs">
+              <span className="font-semibold text-gray-800">{senderName}</span>
+              <span className="text-gray-400">•</span>
+              <span className="inline-flex items-center gap-1 text-gray-500">
                 <Clock3 className="h-3 w-3 text-gray-400" />
                 {formatDateTime(node.created_at)}
               </span>
             </div>
-            <p className="whitespace-pre-wrap text-sm text-gray-900">{node.body}</p>
-            <div className="mt-2">
+            <p className="whitespace-pre-wrap text-[15px] leading-6 text-gray-900">{node.body}</p>
+            <div className="mt-2 inline-flex items-center gap-3 text-xs text-gray-600">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+                Vote
+              </button>
               <button
                 type="button"
                 onClick={() => setReplyParentId(node.id)}
-                className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
+                className="inline-flex items-center gap-1 font-medium text-green-700 hover:text-green-900 cursor-pointer"
               >
                 <Reply className="h-3 w-3" />
                 Reply
+              </button>
+              <button type="button" className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer">
+                <MoreHorizontal className="h-3.5 w-3.5" />
+                More
               </button>
             </div>
           </div>
         </div>
         {children.length > 0 && (
           <div className="space-y-2">
-            {children.map((child) => renderNode(child))}
+            {children.map((child, idx) => renderNode(child, [...ancestorHasMore, !isLast], idx === children.length - 1))}
           </div>
         )}
       </div>
@@ -352,9 +401,9 @@ export default function Messages() {
         </form>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-3 flex-1 min-h-0">
         <section className="rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 flex flex-col shadow-sm">
-          <div className="px-3 py-2 border-b border-gray-200 text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5">
+          <div className="px-3 py-2 border-b border-gray-200 text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5 bg-gray-50">
             <Inbox className="w-4 h-4 text-gray-500" />
             Threads
           </div>
@@ -372,16 +421,16 @@ export default function Messages() {
                   onClick={() => setSelectedConversationId(conv.id)}
                   className={`w-full text-left px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition ${
                     String(conv.id) === String(selectedConversationId)
-                      ? 'bg-green-50 border-l-4 border-l-green-500'
+                      ? 'bg-blue-50 border-l-4 border-l-blue-500'
                       : 'bg-white border-l-4 border-l-transparent'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-gray-900 truncate">{conv.subject || 'Untitled conversation'}</p>
                     <div className="inline-flex items-center gap-1.5">
-                      {Number(conv.unread_count || 0) > 0 && <span className="h-2 w-2 rounded-full bg-rose-500" />}
+                      {Number(conv.unread_count || 0) > 0 && <span className="h-2 w-2 rounded-full bg-orange-500" />}
                       {Number(conv.unread_count || 0) > 0 && (
-                        <span className="inline-flex min-w-5 justify-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700">
+                        <span className="inline-flex min-w-5 justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-700">
                           {conv.unread_count}
                         </span>
                       )}
@@ -420,7 +469,7 @@ export default function Messages() {
                     No messages yet.
                   </p>
                 ) : (
-                  tree.map((entry) => renderNode(entry))
+                  tree.map((entry, idx) => renderNode(entry, [], idx === tree.length - 1))
                 )}
               </div>
               <div className="border-t border-gray-200 p-3 bg-white">
