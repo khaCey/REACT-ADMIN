@@ -71,8 +71,12 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
     navigate('/login')
   }
 
-  const handleRead = async (id) => {
-    const opened = await openThreadFromNotification(id)
+  const handleRead = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : notifications.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    const id = Number(notification?.id || notificationOrId)
+    const opened = await openThreadFromNotification(notification || id)
     if (opened) return
     setReadingId(id)
     try {
@@ -274,12 +278,12 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                       <button
                         type="button"
                         className="text-xs text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-50"
-                        onClick={() => handleRead(item.id)}
+                        onClick={() => handleRead(item)}
                         disabled={readingId === item.id}
                       >
                         {readingId === item.id
                           ? '処理中…'
-                          : (item.kind === 'message' ? 'スレッドを開く' : '既読する')}
+                          : (item.kind === 'message' ? 'Open Message' : '既読する')}
                       </button>
                     </div>
                   </div>
@@ -303,7 +307,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           notification={selectedNotification}
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
-          markReadLabel={selectedNotification?.kind === 'message' ? 'スレッドを開く' : '既読にする'}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'Open Message' : '既読にする'}
           markingRead={readingId === selectedNotification.id}
           canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
           onEdit={(id) => {

@@ -267,9 +267,13 @@ export default function Notifications() {
     }
   }
 
-  const handleMarkRead = async (id) => {
+  const handleMarkRead = async (notificationOrId) => {
     if (notificationsDisabled) return
-    const opened = await handleOpenThreadFromNotification(id)
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : items.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    const id = Number(notification?.id || notificationOrId)
+    const opened = await handleOpenThreadFromNotification(notification || id)
     if (opened) {
       setSelectedNotification(null)
       return
@@ -416,13 +420,13 @@ export default function Notifications() {
                 {!item.is_read && (
                   <button
                     type="button"
-                    onClick={() => handleMarkRead(item.id)}
+                    onClick={() => handleMarkRead(item)}
                     disabled={readingId === item.id}
                     className="text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-60"
                   >
                     {readingId === item.id
                       ? '処理中…'
-                      : (item.kind === 'message' ? 'スレッドを開く' : '既読する')}
+                      : (item.kind === 'message' ? 'Open Message' : '既読する')}
                   </button>
                 )}
                 {canEditNotification(item) && (
@@ -491,7 +495,7 @@ export default function Notifications() {
             setSelectedNotification(null)
           }}
           onMarkRead={handleMarkRead}
-          markReadLabel={selectedNotification?.kind === 'message' ? 'スレッドを開く' : '既読にする'}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'Open Message' : '既読にする'}
           onMarkUnread={handleMarkUnread}
           markingRead={readingId === selectedNotification.id}
           canDelete={canDeleteNotification(selectedNotification)}

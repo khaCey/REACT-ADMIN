@@ -147,7 +147,7 @@ export default function NotificationDetailsModal({
               <button
                 type="button"
                 disabled={markingRead}
-                onClick={() => onMarkRead(notification.id)}
+                onClick={() => onMarkRead(notification)}
                 className={`px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 cursor-pointer ${
                   highlightAction === 'read-unread' ? 'ring-4 ring-yellow-300 animate-pulse' : ''
                 }`}
