@@ -221,8 +221,8 @@ export default function Messages() {
     const senderName = node.sender_name || `Staff #${node.sender_staff_id}`
     const shouldExtendCurrentRail = !isLast || children.length > 0
     return (
-      <div key={node.id} className="space-y-1.5">
-        <div className="relative space-y-2" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
+      <div key={node.id}>
+        <div className="relative" style={rowPaddingLeft > 0 ? { paddingLeft: `${rowPaddingLeft}px` } : undefined}>
           {ancestorHasMore.map((showRail, idx) => (
             showRail ? (
               <span
@@ -280,8 +280,8 @@ export default function Messages() {
             </div>
           </div>
           {children.length > 0 && (
-            <div className="space-y-2">
-            {children.map((child, idx) => renderNode(child, [...ancestorHasMore, !isLast], idx === children.length - 1))}
+            <div className="mt-1.5">
+              {children.map((child, idx) => renderNode(child, [...ancestorHasMore, !isLast], idx === children.length - 1))}
             </div>
           )}
         </div>
