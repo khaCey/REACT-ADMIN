@@ -205,28 +205,36 @@ export default function Messages() {
     const indentPx = clampedDepth * 18
     return (
       <div key={node.id} className="space-y-2" style={{ marginLeft: `${indentPx}px` }}>
-        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
-            <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
-              <Clock3 className="w-3 h-3 text-gray-400" />
-              {formatDateTime(node.created_at)}
-            </span>
-          </div>
-          <p className="text-sm whitespace-pre-wrap text-gray-900">{node.body}</p>
-          <div className="mt-2">
-            <button
-              type="button"
-              onClick={() => setReplyParentId(node.id)}
-              className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
-            >
-              <Reply className="w-3 h-3" />
-              Reply
-            </button>
+        <div className="relative pl-4">
+          {depth > 0 && (
+            <>
+              <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-px bg-gray-200" />
+              <span aria-hidden="true" className="absolute left-0 top-5 h-px w-3 bg-gray-300" />
+            </>
+          )}
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="text-xs font-semibold text-gray-700">{node.sender_name || `Staff #${node.sender_staff_id}`}</span>
+              <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+                <Clock3 className="w-3 h-3 text-gray-400" />
+                {formatDateTime(node.created_at)}
+              </span>
+            </div>
+            <p className="text-sm whitespace-pre-wrap text-gray-900">{node.body}</p>
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setReplyParentId(node.id)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 cursor-pointer"
+              >
+                <Reply className="w-3 h-3" />
+                Reply
+              </button>
+            </div>
           </div>
         </div>
         {children.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2 mt-1">
             {children.map((child) => renderNode(child))}
           </div>
         )}
