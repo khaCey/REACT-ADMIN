@@ -768,7 +768,12 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
       return res.status(400).json({ error: 'removed must be an array when present' });
     }
     console.log('[calendar-poll/sync] received', data.length, 'rows,', (removed || []).length, 'removed');
-    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, { removed: removed || [] });
+    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, {
+      removed: removed || [],
+      // Incremental polls must be treated as deltas; never reconcile by "missing from this payload"
+      // because incremental payloads may omit rows that were not changed in this poll.
+      reconcile: false,
+    });
 
     // Keep teacher_schedules aligned with lesson updates so booking UI capacity constraints are correct.
     // We refresh only when lesson months touch the current JST month or the next JST month.

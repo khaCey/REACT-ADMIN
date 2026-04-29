@@ -49,6 +49,7 @@ export function useCalendarPolling(options = {}) {
   const [cacheVersion, setCacheVersion] = useState(null)
   const pollRef = useRef(null)
   const mountedRef = useRef(true)
+  const dataRef = useRef([])
 
   const refetch = useCallback(async () => {
     await ensurePollingConfig()
@@ -68,6 +69,7 @@ export function useCalendarPolling(options = {}) {
       }
       if (mountedRef.current) {
         setData(result.data || [])
+        dataRef.current = result.data || []
         setLastUpdated(result.lastUpdated || null)
         setCacheVersion(result.cacheVersion ?? null)
       }
@@ -107,14 +109,39 @@ export function useCalendarPolling(options = {}) {
           const addedLen = d.added?.length ?? 0
           const removedLen = d.removed?.length ?? 0
           const updatedLen = d.updated?.length ?? 0
-          const useFullSnapshot =
-            addedLen === 0 && removedLen === 0 && updatedLen > 0
-          setData((prev) =>
-            useFullSnapshot ? [...(d.updated || [])] : applyDiff(prev, d)
-          )
-          setLastUpdated(result.diff.lastUpdated || null)
-          setCacheVersion(result.diff.cacheVersion ?? null)
-          onChanged?.(result.diff)
+
+          const shouldHydrate = (dataRef.current?.length || 0) === 0 && (addedLen + updatedLen + removedLen) > 0
+
+          if (shouldHydrate) {
+            try {
+              const full = await fetchFullCalendar()
+              const fullData = Array.isArray(full?.data) ? full.data : []
+              if (mountedRef.current) {
+                dataRef.current = fullData
+                // Apply diff on top of hydrated snapshot.
+                const hydratedMerged = applyDiff(fullData, d)
+                setData(hydratedMerged)
+                setLastUpdated(result.diff.lastUpdated || full.lastUpdated || null)
+                setCacheVersion(result.diff.cacheVersion ?? full.cacheVersion ?? null)
+                onChanged?.(result.diff)
+              }
+            } catch {
+              // If hydration fails, fall back to applying diff to current cache.
+              setData((prev) => applyDiff(prev, d))
+              setLastUpdated(result.diff.lastUpdated || null)
+              setCacheVersion(result.diff.cacheVersion ?? null)
+              onChanged?.(result.diff)
+            }
+          } else {
+            setData((prev) => {
+              const merged = applyDiff(prev, d)
+              dataRef.current = merged
+              return merged
+            })
+            setLastUpdated(result.diff.lastUpdated || null)
+            setCacheVersion(result.diff.cacheVersion ?? null)
+            onChanged?.(result.diff)
+          }
         }
       } catch (e) {
         if (mountedRef.current) {
