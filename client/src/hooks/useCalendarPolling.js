@@ -117,9 +117,9 @@ export function useCalendarPolling(options = {}) {
               const full = await fetchFullCalendar()
               const fullData = Array.isArray(full?.data) ? full.data : []
               if (mountedRef.current) {
-                dataRef.current = fullData
                 // Apply diff on top of hydrated snapshot.
                 const hydratedMerged = applyDiff(fullData, d)
+                dataRef.current = hydratedMerged
                 setData(hydratedMerged)
                 setLastUpdated(result.diff.lastUpdated || full.lastUpdated || null)
                 setCacheVersion(result.diff.cacheVersion ?? full.cacheVersion ?? null)
@@ -127,7 +127,11 @@ export function useCalendarPolling(options = {}) {
               }
             } catch {
               // If hydration fails, fall back to applying diff to current cache.
-              setData((prev) => applyDiff(prev, d))
+              setData((prev) => {
+                const merged = applyDiff(prev, d)
+                dataRef.current = merged
+                return merged
+              })
               setLastUpdated(result.diff.lastUpdated || null)
               setCacheVersion(result.diff.cacheVersion ?? null)
               onChanged?.(result.diff)
