@@ -341,13 +341,13 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
     <button
       type="button"
       onClick={() => onClick?.(lesson)}
-      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-0 focus-visible:ring-0 ${styles.hoverRing} cursor-pointer overflow-hidden ${hasNote ? 'ring-1 ring-red-200' : ''}`}
+      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-0 focus-visible:ring-0 ${styles.hoverRing} cursor-pointer overflow-hidden ${hasNote ? 'ring-2 ring-red-400' : ''}`}
       data-status={displayStatus}
       aria-label={`Lesson ${dayStr} ${timeStr} (${title})`}
     >
       <span className={`absolute left-0 top-0 h-full ${sz.accent} rounded-l-lg ${styles.accent}`} />
       {hasNote && (
-        <span className="absolute top-1.5 right-1.5 inline-grid h-5 w-5 place-items-center rounded-full border border-red-300 bg-red-50 text-[11px] font-bold text-red-700 shadow-sm">
+        <span className="absolute top-1.5 right-1.5 inline-grid h-5 w-5 place-items-center rounded-full border border-red-500 bg-red-100 text-[11px] font-bold text-red-800 shadow-sm">
           <span className="block leading-[1]">!</span>
         </span>
       )}

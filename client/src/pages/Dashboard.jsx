@@ -279,10 +279,10 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`dashboard-lesson-card relative h-[50px] rounded border flex items-center justify-between overflow-hidden pl-2 pr-9 ${colSpan} border-gray-200 bg-gray-50 ${hasNote ? 'ring-1 ring-red-200' : ''} ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card relative h-[50px] rounded border flex items-center justify-between overflow-hidden pl-2 pr-9 ${colSpan} border-gray-200 bg-gray-50 ${hasNote ? 'ring-2 ring-red-400' : ''} ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
                               <span
-                                className={`pointer-events-none absolute top-1 right-1 inline-grid h-5 w-5 place-items-center rounded-full border border-red-300 bg-red-50 text-[10px] font-bold text-red-700 shadow-sm ${hasNote ? '' : 'invisible'}`}
+                                className={`pointer-events-none absolute top-1 right-1 inline-grid h-5 w-5 place-items-center rounded-full border border-red-500 bg-red-100 text-[10px] font-bold text-red-800 shadow-sm ${hasNote ? '' : 'invisible'}`}
                                 aria-hidden="true"
                               >
                                 <span className="block leading-[1]">!</span>
