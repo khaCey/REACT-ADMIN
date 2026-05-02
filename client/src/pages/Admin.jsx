@@ -513,9 +513,9 @@ export default function Admin() {
                 <LoadingSpinner />
               </div>
             ) : (
-              <div className="overflow-auto">
+              <div className="max-h-[18rem] overflow-auto overscroll-y-contain">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                     <tr className="text-left text-gray-700">
                       <th className="px-3 py-2 font-medium">Student</th>
                       <th className="px-3 py-2 font-medium">Event ID</th>
