@@ -12,6 +12,10 @@ import { createContext, useContext, useCallback, useRef, useEffect, useState, us
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
 import { api } from '../api'
 import { useAuth } from './AuthContext'
+import {
+  normalizeRemovedDiffEntry,
+  dedupeRemovedEntries,
+} from '../utils/calendarPollRemoved'
 
 const CalendarPollingContext = createContext(null)
 
@@ -22,13 +26,6 @@ function resolvePollIntervalMs(propMs) {
   const fromEnv = parseInt(import.meta.env.VITE_CALENDAR_POLL_INTERVAL_MS || '', 10)
   if (Number.isFinite(fromEnv) && fromEnv >= 10000) return fromEnv
   return DEFAULT_POLL_INTERVAL_MS
-}
-
-function parseRemovedKey(key) {
-  if (key == null || typeof key !== 'string') return null
-  const i = key.indexOf('|')
-  if (i <= 0) return null
-  return { eventID: key.slice(0, i), studentName: key.slice(i + 1) }
 }
 
 export function useCalendarPollingContext() {
@@ -47,9 +44,15 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   const removedQueueRef = useRef([])
 
   const onPollDiff = useCallback((diff) => {
-    for (const key of diff?.removed || []) {
-      const parsed = parseRemovedKey(key)
-      if (parsed?.eventID && parsed?.studentName) removedQueueRef.current.push(parsed)
+    const list = diff?.removed
+    if (!Array.isArray(list)) return
+    for (const entry of list) {
+      const parsed = normalizeRemovedDiffEntry(entry)
+      if (parsed?.eventID && parsed?.studentName) {
+        removedQueueRef.current.push(parsed)
+      } else if (import.meta.env.DEV) {
+        console.debug('[CalendarPolling] Malformed diff.removed entry (skipped):', entry)
+      }
     }
   }, [])
 
@@ -65,7 +68,8 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
       // Serialize: overlapping effect runs only set pendingResyncRef; we drain until quiescent.
       while (true) {
         pendingResyncRef.current = false
-        const removed = removedQueueRef.current.splice(0)
+        const removedRaw = removedQueueRef.current.splice(0)
+        const removed = dedupeRemovedEntries(removedRaw)
         const payload = latestDataForSyncRef.current
         const hasPayload = Array.isArray(payload) && payload.length > 0
         if (!hasPayload && removed.length === 0) {
@@ -80,7 +84,9 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
             hasPayload ? payload.length : 0,
             'rows,',
             removed.length,
-            'removed, to server'
+            'removed (',
+            removedRaw.length,
+            'raw), to server'
           )
         } catch (err) {
           console.warn('[CalendarPolling] Sync failed:', err.message)

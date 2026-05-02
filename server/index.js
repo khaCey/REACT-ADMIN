@@ -767,13 +767,24 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
     if (removed != null && !Array.isArray(removed)) {
       return res.status(400).json({ error: 'removed must be an array when present' });
     }
-    console.log('[calendar-poll/sync] received', data.length, 'rows,', (removed || []).length, 'removed');
-    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, {
-      removed: removed || [],
+    const removedArr = removed || [];
+    console.log('[calendar-poll/sync] received', data.length, 'rows,', removedArr.length, 'removed');
+    const syncResult = await upsertMonthlySchedule(data, {
+      removed: removedArr,
       // Incremental polls must be treated as deltas; never reconcile by "missing from this payload"
       // because incremental payloads may omit rows that were not changed in this poll.
       reconcile: false,
     });
+    const {
+      upserted,
+      months,
+      deletedOrphans,
+      removedReceived,
+      removedParsed,
+      removedParsedAttempts,
+      removedSkippedInvalid,
+      removedDeleted,
+    } = syncResult;
 
     // Keep teacher_schedules aligned with lesson updates so booking UI capacity constraints are correct.
     // We refresh only when lesson months touch the current JST month or the next JST month.
@@ -799,9 +810,21 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
       upserted,
       'rows for months',
       months.sort().join(', '),
-      deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : ''
+      deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : '',
+      `; removed: received=${removedReceived} parsed=${removedParsed} (attempts=${removedParsedAttempts}) skippedInvalid=${removedSkippedInvalid} deletedRows=${removedDeleted}`
     );
-    res.json({ ok: true, upserted, months, deletedOrphans: deletedOrphans || 0, teacherSchedulesRefresh });
+    res.json({
+      ok: true,
+      upserted,
+      months,
+      deletedOrphans: deletedOrphans || 0,
+      removedReceived,
+      removedParsed,
+      removedParsedAttempts,
+      removedSkippedInvalid,
+      removedDeleted,
+      teacherSchedulesRefresh,
+    });
   } catch (err) {
     console.error('[calendar-poll/sync] error:', err.message);
     res.status(500).json({ error: err.message });

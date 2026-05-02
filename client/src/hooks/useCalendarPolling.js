@@ -13,6 +13,7 @@ import {
   isPollingConfigured,
   ensurePollingConfig,
 } from '../api/pollingApi'
+import { normalizeRemovedDiffEntry, removedEntryRowKey } from '../utils/calendarPollRemoved'
 
 function rowKey(row) {
   return `${row.eventID || ''}|${row.studentName || ''}`
@@ -24,8 +25,13 @@ function applyDiff(current, diff) {
   for (const row of diff.added || []) {
     map.set(rowKey(row), row)
   }
-  for (const key of diff.removed || []) {
-    map.delete(key)
+  for (const entry of diff.removed || []) {
+    const parsed = normalizeRemovedDiffEntry(entry)
+    const k = parsed ? removedEntryRowKey(parsed) : typeof entry === 'string' ? entry : null
+    if (k) map.delete(k)
+    else if (import.meta.env.DEV) {
+      console.debug('[useCalendarPolling] Malformed diff.removed entry (skipped):', entry)
+    }
   }
   for (const row of diff.updated || []) {
     map.set(rowKey(row), row)

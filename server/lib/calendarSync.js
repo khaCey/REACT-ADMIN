@@ -285,18 +285,66 @@ async function reconcileMonthsToSnapshot(months, incomingKeys) {
 }
 
 /**
- * @param {Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>} removed
+ * Normalize one removal from calendar-poll/sync (string key or object).
+ * @param {unknown} item
+ * @returns {{ eventID: string, studentName: string } | null}
+ */
+function normalizeRemovedPollItem(item) {
+  if (item == null) return null;
+  if (typeof item === 'string') {
+    const i = item.indexOf('|');
+    if (i <= 0) return null;
+    const eventID = item.slice(0, i).trim();
+    const studentName = item.slice(i + 1).trim();
+    if (!eventID || !studentName) return null;
+    return { eventID, studentName };
+  }
+  if (typeof item === 'object') {
+    const raw = (item.eventID ?? item.event_id ?? '').toString().trim();
+    const sn = (item.studentName ?? item.student_name ?? '').toString().trim();
+    if (!raw || !sn) return null;
+    return { eventID: raw, studentName: sn };
+  }
+  return null;
+}
+
+/**
+ * @param {unknown[]} removed
+ * @returns {Promise<{ removedReceived: number, removedParsed: number, removedSkippedInvalid: number, removedDeleted: number }>}
  */
 async function applyRemovedFromPoll(removed) {
-  let n = 0;
-  if (!Array.isArray(removed)) return n;
-  for (const item of removed) {
-    const raw = (item?.eventID ?? item?.event_id ?? '').toString().trim();
-    const sn = (item?.studentName ?? item?.student_name ?? '').toString().trim();
-    if (!raw || !sn) continue;
-    n += await deleteMonthlyScheduleByRawEvent(sn, raw);
+  const removedReceived = Array.isArray(removed) ? removed.length : 0;
+  let removedSkippedInvalid = 0;
+  let removedParsedAttempts = 0;
+  const seen = new Set();
+  /** @type {Array<{ eventID: string, studentName: string }>} */
+  const pairs = [];
+
+  for (const item of Array.isArray(removed) ? removed : []) {
+    const p = normalizeRemovedPollItem(item);
+    if (!p) {
+      removedSkippedInvalid++;
+      continue;
+    }
+    removedParsedAttempts++;
+    const dedupeKey = `${p.eventID}\t${p.studentName}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    pairs.push(p);
   }
-  return n;
+
+  let removedDeleted = 0;
+  for (const p of pairs) {
+    removedDeleted += await deleteMonthlyScheduleByRawEvent(p.studentName, p.eventID);
+  }
+
+  return {
+    removedReceived,
+    removedParsed: pairs.length,
+    removedParsedAttempts,
+    removedSkippedInvalid,
+    removedDeleted,
+  };
 }
 
 /**
@@ -305,7 +353,7 @@ async function applyRemovedFromPoll(removed) {
  */
 export async function upsertMonthlySchedule(data, options = {}) {
   const { removed = [], reconcile = true } = options;
-  await applyRemovedFromPoll(removed);
+  const removedStats = await applyRemovedFromPoll(removed);
 
   const { rows, months, incomingKeys } = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
   let deletedOrphans = 0;
@@ -368,6 +416,8 @@ export async function upsertMonthlySchedule(data, options = {}) {
     upserted,
     months: Array.from(months),
     deletedOrphans,
-    removedRows: Array.isArray(removed) ? removed.length : 0,
+    /** @deprecated use removedReceived — kept for backward compatibility */
+    removedRows: removedStats.removedReceived,
+    ...removedStats,
   };
 }
