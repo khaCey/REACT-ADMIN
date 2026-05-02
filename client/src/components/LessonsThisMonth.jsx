@@ -36,8 +36,6 @@ function addOneMonthYyyyMm(yyyyMm) {
 
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
-  /** monthly_schedule / GAS — valid status not previously styled; missing key fell through to cancelled */
-  reserved: { accent: 'bg-cyan-600', bg: 'bg-cyan-50', dot: 'bg-cyan-600', hoverRing: 'hover:ring-cyan-500/60', label: 'Reserved' },
   calendar_pending: {
     accent: 'bg-sky-600',
     bg: 'bg-sky-50',
@@ -69,7 +67,9 @@ const CARD_SIZES = {
 
 function getLessonDisplayStatus(lesson) {
   const transientStatus = String(lesson?.transientStatus || '').toLowerCase()
-  const rawStatus = String(lesson?.status || '').toLowerCase()
+  /** GAS/Calendar often sends `reserved`; in this app it means a normal booked lesson (same as scheduled). */
+  let rawStatus = String(lesson?.status || '').toLowerCase()
+  if (rawStatus === 'reserved') rawStatus = 'scheduled'
   const syncStatus = String(lesson?.calendarSyncStatus || 'synced').toLowerCase()
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 

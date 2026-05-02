@@ -7,7 +7,6 @@ import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
-  reserved: { color: 'bg-cyan-600', text: 'Reserved' },
   calendar_pending: { color: 'bg-sky-600', text: 'Calendar pending' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
   reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },
@@ -116,6 +115,8 @@ export default function LessonDetailsModal({
   if (!lesson) return null
 
   const status = (lesson.status || 'scheduled').toLowerCase()
+  /** Calendar `reserved` is treated as a normal lesson (same label as scheduled). */
+  const uiStatus = status === 'reserved' ? 'scheduled' : status
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
   const transientStatus = String(lesson.transientStatus || '').toLowerCase()
   const isAwaitingRescheduleDate = status === 'rescheduled' && !!lesson.awaitingRescheduleDate
@@ -142,11 +143,11 @@ export default function LessonDetailsModal({
             ? 'cancelled'
             : calendarSyncStatus === 'failed'
               ? 'sync_failed'
-              : calendarSyncStatus === 'pending' && status === 'scheduled'
+              : calendarSyncStatus === 'pending' && uiStatus === 'scheduled'
                 ? 'calendar_pending'
                 : isDemoLesson
                     ? 'demo'
-                    : status
+                    : uiStatus
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
