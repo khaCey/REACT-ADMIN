@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import { LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
+import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -179,9 +180,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true)
-    setError('')
+  const { lastSynced } = useCalendarPollingContext()
+
+  const fetchDashboard = useCallback(async (opts = {}) => {
+    const silent = opts.silent === true
+    if (!silent) {
+      setLoading(true)
+      setError('')
+    }
     const monthsBack = chartRangeYears * 12 - 1
     const from = subtractMonths(chartEndMonth, monthsBack)
     const to = chartEndMonth
@@ -193,19 +199,29 @@ export default function Dashboard() {
       setMetrics(metricsData)
       setTodayLessons(Array.isArray(todayData?.lessons) ? todayData.lessons : [])
       setTodayDate(todayData?.date || '')
+      if (silent) setError('')
     } catch (err) {
       setError(err.message || 'Failed to load dashboard data')
-      setMetrics(null)
-      setTodayLessons([])
-      setTodayDate('')
+      if (!silent) {
+        setMetrics(null)
+        setTodayLessons([])
+        setTodayDate('')
+      }
     } finally {
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }, [chartEndMonth, chartRangeYears])
 
   useEffect(() => {
     fetchDashboard()
   }, [fetchDashboard])
+
+  useEffect(() => {
+    if (lastSynced == null) return
+    fetchDashboard({ silent: true })
+  }, [lastSynced, fetchDashboard])
 
   const showPaymentBadges = (lesson) =>
     lesson.is_last_lesson_of_month === true || lesson.is_last_lesson_of_month === 't'
