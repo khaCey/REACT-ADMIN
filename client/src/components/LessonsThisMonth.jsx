@@ -444,6 +444,8 @@ export default function LessonsThisMonth({
   sectionClassName,
   onLoadingChange,
   onMonthLessonsUpdated,
+  /** Called after lesson notes are saved/removed so parents (e.g. Dashboard) can refetch server truth. */
+  onLessonNotesChanged,
   optimisticScheduleMutations = [],
   scheduleRefreshKey = 0,
 }) {
@@ -823,7 +825,8 @@ export default function LessonsThisMonth({
       if (String(prev.lessonUUID || '') !== String(lessonUUID)) return prev
       return { ...prev, hasNote: !!hasNote, lessonNotes }
     })
-  }, [setData])
+    onLessonNotesChanged?.({ lessonUUID, hasNote, lessonNotes })
+  }, [setData, onLessonNotesChanged])
 
   const openChangeLessonCount = (monthKey) => {
     if (studentId == null || !monthKey) return

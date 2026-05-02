@@ -41,7 +41,16 @@ class ModalErrorBoundary extends Component {
   }
 }
 
-export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated, guideAction = null, onGuideActionHandled }) {
+export default function StudentDetailsModal({
+  studentId,
+  onClose,
+  onStudentDeleted,
+  onStudentUpdated,
+  /** Optional: e.g. Dashboard refetches today-lessons when lesson notes change (has-note badge). */
+  onLessonNotesChanged,
+  guideAction = null,
+  onGuideActionHandled,
+}) {
   const { success } = useToast()
   const [student, setStudent] = useState(null)
   const [payments, setPayments] = useState([])
@@ -345,6 +354,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   student={student}
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
                   onMonthLessonsUpdated={() => fetchData({ silent: true })}
+                  onLessonNotesChanged={onLessonNotesChanged}
                   onLoadingChange={setLessonsLoading}
                   optimisticScheduleMutations={optimisticScheduleMutations}
                   scheduleRefreshKey={scheduleRefreshKey}

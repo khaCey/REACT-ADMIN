@@ -448,6 +448,7 @@ export default function Dashboard() {
           onClose={() => setSelectedStudentId(null)}
           onStudentDeleted={fetchDashboard}
           onStudentUpdated={fetchDashboard}
+          onLessonNotesChanged={() => fetchDashboard({ silent: true })}
         />
       )}
     </div>
