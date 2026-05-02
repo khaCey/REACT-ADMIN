@@ -7,6 +7,7 @@ import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
+  reserved: { color: 'bg-cyan-600', text: 'Reserved' },
   calendar_pending: { color: 'bg-sky-600', text: 'Calendar pending' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
   reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },

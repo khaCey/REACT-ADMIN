@@ -36,6 +36,8 @@ function addOneMonthYyyyMm(yyyyMm) {
 
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
+  /** monthly_schedule / GAS — valid status not previously styled; missing key fell through to cancelled */
+  reserved: { accent: 'bg-cyan-600', bg: 'bg-cyan-50', dot: 'bg-cyan-600', hoverRing: 'hover:ring-cyan-500/60', label: 'Reserved' },
   calendar_pending: {
     accent: 'bg-sky-600',
     bg: 'bg-sky-50',
@@ -332,7 +334,7 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const dow = date && !isNaN(date.getTime()) ? DOW[date.getDay()] : ''
   const dayStr = isUnscheduled ? '--' : (lesson.day && lesson.day !== '--' ? `${parseInt(lesson.day)}日` : '--')
   const timeStr = isUnscheduled ? '--' : (lesson.time ? lesson.time.replace(':', '：') : '--')
-  const styles = CARD_STYLES[displayStatus] || CARD_STYLES.cancelled
+  const styles = CARD_STYLES[displayStatus] || CARD_STYLES.scheduled
   const title = styles.label || (displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1))
   const sz = CARD_SIZES[size] || CARD_SIZES.normal
   const hasNote = !!lesson?.hasNote
