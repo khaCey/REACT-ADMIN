@@ -240,28 +240,32 @@ export default function Admin() {
             {backups.length === 0 ? (
               <p className="text-sm text-gray-500">No backups in the last 30 days. Create one above or wait for the daily run.</p>
             ) : (
-              <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
-                {backups.map((b) => (
-                  <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{b.file_name}</p>
-                      <p className="text-xs text-gray-500">
-                        {formatBackupDate(b.created_at)} · {b.source === 'scheduled' ? 'Scheduled' : 'Manual'}
-                      </p>
-                    </div>
-                    {b.drive_file_id ? (
-                      <button
-                        type="button"
-                        onClick={() => setRestoreBackupId(b.id)}
-                        className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Restore backup
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="max-h-[18rem] overflow-y-auto overscroll-y-contain">
+                  <ul className="divide-y divide-gray-200">
+                    {backups.map((b) => (
+                      <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{b.file_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatBackupDate(b.created_at)} · {b.source === 'scheduled' ? 'Scheduled' : 'Manual'}
+                          </p>
+                        </div>
+                        {b.drive_file_id ? (
+                          <button
+                            type="button"
+                            onClick={() => setRestoreBackupId(b.id)}
+                            className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            Restore backup
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             )}
           </div>
         </section>
