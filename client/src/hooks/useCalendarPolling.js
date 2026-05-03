@@ -104,11 +104,25 @@ export function useCalendarPolling(options = {}) {
   }, [enabled, refetch])
 
   useEffect(() => {
-    if (!enabled || loading || !isPollingConfigured()) return
+    if (!enabled || loading) return
+    if (!isPollingConfigured()) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          '[useCalendarPolling] Not configured: add VITE_CALENDAR_POLL_URL + VITE_CALENDAR_POLL_API_KEY to client/.env (restart Vite), or log in as staff so /api/config/calendar-poll can supply them.'
+        )
+      }
+      return
+    }
 
     pollRef.current = setInterval(async () => {
       try {
         const result = await pollCalendarChanges()
+        if (import.meta.env.DEV) {
+          console.debug(
+            '[useCalendarPolling] poll tick',
+            result._skipped ? 'skipped' : result.changed ? 'changed' : 'no diff'
+          )
+        }
         if (result._skipped) return
         if (result.changed && result.diff && mountedRef.current) {
           const d = result.diff
