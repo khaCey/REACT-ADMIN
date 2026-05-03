@@ -7,6 +7,7 @@
  */
 
 import { getStoredToken } from '../utils/authSession'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const viteBase = () => (import.meta.env.VITE_CALENDAR_POLL_URL || '').trim()
 const viteKey = () => (import.meta.env.VITE_CALENDAR_POLL_API_KEY || '').trim()
@@ -115,6 +116,76 @@ export async function fetchFullCalendar() {
     data: rows,
   })
   return data
+}
+
+function pollRowKey(row) {
+  if (!row || typeof row !== 'object') return ''
+  const id = String(row.eventID ?? '').trim()
+  const sn = String(row.studentName ?? '').trim()
+  if (!id || !sn) return ''
+  return `${id}|${sn}`
+}
+
+function mergeDedupePollRows(rowsA, rowsB) {
+  const map = new Map()
+  for (const row of rowsA) {
+    const k = pollRowKey(row)
+    if (k) map.set(k, row)
+  }
+  for (const row of rowsB) {
+    const k = pollRowKey(row)
+    if (k) map.set(k, row)
+  }
+  return Array.from(map.values())
+}
+
+/**
+ * Current + next JST month via GAS month backfill (Calendar → rows), merged and deduped.
+ * @returns {Promise<{ data: Array, lastUpdated?: string, cacheVersion?: number, _skipped?: boolean }>}
+ */
+export async function fetchCalendarCurrentAndNextMonths() {
+  await ensurePollingConfig()
+  if (!isPollingConfigured()) {
+    return { data: [], _skipped: true }
+  }
+  const curYm = getCurrentYyyyMmJst()
+  const nextYm = addOneMonthYyyyMm(curYm)
+  if (!nextYm) {
+    return { data: [], _skipped: true }
+  }
+
+  const [curRes, nextRes] = await Promise.all([
+    fetchCalendarMonth(curYm),
+    fetchCalendarMonth(nextYm),
+  ])
+
+  if (curRes._skipped && nextRes._skipped) {
+    return { data: [], _skipped: true }
+  }
+
+  const rowsCur = Array.isArray(curRes.data) ? curRes.data : []
+  const rowsNext = Array.isArray(nextRes.data) ? nextRes.data : []
+  const merged = mergeDedupePollRows(rowsCur, rowsNext)
+
+  const t1 = curRes.lastUpdated ? Date.parse(curRes.lastUpdated) : NaN
+  const t2 = nextRes.lastUpdated ? Date.parse(nextRes.lastUpdated) : NaN
+  const parsed = [t1, t2].filter((t) => !Number.isNaN(t))
+  const lastTs = parsed.length > 0 ? Math.max(...parsed, Date.now()) : Date.now()
+  const lastUpdated = new Date(lastTs).toISOString()
+
+  console.log('[calendar poll] GAS cur+next month backfill:', {
+    curYm,
+    nextYm,
+    rowsCur: rowsCur.length,
+    rowsNext: rowsNext.length,
+    merged: merged.length,
+  })
+
+  return {
+    data: merged,
+    lastUpdated,
+    cacheVersion: 0,
+  }
 }
 
 /**

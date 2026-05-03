@@ -10,6 +10,7 @@ import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemoOrTrial } from '../config/booking'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
@@ -133,29 +134,6 @@ function formatBreakChipLabel(b) {
     return `${name}'s Break`
   }
   return raw
-}
-
-/** Calendar month YYYY-MM in Asia/Tokyo (matches server latest-by-month keys). */
-function getCurrentYyyyMmJst() {
-  const jst = new Date(Date.now() + JST_OFFSET_MS)
-  const y = jst.getUTCFullYear()
-  const m = jst.getUTCMonth() + 1
-  return `${y}-${String(m).padStart(2, '0')}`
-}
-
-/** Next calendar month as YYYY-MM (for showing this + next month cards). */
-function addOneMonthYyyyMm(yyyyMm) {
-  const [ys, ms] = String(yyyyMm).split('-')
-  const y = parseInt(ys, 10)
-  const mo = parseInt(ms, 10)
-  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
-  let ny = y
-  let nm = mo + 1
-  if (nm > 12) {
-    nm = 1
-    ny += 1
-  }
-  return `${ny}-${String(nm).padStart(2, '0')}`
 }
 
 function toLessonMonthSummary(ym, entry) {

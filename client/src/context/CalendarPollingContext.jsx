@@ -1,7 +1,7 @@
 /**
- * CalendarPollingProvider — Full GAS MonthlySchedule fetch on an interval → POST /api/calendar-poll/sync.
+ * CalendarPollingProvider — GAS backfill (current + next JST month) on an interval → POST /api/calendar-poll/sync.
  *
- * Schedule UIs load from API/DB; context `data` is the in-memory GAS snapshot for server sync.
+ * Schedule UIs load from API/DB; context `data` is the merged month snapshot for server sync.
  * `lastSynced` signals DB-backed components to refetch. See POLLING_API_SPEC.md.
  */
 

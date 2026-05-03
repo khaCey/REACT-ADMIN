@@ -1,10 +1,10 @@
 /**
- * useCalendarPolling — Full GAS MonthlySchedule snapshot (?full=1) on load and each interval.
+ * useCalendarPolling — GAS month backfill (current + next JST month) on load and each interval.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  fetchFullCalendar,
+  fetchCalendarCurrentAndNextMonths,
   isPollingConfigured,
   ensurePollingConfig,
 } from '../api/pollingApi'
@@ -35,7 +35,7 @@ export function useCalendarPolling(options = {}) {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchFullCalendar()
+      const result = await fetchCalendarCurrentAndNextMonths()
       if (result._skipped) {
         setData([])
         setLoading(false)
@@ -62,7 +62,7 @@ export function useCalendarPolling(options = {}) {
     await ensurePollingConfig()
     if (!isPollingConfigured() || !mountedRef.current) return
     try {
-      const result = await fetchFullCalendar()
+      const result = await fetchCalendarCurrentAndNextMonths()
       if (result._skipped || !mountedRef.current) return
       const rows = Array.isArray(result.data) ? result.data : []
       setData(rows)

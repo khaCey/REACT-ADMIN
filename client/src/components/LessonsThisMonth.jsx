@@ -7,32 +7,9 @@ import ConfirmActionModal from './ConfirmActionModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
-
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000
-
-/** Match server `/students/:id/latest-by-month` window (Asia/Tokyo calendar month). */
-function getCurrentYyyyMmJst() {
-  const jst = new Date(Date.now() + JST_OFFSET_MS)
-  const y = jst.getUTCFullYear()
-  const m = jst.getUTCMonth() + 1
-  return `${y}-${String(m).padStart(2, '0')}`
-}
-
-function addOneMonthYyyyMm(yyyyMm) {
-  const [ys, ms] = String(yyyyMm).split('-')
-  const y = parseInt(ys, 10)
-  const mo = parseInt(ms, 10)
-  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
-  let ny = y
-  let nm = mo + 1
-  if (nm > 12) {
-    nm = 1
-    ny += 1
-  }
-  return `${ny}-${String(nm).padStart(2, '0')}`
-}
 
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
