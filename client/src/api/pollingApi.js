@@ -88,6 +88,7 @@ export async function pollCalendarChanges() {
   if (data.error) {
     throw new Error(data.error)
   }
+  console.log('[calendar poll] GAS diff poll response:', data)
   return data
 }
 
@@ -106,6 +107,13 @@ export async function fetchFullCalendar() {
   if (data.error) {
     throw new Error(data.error)
   }
+  const rows = Array.isArray(data.data) ? data.data : []
+  console.log('[calendar poll] GAS full fetch response:', {
+    cacheVersion: data.cacheVersion,
+    lastUpdated: data.lastUpdated,
+    rowCount: rows.length,
+    data: rows,
+  })
   return data
 }
 

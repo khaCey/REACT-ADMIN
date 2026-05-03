@@ -117,12 +117,6 @@ export function useCalendarPolling(options = {}) {
     pollRef.current = setInterval(async () => {
       try {
         const result = await pollCalendarChanges()
-        if (import.meta.env.DEV) {
-          console.debug(
-            '[useCalendarPolling] poll tick',
-            result._skipped ? 'skipped' : result.changed ? 'changed' : 'no diff'
-          )
-        }
         if (result._skipped) return
         if (result.changed && result.diff && mountedRef.current) {
           const d = result.diff
