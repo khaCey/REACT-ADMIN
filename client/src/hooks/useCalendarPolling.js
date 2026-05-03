@@ -1,50 +1,18 @@
 /**
- * useCalendarPolling — React hook for Calendar Webhook polling.
- * Follows POLLING_API_SPEC.md flow:
- * 1. Startup: fetch full data
- * 2. Poll every intervalMs
- * 3. When changed: apply diff
+ * useCalendarPolling — Full GAS MonthlySchedule snapshot (?full=1) on load and each interval.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  pollCalendarChanges,
   fetchFullCalendar,
   isPollingConfigured,
   ensurePollingConfig,
 } from '../api/pollingApi'
-import { normalizeRemovedDiffEntry, removedEntryRowKey } from '../utils/calendarPollRemoved'
-
-function rowKey(row) {
-  return `${row.eventID || ''}|${row.studentName || ''}`
-}
-
-function applyDiff(current, diff) {
-  const map = new Map(current.map((r) => [rowKey(r), r]))
-
-  for (const row of diff.added || []) {
-    map.set(rowKey(row), row)
-  }
-  for (const entry of diff.removed || []) {
-    const parsed = normalizeRemovedDiffEntry(entry)
-    const k = parsed ? removedEntryRowKey(parsed) : typeof entry === 'string' ? entry : null
-    if (k) map.delete(k)
-    else if (import.meta.env.DEV) {
-      console.debug('[useCalendarPolling] Malformed diff.removed entry (skipped):', entry)
-    }
-  }
-  for (const row of diff.updated || []) {
-    map.set(rowKey(row), row)
-  }
-
-  return Array.from(map.values())
-}
 
 export function useCalendarPolling(options = {}) {
   const {
-    intervalMs = 300000, // 5 minutes
+    intervalMs = 900000, // 15 min (CalendarPollingProvider overrides default)
     enabled = true,
-    onChanged,
     onError,
   } = options
 
@@ -74,8 +42,9 @@ export function useCalendarPolling(options = {}) {
         return
       }
       if (mountedRef.current) {
-        setData(result.data || [])
-        dataRef.current = result.data || []
+        const rows = Array.isArray(result.data) ? result.data : []
+        setData(rows)
+        dataRef.current = rows
         setLastUpdated(result.lastUpdated || null)
         setCacheVersion(result.cacheVersion ?? null)
       }
@@ -86,6 +55,25 @@ export function useCalendarPolling(options = {}) {
       }
     } finally {
       if (mountedRef.current) setLoading(false)
+    }
+  }, [onError])
+
+  const fetchFullSilent = useCallback(async () => {
+    await ensurePollingConfig()
+    if (!isPollingConfigured() || !mountedRef.current) return
+    try {
+      const result = await fetchFullCalendar()
+      if (result._skipped || !mountedRef.current) return
+      const rows = Array.isArray(result.data) ? result.data : []
+      setData(rows)
+      dataRef.current = rows
+      setLastUpdated(result.lastUpdated || null)
+      setCacheVersion(result.cacheVersion ?? null)
+    } catch (e) {
+      if (mountedRef.current) {
+        setError(e.message)
+        onError?.(e)
+      }
     }
   }, [onError])
 
@@ -114,59 +102,8 @@ export function useCalendarPolling(options = {}) {
       return
     }
 
-    pollRef.current = setInterval(async () => {
-      try {
-        const result = await pollCalendarChanges()
-        if (result._skipped) return
-        if (result.changed && result.diff && mountedRef.current) {
-          const d = result.diff
-          const addedLen = d.added?.length ?? 0
-          const removedLen = d.removed?.length ?? 0
-          const updatedLen = d.updated?.length ?? 0
-
-          const shouldHydrate = (dataRef.current?.length || 0) === 0 && (addedLen + updatedLen + removedLen) > 0
-
-          if (shouldHydrate) {
-            try {
-              const full = await fetchFullCalendar()
-              const fullData = Array.isArray(full?.data) ? full.data : []
-              if (mountedRef.current) {
-                // Apply diff on top of hydrated snapshot.
-                const hydratedMerged = applyDiff(fullData, d)
-                dataRef.current = hydratedMerged
-                setData(hydratedMerged)
-                setLastUpdated(result.diff.lastUpdated || full.lastUpdated || null)
-                setCacheVersion(result.diff.cacheVersion ?? full.cacheVersion ?? null)
-                onChanged?.(result.diff)
-              }
-            } catch {
-              // If hydration fails, fall back to applying diff to current cache.
-              setData((prev) => {
-                const merged = applyDiff(prev, d)
-                dataRef.current = merged
-                return merged
-              })
-              setLastUpdated(result.diff.lastUpdated || null)
-              setCacheVersion(result.diff.cacheVersion ?? null)
-              onChanged?.(result.diff)
-            }
-          } else {
-            setData((prev) => {
-              const merged = applyDiff(prev, d)
-              dataRef.current = merged
-              return merged
-            })
-            setLastUpdated(result.diff.lastUpdated || null)
-            setCacheVersion(result.diff.cacheVersion ?? null)
-            onChanged?.(result.diff)
-          }
-        }
-      } catch (e) {
-        if (mountedRef.current) {
-          setError(e.message)
-          onError?.(e)
-        }
-      }
+    pollRef.current = setInterval(() => {
+      fetchFullSilent()
     }, intervalMs)
 
     return () => {
@@ -175,7 +112,7 @@ export function useCalendarPolling(options = {}) {
         pollRef.current = null
       }
     }
-  }, [enabled, intervalMs, loading, onChanged, onError])
+  }, [enabled, intervalMs, loading, fetchFullSilent])
 
   return {
     data,

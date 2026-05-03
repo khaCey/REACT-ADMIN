@@ -1,25 +1,18 @@
 /**
- * CalendarPollingProvider — GAS MonthlySchedule poll → POST /api/calendar-poll/sync (PostgreSQL).
+ * CalendarPollingProvider — Full GAS MonthlySchedule fetch on an interval → POST /api/calendar-poll/sync.
  *
- * Schedule UIs (e.g. LessonsThisMonth, BookLessonModal) must load lessons from API routes that read
- * the DB; context `data` is the in-memory GAS snapshot used only to sync to the server, not for
- * rendering grids/cards. Those components use `lastSynced` as a signal to refetch DB-backed data.
- *
- * See POLLING_API_SPEC.md for the GAS contract.
+ * Schedule UIs load from API/DB; context `data` is the in-memory GAS snapshot for server sync.
+ * `lastSynced` signals DB-backed components to refetch. See POLLING_API_SPEC.md.
  */
 
 import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo } from 'react'
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
 import { api } from '../api'
 import { useAuth } from './AuthContext'
-import {
-  normalizeRemovedDiffEntry,
-  dedupeRemovedEntries,
-} from '../utils/calendarPollRemoved'
 
 const CalendarPollingContext = createContext(null)
 
-const DEFAULT_POLL_INTERVAL_MS = 120000
+const DEFAULT_POLL_INTERVAL_MS = 15 * 60 * 1000
 
 function resolvePollIntervalMs(propMs) {
   if (propMs != null && Number.isFinite(propMs) && propMs >= 10000) return propMs
@@ -41,20 +34,6 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   const syncLoopRunningRef = useRef(false)
   const pendingResyncRef = useRef(false)
   const latestDataForSyncRef = useRef([])
-  const removedQueueRef = useRef([])
-
-  const onPollDiff = useCallback((diff) => {
-    const list = diff?.removed
-    if (!Array.isArray(list)) return
-    for (const entry of list) {
-      const parsed = normalizeRemovedDiffEntry(entry)
-      if (parsed?.eventID && parsed?.studentName) {
-        removedQueueRef.current.push(parsed)
-      } else if (import.meta.env.DEV) {
-        console.debug('[CalendarPolling] Malformed diff.removed entry (skipped):', entry)
-      }
-    }
-  }, [])
 
   const syncToServer = useCallback(async (data) => {
     latestDataForSyncRef.current = Array.isArray(data) ? data : []
@@ -65,29 +44,18 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
     syncLoopRunningRef.current = true
     pendingResyncRef.current = false
     try {
-      // Serialize: overlapping effect runs only set pendingResyncRef; we drain until quiescent.
       while (true) {
         pendingResyncRef.current = false
-        const removedRaw = removedQueueRef.current.splice(0)
-        const removed = dedupeRemovedEntries(removedRaw)
         const payload = latestDataForSyncRef.current
         const hasPayload = Array.isArray(payload) && payload.length > 0
-        if (!hasPayload && removed.length === 0) {
+        if (!hasPayload) {
           if (!pendingResyncRef.current) break
           continue
         }
         try {
-          await api.syncCalendarPoll({ data: hasPayload ? payload : [], removed })
+          await api.syncCalendarPoll({ data: payload, removed: [] })
           setLastSynced(Date.now())
-          console.debug(
-            '[CalendarPolling] Synced',
-            hasPayload ? payload.length : 0,
-            'rows,',
-            removed.length,
-            'removed (',
-            removedRaw.length,
-            'raw), to server'
-          )
+          console.debug('[CalendarPolling] Synced', payload.length, 'rows to server (full snapshot)')
         } catch (err) {
           console.warn('[CalendarPolling] Sync failed:', err.message)
         }
@@ -109,10 +77,9 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   } = useCalendarPolling({
     intervalMs,
     enabled: !!staff && !authLoading,
-    onChanged: onPollDiff,
   })
 
-  // Sync to server when data changes (full fetch or diff applied)
+  // Sync to server when data changes (each full GAS snapshot)
   useEffect(() => {
     if (isConfigured && !loading) {
       syncToServer(data ?? [])
