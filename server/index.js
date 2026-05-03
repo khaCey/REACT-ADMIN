@@ -45,6 +45,7 @@ import {
   syncOneStaffCalendarFromGas,
 } from './lib/staffScheduleGasSync.js';
 import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
+import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
 import cron from 'node-cron';
 
 const app = express();
@@ -958,6 +959,25 @@ app.listen(PORT, '0.0.0.0', () => {
         },
         { timezone: tz }
       );
+
+      const pollCronExpr = (process.env.CALENDAR_POLL_SERVER_CRON || '').trim();
+      const pollDisabled =
+        !pollCronExpr ||
+        pollCronExpr === '0' ||
+        /^off$/i.test(pollCronExpr);
+      if (!pollDisabled) {
+        const pollTz = process.env.CALENDAR_POLL_SERVER_CRON_TZ || 'Asia/Tokyo';
+        cron.schedule(
+          pollCronExpr,
+          () => {
+            runServerCalendarPollSync().catch((err) =>
+              console.error('[calendar-poll/server] scheduled sync failed:', err.message)
+            );
+          },
+          { timezone: pollTz }
+        );
+        console.log('[calendar-poll/server] cron:', pollCronExpr, pollTz);
+      }
     });
   })
   .catch((err) => {
