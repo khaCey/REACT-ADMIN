@@ -1,7 +1,7 @@
 /**
- * Server-side Calendar GAS full fetch → PostgreSQL monthly_schedule sync.
+ * Server-side Calendar GAS month backfill → PostgreSQL monthly_schedule sync.
  * Runs on a cron schedule from server/index.js when CALENDAR_POLL_SERVER_CRON is set.
- * Uses full=1 snapshot + reconcile so DB matches GAS without relying on a browser session.
+ * Uses current + next month snapshots (month=YYYY-MM) + reconcile to mirror backfill behavior.
  */
 import { upsertMonthlySchedule } from './calendarSync.js';
 import {
@@ -62,16 +62,45 @@ async function refreshTeacherSchedulesFromGASForMonth(yyyyMm) {
   };
 }
 
+function getCurrentAndNextYyyyMmJst() {
+  const jstNow = new Date(Date.now() + JST_OFFSET_MS);
+  const curYyyyMm = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
+  const nextDate = new Date(jstNow.getTime());
+  nextDate.setUTCMonth(nextDate.getUTCMonth() + 1);
+  const nextYyyyMm = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}`;
+  return { curYyyyMm, nextYyyyMm };
+}
+
+function rowKey(row) {
+  const eventId = String(row?.eventID || row?.event_id || '').trim();
+  const studentName = String(row?.studentName || row?.student_name || '').trim();
+  if (!eventId || !studentName) return '';
+  return `${eventId}|${studentName}`;
+}
+
+function mergeAndDedupeRows(rowsA, rowsB) {
+  const map = new Map();
+  for (const row of rowsA || []) {
+    const k = rowKey(row);
+    if (k) map.set(k, row);
+  }
+  for (const row of rowsB || []) {
+    const k = rowKey(row);
+    if (k) map.set(k, row);
+  }
+  return Array.from(map.values());
+}
+
 /**
- * Fetch MonthlySchedule JSON from GAS (?full=1).
+ * Fetch MonthlySchedule JSON from GAS for a specific month (month=YYYY-MM).
  * @returns {Promise<{ data: Array, raw: object }>}
  */
-export async function fetchFullMonthlyScheduleFromGas() {
+async function fetchMonthlyScheduleFromGasMonth(yyyyMm) {
   const { url, key, configured } = getCalendarPollGasEnv();
   if (!configured) {
     throw new Error('Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)');
   }
-  const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1`;
+  const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1&month=${encodeURIComponent(yyyyMm)}`;
   let fetchRes;
   try {
     fetchRes = await fetch(gasUrl);
@@ -92,7 +121,7 @@ export async function fetchFullMonthlyScheduleFromGas() {
 }
 
 /**
- * Full GAS snapshot → upsert + reconcile; refresh teacher_schedules when payload touches current/next JST month.
+ * GAS month snapshots (current + next) → upsert + reconcile; mirrors backfill behavior.
  */
 export async function runServerCalendarPollSync() {
   const { configured } = getCalendarPollGasEnv();
@@ -101,20 +130,23 @@ export async function runServerCalendarPollSync() {
     return { ok: false, skipped: true, reason: 'not_configured' };
   }
 
-  const { data, raw } = await fetchFullMonthlyScheduleFromGas();
-  console.log('[calendar-poll/server] fetched', data.length, 'rows from GAS (full=1)');
+  const { curYyyyMm, nextYyyyMm } = getCurrentAndNextYyyyMmJst();
+  const [cur, next] = await Promise.all([
+    fetchMonthlyScheduleFromGasMonth(curYyyyMm),
+    fetchMonthlyScheduleFromGasMonth(nextYyyyMm),
+  ]);
+  const data = mergeAndDedupeRows(cur.data, next.data);
+  console.log(
+    '[calendar-poll/server] fetched',
+    data.length,
+    `rows from GAS (month backfill ${curYyyyMm} + ${nextYyyyMm}; raw=${cur.data.length}+${next.data.length})`
+  );
 
   const syncResult = await upsertMonthlySchedule(data, { reconcile: true });
   const { upserted, months, deletedOrphans } = syncResult;
 
   let teacherSchedulesRefresh = null;
   try {
-    const jstNow = new Date(Date.now() + JST_OFFSET_MS);
-    const curYyyyMm = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
-    const nextDate = new Date(jstNow.getTime());
-    nextDate.setUTCMonth(nextDate.getUTCMonth() + 1);
-    const nextYyyyMm = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}`;
-
     const intersectsCurOrNext =
       Array.isArray(months) && months.some((m) => m === curYyyyMm || m === nextYyyyMm);
     if (intersectsCurOrNext) {
@@ -131,8 +163,8 @@ export async function runServerCalendarPollSync() {
     'rows for months',
     (months || []).slice().sort().join(', '),
     deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : '',
-    '; cacheVersion=',
-    raw?.cacheVersion ?? '—'
+    '; sources=',
+    `${curYyyyMm}+${nextYyyyMm}`
   );
 
   return {
@@ -142,7 +174,7 @@ export async function runServerCalendarPollSync() {
     deletedOrphans: deletedOrphans || 0,
     teacherSchedulesRefresh,
     fetched: data.length,
-    cacheVersion: raw?.cacheVersion ?? null,
-    lastUpdated: raw?.lastUpdated ?? null,
+    cacheVersion: 0,
+    lastUpdated: new Date().toISOString(),
   };
 }
