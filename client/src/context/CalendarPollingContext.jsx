@@ -1,15 +1,13 @@
 /**
- * CalendarPollingProvider — GAS backfill (current + next JST month) on an interval → POST /api/calendar-poll/sync.
+ * CalendarPollingProvider — client poll signal for DB-backed UIs.
  *
- * Schedule UIs load from API/DB; context `data` is the merged month snapshot for server sync.
- * `lastSynced` signals DB-backed components to refetch. See POLLING_API_SPEC.md.
+ * Server cron performs GAS backfill+reconcile. Client polling is used to drive
+ * periodic UI refetch signals (`lastSynced`) for DB-backed screens.
  */
 
-import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
-import { api } from '../api'
 import { useAuth } from './AuthContext'
-import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const CalendarPollingContext = createContext(null)
 
@@ -32,37 +30,6 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   const intervalMs = useMemo(() => resolvePollIntervalMs(intervalMsProp), [intervalMsProp])
 
   const [lastSynced, setLastSynced] = useState(null)
-  const syncLoopRunningRef = useRef(false)
-  const pendingResyncRef = useRef(false)
-  const latestDataForSyncRef = useRef([])
-
-  const syncToServer = useCallback(async (data) => {
-    latestDataForSyncRef.current = Array.isArray(data) ? data : []
-    if (syncLoopRunningRef.current) {
-      pendingResyncRef.current = true
-      return
-    }
-    syncLoopRunningRef.current = true
-    pendingResyncRef.current = false
-    try {
-      while (true) {
-        pendingResyncRef.current = false
-        try {
-          const currentYm = getCurrentYyyyMmJst()
-          const nextYm = addOneMonthYyyyMm(currentYm)
-          const months = [currentYm, nextYm].filter(Boolean)
-          await Promise.all(months.map((month) => api.backfillFromCalendar({ month })))
-          setLastSynced(Date.now())
-          console.debug('[CalendarPolling] Backfill synced months:', months.join(', '))
-        } catch (err) {
-          console.warn('[CalendarPolling] Sync failed:', err.message)
-        }
-        if (!pendingResyncRef.current) break
-      }
-    } finally {
-      syncLoopRunningRef.current = false
-    }
-  }, [])
 
   const {
     data,
@@ -77,12 +44,12 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
     enabled: !!staff && !authLoading,
   })
 
-  // Sync to server when data changes (each full GAS snapshot)
+  // Emit UI refresh signal when client poll data changes.
   useEffect(() => {
     if (isConfigured && !loading) {
-      syncToServer(data ?? [])
+      setLastSynced(Date.now())
     }
-  }, [isConfigured, data, loading, syncToServer])
+  }, [isConfigured, data, loading])
 
   const value = {
     data,
