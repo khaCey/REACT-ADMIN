@@ -9,6 +9,7 @@ import { createContext, useContext, useCallback, useRef, useEffect, useState, us
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
 import { api } from '../api'
 import { useAuth } from './AuthContext'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const CalendarPollingContext = createContext(null)
 
@@ -46,16 +47,13 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
     try {
       while (true) {
         pendingResyncRef.current = false
-        const payload = latestDataForSyncRef.current
-        const hasPayload = Array.isArray(payload) && payload.length > 0
-        if (!hasPayload) {
-          if (!pendingResyncRef.current) break
-          continue
-        }
         try {
-          await api.syncCalendarPoll({ data: payload, removed: [] })
+          const currentYm = getCurrentYyyyMmJst()
+          const nextYm = addOneMonthYyyyMm(currentYm)
+          const months = [currentYm, nextYm].filter(Boolean)
+          await Promise.all(months.map((month) => api.backfillFromCalendar({ month })))
           setLastSynced(Date.now())
-          console.debug('[CalendarPolling] Synced', payload.length, 'rows to server (full snapshot)')
+          console.debug('[CalendarPolling] Backfill synced months:', months.join(', '))
         } catch (err) {
           console.warn('[CalendarPolling] Sync failed:', err.message)
         }
