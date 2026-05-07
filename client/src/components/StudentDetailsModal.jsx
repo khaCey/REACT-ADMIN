@@ -272,6 +272,14 @@ export default function StudentDetailsModal({
     await fetchData({ silent: true })
   }, [fetchData, student, studentGroup, studentId, success])
 
+  const handleUnlinkGroupLesson = useCallback(async () => {
+    const unlinked = await api.unlinkStudentGroup(studentId)
+    setStudentGroup(unlinked || null)
+    success('Group link removed')
+    setGroupLinkModalOpen(false)
+    await fetchData({ silent: true })
+  }, [fetchData, studentId, success])
+
   useEffect(() => {
     if (studentId == null) return
     const onKey = (e) => e.key === 'Escape' && onClose()
@@ -661,6 +669,7 @@ export default function StudentDetailsModal({
           setGroupLinkModalOpen(false)
         }}
         onSave={handleSaveGroupLesson}
+        onUnlink={handleUnlinkGroupLesson}
       />
     )}
     </>,

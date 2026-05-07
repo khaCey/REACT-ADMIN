@@ -237,6 +237,84 @@ router.put('/:id/group', async (req, res) => {
   }
 });
 
+router.delete('/:id/group', async (req, res) => {
+  let client;
+  try {
+    const studentId = Number(req.params.id);
+    if (!Number.isFinite(studentId) || !Number.isInteger(studentId) || studentId < 0) {
+      return res.status(400).json({ error: 'Invalid student id' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const studentResult = await client.query('SELECT id FROM students WHERE id = $1', [studentId]);
+    if (studentResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const groupResult = await client.query(
+      'SELECT group_id FROM student_group_members WHERE student_id = $1 LIMIT 1',
+      [studentId]
+    );
+    const groupId = groupResult.rows[0]?.group_id ? Number(groupResult.rows[0].group_id) : null;
+
+    if (!groupId) {
+      await client.query('COMMIT');
+      const payload = await getStudentGroupPayload(studentId, client.query.bind(client));
+      return res.json(payload);
+    }
+
+    // Remove current student from group.
+    await client.query(
+      'DELETE FROM student_group_members WHERE group_id = $1 AND student_id = $2',
+      [groupId, studentId]
+    );
+
+    const remaining = await client.query(
+      `SELECT student_id
+         FROM student_group_members
+        WHERE group_id = $1
+        ORDER BY sort_order ASC, student_id ASC`,
+      [groupId]
+    );
+
+    // 1-member groups are invalid; dissolve remaining links as well.
+    if (remaining.rows.length < 2) {
+      await client.query('DELETE FROM student_group_members WHERE group_id = $1', [groupId]);
+    } else {
+      // Keep group ordering compact after unlink.
+      for (let index = 0; index < remaining.rows.length; index += 1) {
+        await client.query(
+          'UPDATE student_group_members SET sort_order = $3 WHERE group_id = $1 AND student_id = $2',
+          [groupId, remaining.rows[index].student_id, index + 1]
+        );
+      }
+      await client.query(
+        `UPDATE student_groups
+            SET expected_size = $2,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [groupId, remaining.rows.length]
+      );
+    }
+
+    await cleanupEmptyStudentGroups(client);
+    await client.query('COMMIT');
+
+    const payload = await getStudentGroupPayload(studentId, client.query.bind(client));
+    res.json(payload);
+  } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const body = req.body;

@@ -14,6 +14,7 @@ export default function GroupLinkModal({
   initialGroup = null,
   onClose,
   onSave,
+  onUnlink,
 }) {
   const expectedSize = Math.max(
     2,
@@ -220,6 +221,20 @@ export default function GroupLinkModal({
     setSaving(false)
   }
 
+  const handleUnlink = async () => {
+    if (!initialGroup?.groupId || currentStudentId === null) return
+    setSaving(true)
+    setError('')
+    try {
+      await onUnlink?.()
+    } catch (err) {
+      setError(err?.message || 'Failed to unlink group lesson')
+      setSaving(false)
+      return
+    }
+    setSaving(false)
+  }
+
   return createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/50" onClick={() => !saving && onClose?.()} aria-hidden="true" />
@@ -322,6 +337,16 @@ export default function GroupLinkModal({
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-gray-200 px-4 py-3">
+          {initialGroup?.groupId && (
+            <button
+              type="button"
+              onClick={handleUnlink}
+              disabled={saving || loading}
+              className="mr-auto rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Unlinking...' : 'Unlink group'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => !saving && onClose?.()}
