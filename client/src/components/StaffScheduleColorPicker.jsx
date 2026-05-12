@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react'
 import { Palette } from 'lucide-react'
 import {
   GOOGLE_CALENDAR_EVENT_COLORS,
@@ -23,7 +24,32 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
       ? ` · ${normalizeCalendarHex(selected)}`
       : ` · Calendar id ${selected}`
 
-  const colorInputValue = hexSelected ? normalizeCalendarHex(selected) : '#94a3b8'
+  const [hexDraft, setHexDraft] = useState(() =>
+    hexSelected ? normalizeCalendarHex(selected) : ''
+  )
+
+  useEffect(() => {
+    const s = value == null || String(value).trim() === '' ? '' : String(value).trim()
+    if (isCalendarHexColor(s)) {
+      setHexDraft(normalizeCalendarHex(s))
+    } else {
+      setHexDraft('')
+    }
+  }, [value])
+
+  const commitHexDraft = useCallback(() => {
+    const t = hexDraft.trim()
+    if (t === '') {
+      onChange('')
+      return
+    }
+    if (isCalendarHexColor(t)) {
+      onChange(normalizeCalendarHex(t))
+      return
+    }
+    const cur = value == null || String(value).trim() === '' ? '' : String(value).trim()
+    setHexDraft(isCalendarHexColor(cur) ? normalizeCalendarHex(cur) : '')
+  }, [hexDraft, onChange, value])
 
   const ringSelected = 'ring-2 ring-green-600 ring-offset-2 ring-offset-white'
   const ringIdle = 'ring-1 ring-gray-300 hover:ring-gray-400'
@@ -66,22 +92,34 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
         })}
       </div>
       <div className="flex flex-wrap items-center gap-3 pt-1">
-        <span className="text-xs font-medium text-slate-700">Custom color</span>
+        <label htmlFor={`${idPrefix}-custom-hex`} className="text-xs font-medium text-slate-700">
+          Custom hex
+        </label>
         <div
           className={`inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 ${hexSelected ? ringSelected : ringIdle}`}
         >
           <input
-            type="color"
+            type="text"
             id={`${idPrefix}-custom-hex`}
-            value={colorInputValue}
-            onChange={(e) => onChange(normalizeCalendarHex(e.target.value))}
-            className="h-9 w-12 cursor-pointer rounded border border-gray-300 bg-white p-0.5"
-            title="Pick a custom color (stored as #RRGGBB)"
-            aria-label="Custom schedule color"
+            value={hexDraft}
+            onChange={(e) => setHexDraft(e.target.value)}
+            onBlur={commitHexDraft}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitHexDraft()
+                e.currentTarget.blur()
+              }
+            }}
+            placeholder="#RRGGBB"
+            maxLength={7}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            className="h-9 w-[7.5rem] rounded border border-gray-300 bg-white px-2 font-mono text-sm text-gray-900"
+            title="Enter #RRGGBB (e.g. #ff0000). Leave empty and blur for Auto."
+            aria-label="Custom hex color (#RRGGBB)"
           />
-          {hexSelected && (
-            <span className="text-xs font-mono text-gray-700">{normalizeCalendarHex(selected)}</span>
-          )}
         </div>
       </div>
     </div>
