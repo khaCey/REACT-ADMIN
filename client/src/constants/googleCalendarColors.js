@@ -22,6 +22,19 @@ export const GOOGLE_CALENDAR_EVENT_COLORS = [
 const BY_ID = Object.fromEntries(GOOGLE_CALENDAR_EVENT_COLORS.map((c) => [c.id, c]))
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/
+const BARE_HEX_RE = /^[0-9A-Fa-f]{6}$/
+
+/**
+ * Parse hex from the schedule color text field: `#RRGGBB` or bare `RRGGBB`.
+ * @returns {string|null} normalized `#rrggbb`, or null if empty / invalid
+ */
+export function parseScheduleHexInput(raw) {
+  const t = String(raw ?? '').trim()
+  if (t === '') return null
+  if (HEX_COLOR_RE.test(t)) return normalizeCalendarHex(t)
+  if (BARE_HEX_RE.test(t)) return `#${t.toLowerCase()}`
+  return null
+}
 
 /** True if value is a stored custom UI color `#RRGGBB`. */
 export function isCalendarHexColor(value) {

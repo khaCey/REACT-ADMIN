@@ -6,7 +6,7 @@ import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import StaffScheduleColorPicker from './StaffScheduleColorPicker'
-import { isCalendarHexColor, normalizeCalendarHex } from '../constants/googleCalendarColors'
+import { isCalendarHexColor, parseScheduleHexInput } from '../constants/googleCalendarColors'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -60,14 +60,18 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     setError('')
     setSubmitting(true)
     try {
-      let colorTrim = String(calendar_color_id ?? '').trim()
-      /** Prefer hex typed in the picker input — blur may not have run before Save, so state can be stale. */
-      const hexInput = document.getElementById(`edit-staff-${staff.id}-color-custom-hex`)
-      if (hexInput) {
-        const typed = String(hexInput.value ?? '').trim()
-        if (isCalendarHexColor(typed)) {
-          colorTrim = normalizeCalendarHex(typed)
-        }
+      /** Read hex from the form field by name — matches React-controlled value at submit time (fixes stale state). */
+      const formEl = e.currentTarget
+      const hexEl = formEl.querySelector('input[name="schedule_color_hex"]')
+      const typed = hexEl ? String(hexEl.value ?? '').trim() : ''
+      const parsedHex = parseScheduleHexInput(typed)
+      const stateColor = String(calendar_color_id ?? '').trim()
+      let colorTrim = stateColor
+      if (parsedHex) {
+        colorTrim = parsedHex
+      } else if (typed === '' && isCalendarHexColor(stateColor)) {
+        // Cleared custom hex without blur — controlled input is empty but state still had hex
+        colorTrim = ''
       }
       const payload = {
         calendar_id: String(calendar_id ?? '').trim() || null,

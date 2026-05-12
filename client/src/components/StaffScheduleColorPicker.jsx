@@ -5,6 +5,7 @@ import {
   googleCalendarColorLabel,
   isCalendarHexColor,
   normalizeCalendarHex,
+  parseScheduleHexInput,
 } from '../constants/googleCalendarColors'
 
 /**
@@ -43,8 +44,9 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
       onChange('')
       return
     }
-    if (isCalendarHexColor(t)) {
-      onChange(normalizeCalendarHex(t))
+    const parsed = parseScheduleHexInput(t)
+    if (parsed) {
+      onChange(parsed)
       return
     }
     const cur = value == null || String(value).trim() === '' ? '' : String(value).trim()
@@ -101,6 +103,7 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
           <input
             type="text"
             id={`${idPrefix}-custom-hex`}
+            name="schedule_color_hex"
             value={hexDraft}
             onChange={(e) => setHexDraft(e.target.value)}
             onBlur={commitHexDraft}
@@ -111,8 +114,9 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
                 e.currentTarget.blur()
               }
             }}
-            placeholder="#RRGGBB"
+            placeholder="#RRGGBB or RRGGBB"
             maxLength={7}
+            autoComplete="off"
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
