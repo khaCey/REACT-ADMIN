@@ -11,8 +11,9 @@ import FullPageLoading from '../components/FullPageLoading'
 import {
   GOOGLE_CALENDAR_EVENT_COLORS,
   googleCalendarColorLabel,
-  staffScheduleCellTintClass,
-  staffScheduleColorChipClass,
+  isCalendarHexColor,
+  staffScheduleCellTintPresentation,
+  staffScheduleColorChipPresentation,
 } from '../constants/googleCalendarColors'
 
 function formatShiftTime(iso) {
@@ -187,6 +188,8 @@ function isShiftRosterEligibleStaff(s) {
 function getStaffCalendarSwatchHex(staff, fallbackIndex = 0) {
   const raw = staff?.calendar_color_id
   const id = raw != null && String(raw).trim() !== '' ? String(raw).trim() : null
+
+  if (id && isCalendarHexColor(id)) return id
 
   if (id) {
     const found = GOOGLE_CALENDAR_EVENT_COLORS.find((c) => c.id === id)
@@ -557,11 +560,17 @@ export default function Staff() {
                     >
                       <td className="px-4 py-2 font-medium text-gray-900">{s.name}</td>
                       <td className="px-4 py-2">
+                        {(() => {
+                          const chip = staffScheduleColorChipPresentation(s, s.id)
+                          return (
                         <span
-                          className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${staffScheduleColorChipClass(s, s.id)}`}
+                          className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${chip.className}`}
+                          style={chip.style}
                           title={
                             s.calendar_color_id
-                              ? `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
+                              ? isCalendarHexColor(s.calendar_color_id)
+                                ? `Custom color ${s.calendar_color_id}`
+                                : `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
                               : 'Auto (set in Edit Staff)'
                           }
                         >
@@ -569,6 +578,8 @@ export default function Staff() {
                             ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
                             : 'Auto'}
                         </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-4 py-2 text-sm text-gray-600 truncate max-w-[200px]">
                         {s.calendar_id || '—'}
@@ -703,7 +714,7 @@ export default function Staff() {
                         rosterLegendNames.forEach((name, idx) => {
                           const st = findStaffMemberForRosterName(staffList, name)
                           const listIdx = st ? staffList.findIndex((s) => s.id === st.id) : -1
-                          rosterColorIndex[name] = staffScheduleColorChipClass(
+                          rosterColorIndex[name] = staffScheduleColorChipPresentation(
                             st || {},
                             listIdx >= 0 ? listIdx : idx
                           )
@@ -717,14 +728,21 @@ export default function Staff() {
                         return (
                           <>
                             <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
-                              {rosterLegendNames.map((name) => (
-                                <span
-                                  key={name}
-                                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${rosterColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
-                                >
-                                  {name}
-                                </span>
-                              ))}
+                              {rosterLegendNames.map((name) => {
+                                const pres = rosterColorIndex[name] || {
+                                  className: 'bg-gray-100 border-gray-300',
+                                  style: undefined,
+                                }
+                                return (
+                                  <span
+                                    key={name}
+                                    className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${pres.className}`}
+                                    style={pres.style}
+                                  >
+                                    {name}
+                                  </span>
+                                )
+                              })}
                             </div>
                             <div className="flex min-w-[600px] border-b border-gray-200">
                               <div className="w-14 shrink-0" />
@@ -773,15 +791,17 @@ export default function Staff() {
                                         TEACHER_CALENDAR_TOTAL_MINUTES > 0
                                           ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
                                           : 0
-                                      const colorClass =
-                                        rosterColorIndex[block.staff_name] ||
-                                        'bg-gray-100 border-gray-300 text-gray-800'
+                                      const pres = rosterColorIndex[block.staff_name] || {
+                                        className: 'bg-gray-100 border-gray-300 text-gray-800',
+                                        style: undefined,
+                                      }
                                       const cascadeIndex = cascadeIndices[i] ?? 0
                                       return (
                                         <div
                                           key={`${block.staff_name}-${block.start_time}-${i}`}
-                                          className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                          className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${pres.className}`}
                                           style={{
+                                            ...(pres.style || {}),
                                             top: `${topPct}%`,
                                             height: `${heightPct}%`,
                                             minHeight: 20,
@@ -878,8 +898,8 @@ export default function Staff() {
                             : (primaryCalendarMatchIdx >= 0 ? primaryCalendarMatchIdx : 0)
                           const shiftCellTint =
                             tintStaff != null
-                              ? staffScheduleCellTintClass(tintStaff, tintStaffIdx)
-                              : 'bg-white border-gray-100'
+                              ? staffScheduleCellTintPresentation(tintStaff, tintStaffIdx)
+                              : { className: 'bg-white border-gray-100', style: undefined }
                           const selectStyle = getStaffSelectStyle(
                             assignedStaff || primaryCalendarMatch,
                             assignedStaff != null
@@ -897,7 +917,10 @@ export default function Staff() {
 
                           return (
                             <td key={date} className="px-2 py-2 min-w-[140px] align-top">
-                              <div className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint}`}>
+                              <div
+                                className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint.className}`}
+                                style={shiftCellTint.style}
+                              >
                                 <select
                                   value={slot?.staff_name ?? ''}
                                   onChange={(e) => {
@@ -947,13 +970,15 @@ export default function Staff() {
                                       const matchStaffIdx = matchStaff
                                         ? calendarStaffOptions.findIndex((x) => x.id === matchStaff.id)
                                         : matchIdx
+                                      const matchChip = staffScheduleColorChipPresentation(
+                                        matchStaff || {},
+                                        matchStaffIdx >= 0 ? matchStaffIdx : matchIdx
+                                      )
                                       return (
                                         <span
                                           key={`${match.staff_name}-${match.start_time}-${match.end_time}-${matchIdx}`}
-                                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${staffScheduleColorChipClass(
-                                            matchStaff || {},
-                                            matchStaffIdx >= 0 ? matchStaffIdx : matchIdx
-                                          )}`}
+                                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${matchChip.className}`}
+                                          style={matchChip.style}
                                           title={`${match.staff_name}: ${match.start_time}–${match.end_time}`}
                                         >
                                           {match.staff_name}
@@ -1209,7 +1234,7 @@ export default function Staff() {
                     const teacherColorIndex = {}
                     englishTeachers.forEach((name, idx) => {
                       const st = staffList.find((s) => s.name === name)
-                      teacherColorIndex[name] = staffScheduleColorChipClass(st || {}, idx)
+                      teacherColorIndex[name] = staffScheduleColorChipPresentation(st || {}, idx)
                     })
                     const hourLabels = Array.from(
                       { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
@@ -1219,14 +1244,21 @@ export default function Staff() {
                     return (
                       <>
                         <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
-                          {englishTeachers.map((name) => (
-                            <span
-                              key={name}
-                              className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${teacherColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
-                            >
-                              {name}
-                            </span>
-                          ))}
+                          {englishTeachers.map((name) => {
+                            const tpres = teacherColorIndex[name] || {
+                              className: 'bg-gray-100 border-gray-300',
+                              style: undefined,
+                            }
+                            return (
+                              <span
+                                key={name}
+                                className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${tpres.className}`}
+                                style={tpres.style}
+                              >
+                                {name}
+                              </span>
+                            )
+                          })}
                         </div>
                         <div className="flex min-w-[600px] border-b border-gray-200">
                           <div className="w-14 shrink-0" />
@@ -1269,15 +1301,23 @@ export default function Staff() {
                                   const duration = Math.max(1, endMin - startMin)
                                   const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
-                                  const colorClass = block.kind === 'preset_break'
-                                    ? 'bg-slate-100 border-slate-300 text-slate-700'
-                                    : (teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800')
+                                  const blockPres =
+                                    block.kind === 'preset_break'
+                                      ? {
+                                          className: 'bg-slate-100 border-slate-300 text-slate-700',
+                                          style: undefined,
+                                        }
+                                      : teacherColorIndex[block.teacher] || {
+                                          className: 'bg-gray-100 border-gray-300 text-gray-800',
+                                          style: undefined,
+                                        }
                                   const cascadeIndex = cascadeIndices[i] ?? 0
                                   return (
                                     <div
                                       key={i}
-                                      className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                      className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${blockPres.className}`}
                                       style={{
+                                        ...(blockPres.style || {}),
                                         top: `${topPct}%`,
                                         height: `${heightPct}%`,
                                         minHeight: 20,

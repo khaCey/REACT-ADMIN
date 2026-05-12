@@ -1,14 +1,29 @@
 import { Palette } from 'lucide-react'
-import { GOOGLE_CALENDAR_EVENT_COLORS, googleCalendarColorLabel } from '../constants/googleCalendarColors'
+import {
+  GOOGLE_CALENDAR_EVENT_COLORS,
+  googleCalendarColorLabel,
+  isCalendarHexColor,
+  normalizeCalendarHex,
+} from '../constants/googleCalendarColors'
 
 /**
  * Google Calendar event colors as clickable swatches (native <select> cannot show colors).
- * @param {string} value - "" for Auto, or "1"–"11"
- * @param {(next: string) => void} onChange - receives "" or id string
+ * Also supports custom `#RRGGBB` stored in the same field as calendar_color_id.
+ * @param {string} value - "" for Auto, "1"–"11", or `#rrggbb`
+ * @param {(next: string) => void} onChange - receives "" or id string or hex
  */
 export default function StaffScheduleColorPicker({ value, onChange, idPrefix = 'staff-schedule-color' }) {
   const selected = value == null || String(value).trim() === '' ? '' : String(value).trim()
+  const hexSelected = isCalendarHexColor(selected)
   const selectedLabel = selected ? googleCalendarColorLabel(selected) : 'Auto'
+
+  const summarySuffix = !selected
+    ? ' · palette rotates by staff order'
+    : hexSelected
+      ? ` · ${normalizeCalendarHex(selected)}`
+      : ` · Calendar id ${selected}`
+
+  const colorInputValue = hexSelected ? normalizeCalendarHex(selected) : '#94a3b8'
 
   const ringSelected = 'ring-2 ring-green-600 ring-offset-2 ring-offset-white'
   const ringIdle = 'ring-1 ring-gray-300 hover:ring-gray-400'
@@ -17,7 +32,7 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
     <div className="space-y-2">
       <p className="text-xs text-gray-600">
         Selected: <span className="font-medium text-gray-900">{selectedLabel}</span>
-        {selected ? ` · Calendar id ${selected}` : ' · palette rotates by staff order'}
+        {summarySuffix}
       </p>
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Google Calendar event color">
         <button
@@ -49,6 +64,25 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
             />
           )
         })}
+      </div>
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <span className="text-xs font-medium text-slate-700">Custom color</span>
+        <div
+          className={`inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 ${hexSelected ? ringSelected : ringIdle}`}
+        >
+          <input
+            type="color"
+            id={`${idPrefix}-custom-hex`}
+            value={colorInputValue}
+            onChange={(e) => onChange(normalizeCalendarHex(e.target.value))}
+            className="h-9 w-12 cursor-pointer rounded border border-gray-300 bg-white p-0.5"
+            title="Pick a custom color (stored as #RRGGBB)"
+            aria-label="Custom schedule color"
+          />
+          {hexSelected && (
+            <span className="text-xs font-mono text-gray-700">{normalizeCalendarHex(selected)}</span>
+          )}
+        </div>
       </div>
     </div>
   )
