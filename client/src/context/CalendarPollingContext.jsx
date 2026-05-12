@@ -1,13 +1,14 @@
 /**
- * CalendarPollingProvider — client poll signal for DB-backed UIs.
+ * CalendarPollingProvider — poll GAS (cur+next month), then POST server backfill for those months.
  *
- * Server cron performs GAS backfill+reconcile. Client polling is used to drive
- * periodic UI refetch signals (`lastSynced`) for DB-backed screens.
+ * Optional `CALENDAR_POLL_SERVER_CRON` in root `.env` also syncs when no browser is open.
  */
 
-import { createContext, useContext, useEffect, useState, useMemo } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
 import { useAuth } from './AuthContext'
+import { api } from '../api'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const CalendarPollingContext = createContext(null)
 
@@ -30,6 +31,7 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   const intervalMs = useMemo(() => resolvePollIntervalMs(intervalMsProp), [intervalMsProp])
 
   const [lastSynced, setLastSynced] = useState(null)
+  const backfillGenRef = useRef(0)
 
   const {
     data,
@@ -44,12 +46,26 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
     enabled: !!staff && !authLoading,
   })
 
-  // Emit UI refresh signal when client poll data changes.
+  // After each successful GAS poll, run server-side month backfill (reconcile) then bump UI refresh.
   useEffect(() => {
-    if (isConfigured && !loading) {
-      setLastSynced(Date.now())
-    }
-  }, [isConfigured, data, loading])
+    if (!staff || authLoading || !isConfigured || loading) return
+    const gen = ++backfillGenRef.current
+    const curYm = getCurrentYyyyMmJst()
+    const nextYm = addOneMonthYyyyMm(curYm)
+    ;(async () => {
+      try {
+        await Promise.all([
+          api.backfillFromCalendar({ month: curYm }),
+          nextYm ? api.backfillFromCalendar({ month: nextYm }) : Promise.resolve(),
+        ])
+        if (backfillGenRef.current === gen) {
+          setLastSynced(Date.now())
+        }
+      } catch (err) {
+        console.warn('[CalendarPolling] Backfill failed:', err?.message || err)
+      }
+    })()
+  }, [staff, authLoading, isConfigured, loading, lastUpdated])
 
   const value = {
     data,
