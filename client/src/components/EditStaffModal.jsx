@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import StaffScheduleColorPicker from './StaffScheduleColorPicker'
+import { isCalendarHexColor, normalizeCalendarHex } from '../constants/googleCalendarColors'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -59,7 +60,15 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     setError('')
     setSubmitting(true)
     try {
-      const colorTrim = String(calendar_color_id ?? '').trim()
+      let colorTrim = String(calendar_color_id ?? '').trim()
+      /** Prefer hex typed in the picker input — blur may not have run before Save, so state can be stale. */
+      const hexInput = document.getElementById(`edit-staff-${staff.id}-color-custom-hex`)
+      if (hexInput) {
+        const typed = String(hexInput.value ?? '').trim()
+        if (isCalendarHexColor(typed)) {
+          colorTrim = normalizeCalendarHex(typed)
+        }
+      }
       const payload = {
         calendar_id: String(calendar_id ?? '').trim() || null,
         calendar_color_id: colorTrim === '' ? null : colorTrim,
