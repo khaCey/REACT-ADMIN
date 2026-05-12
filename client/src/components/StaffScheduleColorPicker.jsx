@@ -14,7 +14,13 @@ import {
  * @param {string} value - "" for Auto, "1"–"11", or `#rrggbb`
  * @param {(next: string) => void} onChange - receives "" or id string or hex
  */
-export default function StaffScheduleColorPicker({ value, onChange, idPrefix = 'staff-schedule-color' }) {
+export default function StaffScheduleColorPicker({
+  value,
+  onChange,
+  idPrefix = 'staff-schedule-color',
+  /** Parent can read the hex field at form submit (avoids stale querySelector / timing issues). */
+  hexInputRef,
+}) {
   const selected = value == null || String(value).trim() === '' ? '' : String(value).trim()
   const hexSelected = isCalendarHexColor(selected)
   const selectedLabel = selected ? googleCalendarColorLabel(selected) : 'Auto'
@@ -41,7 +47,9 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
   const commitHexDraft = useCallback(() => {
     const t = hexDraft.trim()
     if (t === '') {
-      onChange('')
+      const cur = value == null || String(value).trim() === '' ? '' : String(value).trim()
+      // Only clearing the text field should drop *custom hex* to Auto — not a Google swatch selection.
+      if (isCalendarHexColor(cur)) onChange('')
       return
     }
     const parsed = parseScheduleHexInput(t)
@@ -101,6 +109,7 @@ export default function StaffScheduleColorPicker({ value, onChange, idPrefix = '
           className={`inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 ${hexSelected ? ringSelected : ringIdle}`}
         >
           <input
+            ref={hexInputRef}
             type="text"
             id={`${idPrefix}-custom-hex`}
             name="schedule_color_hex"
