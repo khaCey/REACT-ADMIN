@@ -70,8 +70,9 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
       await api.updateStudent(studentId, {
         Name: form.Name.trim(),
         漢字: form.漢字.trim() || undefined,
-        Phone: phone || undefined,
-        Email: form.Email.trim() || undefined,
+        // Send '' when cleared so server COALESCE($n, column) updates instead of skipping.
+        Phone: phone,
+        Email: form.Email.trim(),
         Status: form.Status,
         Payment: form.Payment,
         当日: form.当日,
