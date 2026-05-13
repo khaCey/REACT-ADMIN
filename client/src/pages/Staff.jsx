@@ -100,8 +100,8 @@ const TEACHER_CALENDAR_START_HOUR = 10
 const TEACHER_CALENDAR_END_HOUR = 21
 const TEACHER_CALENDAR_TOTAL_MINUTES = (TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR) * 60
 const TEACHER_CALENDAR_ROW_HEIGHT = 24
-/** Same width as shift table first column (`w-40`) so roster / teacher week grids align with shift management. */
-const STAFF_WEEK_GRID_LEADING_COL = '10rem'
+/** Tailwind `w-14`; shift table row labels use the same width as timeline hour gutter so columns align. */
+const STAFF_WEEK_TIMELINE_GUTTER = '3.5rem'
 
 /** Match schedule/API teacher_name to Staff list despite extra spaces or casing. */
 function teacherNameMatchKey(name) {
@@ -747,9 +747,9 @@ export default function Staff() {
                               })}
                             </div>
                             <div
-                              className="grid w-full min-w-[640px]"
+                              className="grid w-full min-w-[600px]"
                               style={{
-                                gridTemplateColumns: `${STAFF_WEEK_GRID_LEADING_COL} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                                gridTemplateColumns: `${STAFF_WEEK_TIMELINE_GUTTER} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
                                 gridTemplateRows: `auto ${timelineHeight}px`,
                               }}
                             >
@@ -845,22 +845,26 @@ export default function Staff() {
                     slots stay white.
                   </p>
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
-                <table className="w-full table-fixed border-collapse min-w-[640px]">
+                <table className="w-full table-fixed border-collapse min-w-[600px]">
                   <colgroup>
-                    <col className="w-40" />
+                    <col className="w-14 max-w-[3.5rem]" />
                     {dates.map((date) => (
                       <col
                         key={date}
                         style={{
                           width:
-                            dates.length > 0 ? `calc((100% - 10rem) / ${dates.length})` : undefined,
+                            dates.length > 0
+                              ? `calc((100% - ${STAFF_WEEK_TIMELINE_GUTTER}) / ${dates.length})`
+                              : undefined,
                         }}
                       />
                     ))}
                   </colgroup>
                   <thead>
                     <tr className="bg-gray-50">
-                      <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700">Shift</th>
+                      <th className="w-14 max-w-[3.5rem] px-1 py-2 text-center text-xs font-semibold text-gray-700">
+                        Shift
+                      </th>
                       {dates.map((date) => (
                           <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-0">
                             {formatDayHeaderJapan(date)}
@@ -874,7 +878,7 @@ export default function Staff() {
                       { row: 'pm', label: 'PM' },
                     ].map(({ row, label }) => (
                       <tr key={row}>
-                        <td className="px-2 py-2 text-sm text-gray-600 align-top border-r border-gray-100">
+                        <td className="w-14 max-w-[3.5rem] px-1 py-2 text-center text-xs font-medium text-gray-600 align-top border-r border-gray-100">
                           {label}
                         </td>
                         {dates.map((date) => {
@@ -1279,9 +1283,9 @@ export default function Staff() {
                           })}
                         </div>
                         <div
-                          className="grid w-full min-w-[640px]"
+                          className="grid w-full min-w-[600px]"
                           style={{
-                            gridTemplateColumns: `${STAFF_WEEK_GRID_LEADING_COL} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                            gridTemplateColumns: `${STAFF_WEEK_TIMELINE_GUTTER} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
                             gridTemplateRows: `auto ${timelineHeight}px`,
                           }}
                         >
