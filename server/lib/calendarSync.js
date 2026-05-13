@@ -38,6 +38,9 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
 const LESSON_KIND_VALID = { regular: true, demo: true, owner: true };
 const LESSON_MODE_VALID = { cafe: true, online: true, unknown: true };
 
+/** Ignore GAS rows longer than this (all-day / multi-day spans); sync lesson-length events only. */
+const MAX_LESSON_DURATION_MS = 60 * 60 * 1000;
+
 function normalizeLessonKind(val) {
   if (val == null || val === '') return 'regular';
   const v = String(val).trim().toLowerCase();
@@ -194,6 +197,14 @@ async function buildMonthlyScheduleRows(data) {
       const d = new Date(endVal);
       if (!isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
     }
+
+    if (startTs && endTs) {
+      const durMs = new Date(endTs).getTime() - new Date(startTs).getTime();
+      if (Number.isFinite(durMs) && durMs > MAX_LESSON_DURATION_MS) {
+        continue;
+      }
+    }
+
     if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
 
     const status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
@@ -348,17 +359,46 @@ async function applyRemovedFromPoll(removed) {
 }
 
 /**
+ * Limits orphan deletion to intended snapshot months (stray dated rows in payload must not reconcile wrong months).
+ * @param {Set<string>} months - YYYY-MM from incoming rows
+ * @param {{ reconcileMonthsAllowlist?: string[], reconcileOnlyYear?: string }} options
+ * @returns {Set<string>}
+ */
+function monthsEligibleForReconcile(months, options) {
+  const { reconcileMonthsAllowlist, reconcileOnlyYear } = options;
+  let out = new Set(months);
+  if (Array.isArray(reconcileMonthsAllowlist) && reconcileMonthsAllowlist.length > 0) {
+    const allow = new Set(reconcileMonthsAllowlist.map((s) => String(s).trim()));
+    out = new Set([...out].filter((m) => allow.has(m)));
+  }
+  if (reconcileOnlyYear != null && /^\d{4}$/.test(String(reconcileOnlyYear).trim())) {
+    const y = `${String(reconcileOnlyYear).trim()}-`;
+    out = new Set([...out].filter((m) => m.startsWith(y)));
+  }
+  return out;
+}
+
+/**
  * @param {Array<Record<string, unknown>>} data
- * @param {{ removed?: Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>, reconcile?: boolean }} [options] - reconcile: delete DB rows in snapshot months not in `data` (default true).
+ * @param {{
+ *   removed?: Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>,
+ *   reconcile?: boolean,
+ *   reconcileMonthsAllowlist?: string[],
+ *   reconcileOnlyYear?: string,
+ * }} [options]
+ * - reconcile: delete DB rows in snapshot months not in `data` (default true).
+ * - reconcileMonthsAllowlist: only these YYYY-MM months are reconciled (intersected with months from payload).
+ * - reconcileOnlyYear: only months starting with this YYYY (after allowlist filter).
  */
 export async function upsertMonthlySchedule(data, options = {}) {
   const { removed = [], reconcile = true } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
   const { rows, months, incomingKeys } = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
+  const monthsToReconcile = monthsEligibleForReconcile(months, options);
   let deletedOrphans = 0;
-  if (reconcile && months.size > 0) {
-    deletedOrphans = await reconcileMonthsToSnapshot(months, incomingKeys);
+  if (reconcile && monthsToReconcile.size > 0) {
+    deletedOrphans = await reconcileMonthsToSnapshot(monthsToReconcile, incomingKeys);
   }
 
   let upserted = 0;
@@ -415,6 +455,7 @@ export async function upsertMonthlySchedule(data, options = {}) {
   return {
     upserted,
     months: Array.from(months),
+    monthsReconciled: Array.from(monthsToReconcile),
     deletedOrphans,
     /** @deprecated use removedReceived — kept for backward compatibility */
     removedRows: removedStats.removedReceived,

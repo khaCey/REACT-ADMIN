@@ -868,7 +868,14 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
     }
     const data = Array.isArray(json.data) ? json.data : [];
     console.log('[calendar-poll/backfill] fetched', data.length, 'rows from GAS');
-    const { upserted, months } = await upsertMonthlySchedule(data);
+    /** Only reconcile months this request asked for (avoids orphan-deleting other months from stray rows). */
+    const reconcileOpts =
+      month && /^\d{4}-\d{2}$/.test(String(month))
+        ? { reconcileMonthsAllowlist: [String(month)] }
+        : year && /^\d{4}$/.test(String(year))
+          ? { reconcileOnlyYear: String(year) }
+          : {};
+    const { upserted, months } = await upsertMonthlySchedule(data, reconcileOpts);
 
     // Keep teacher_schedules in sync so booking UI has correct capacity/constraints.
     // (Booking grid calls GET /schedule/week which reads teacher_schedules from DB.)

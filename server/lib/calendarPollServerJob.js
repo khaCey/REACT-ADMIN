@@ -142,8 +142,11 @@ export async function runServerCalendarPollSync() {
     `rows from GAS (month backfill ${curYyyyMm} + ${nextYyyyMm}; raw=${cur.data.length}+${next.data.length})`
   );
 
-  const syncResult = await upsertMonthlySchedule(data, { reconcile: true });
-  const { upserted, months, deletedOrphans } = syncResult;
+  const syncResult = await upsertMonthlySchedule(data, {
+    reconcile: true,
+    reconcileMonthsAllowlist: [curYyyyMm, nextYyyyMm],
+  });
+  const { upserted, months, monthsReconciled, deletedOrphans } = syncResult;
 
   let teacherSchedulesRefresh = null;
   try {
@@ -162,6 +165,8 @@ export async function runServerCalendarPollSync() {
     upserted,
     'rows for months',
     (months || []).slice().sort().join(', '),
+    '; reconcile months',
+    (monthsReconciled || []).slice().sort().join(', '),
     deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : '',
     '; sources=',
     `${curYyyyMm}+${nextYyyyMm}`
