@@ -100,6 +100,8 @@ const TEACHER_CALENDAR_START_HOUR = 10
 const TEACHER_CALENDAR_END_HOUR = 21
 const TEACHER_CALENDAR_TOTAL_MINUTES = (TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR) * 60
 const TEACHER_CALENDAR_ROW_HEIGHT = 24
+/** Same width as shift table first column (`w-40`) so roster / teacher week grids align with shift management. */
+const STAFF_WEEK_GRID_LEADING_COL = '10rem'
 
 /** Match schedule/API teacher_name to Staff list despite extra spaces or casing. */
 function teacherNameMatchKey(name) {
@@ -745,9 +747,9 @@ export default function Staff() {
                               })}
                             </div>
                             <div
-                              className="grid w-full min-w-[600px]"
+                              className="grid w-full min-w-[640px]"
                               style={{
-                                gridTemplateColumns: `3.5rem repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                                gridTemplateColumns: `${STAFF_WEEK_GRID_LEADING_COL} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
                                 gridTemplateRows: `auto ${timelineHeight}px`,
                               }}
                             >
@@ -1277,9 +1279,9 @@ export default function Staff() {
                           })}
                         </div>
                         <div
-                          className="grid w-full min-w-[600px]"
+                          className="grid w-full min-w-[640px]"
                           style={{
-                            gridTemplateColumns: `3.5rem repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                            gridTemplateColumns: `${STAFF_WEEK_GRID_LEADING_COL} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
                             gridTemplateRows: `auto ${timelineHeight}px`,
                           }}
                         >
