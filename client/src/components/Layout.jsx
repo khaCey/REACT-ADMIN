@@ -21,8 +21,10 @@ export default function Layout() {
     setShowPostLoginUnread(true)
     const nextState = location.state ? { ...location.state } : {}
     delete nextState.openPostLoginUnread
+    const path =
+      location.pathname === '/' || location.pathname === '' ? '/dashboard' : location.pathname
     navigate(
-      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { pathname: path, search: location.search, hash: location.hash },
       {
         replace: true,
         state: Object.keys(nextState).length > 0 ? nextState : undefined,
