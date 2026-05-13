@@ -172,7 +172,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
               <div>
                 <label className="block font-semibold text-gray-800 mb-1 flex items-center gap-2">
                   <Phone className="h-4 w-4 text-gray-500" />
-                  <span>Phone <span className="text-rose-600">*</span></span>
+                  <span>Phone</span>
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -206,7 +206,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
               <div>
                 <label className="block font-semibold text-gray-800 mb-1 flex items-center gap-2">
                   <Mail className="h-4 w-4 text-gray-500" />
-                  <span>Email <span className="text-rose-600">*</span></span>
+                  <span>Email</span>
                 </label>
                 <input
                   type="email"

@@ -120,13 +120,11 @@ export default function AddStudentModal({ onClose, onAdded }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Phone <span className="text-rose-600">*</span></label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
             <div className="flex items-center gap-2 flex-wrap">
               <input
                 inputMode="numeric"
-                pattern="[0-9]{3}"
                 maxLength={3}
-                required
                 className="w-16 border border-gray-300 rounded-lg px-2 py-2 text-center focus:ring-2 focus:ring-green-500"
                 placeholder="090"
                 value={form.phone1}
@@ -135,9 +133,7 @@ export default function AddStudentModal({ onClose, onAdded }) {
               <span className="text-gray-400">-</span>
               <input
                 inputMode="numeric"
-                pattern="[0-9]{4}"
                 maxLength={4}
-                required
                 className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-center focus:ring-2 focus:ring-green-500"
                 placeholder="0000"
                 value={form.phone2}
@@ -146,9 +142,7 @@ export default function AddStudentModal({ onClose, onAdded }) {
               <span className="text-gray-400">-</span>
               <input
                 inputMode="numeric"
-                pattern="[0-9]{4}"
                 maxLength={4}
-                required
                 className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-center focus:ring-2 focus:ring-green-500"
                 placeholder="0000"
                 value={form.phone3}
@@ -167,10 +161,9 @@ export default function AddStudentModal({ onClose, onAdded }) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email <span className="text-rose-600">*</span></label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
             <input
               type="email"
-              required
               className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent"
               value={form.Email}
               onChange={(e) => setForm((f) => ({ ...f, Email: e.target.value }))}
