@@ -289,7 +289,14 @@ router.get('/today-lessons', async (_req, res) => {
        ) sm ON m.student_id IS NULL
        LEFT JOIN students sg ON sg.id = COALESCE(m.student_id, sm.id)
        LEFT JOIN ranked r ON (
-         (m.lesson_uuid IS NOT NULL AND r.lesson_uuid = m.lesson_uuid)
+         (
+           m.lesson_uuid IS NOT NULL
+           AND r.lesson_uuid = m.lesson_uuid
+           AND REGEXP_REPLACE(TRIM(r.student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+           AND r.date = m.date
+           AND r.start IS NOT DISTINCT FROM m.start
+         )
          OR (
            m.lesson_uuid IS NULL
            AND r.event_id = m.event_id
