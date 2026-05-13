@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { areGuidesAvailable, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { areGuidesAvailable, MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import FullPageLoading from '../components/FullPageLoading'
 
 const PAGE_SIZE = 25
@@ -260,6 +260,10 @@ export default function Notifications() {
     try {
       await markAsRead(notification.id)
       await refreshUnread()
+      if (MESSAGES_WIP_DISABLED) {
+        success('Marked as read')
+        return true
+      }
       navigate('/messages', { state: { conversationId } })
       return true
     } finally {

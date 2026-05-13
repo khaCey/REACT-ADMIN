@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { X, Bell } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
-import { areGuidesAvailable } from '../guides/wipFlags'
+import { areGuidesAvailable, MESSAGES_WIP_DISABLED } from '../guides/wipFlags'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 const UNREAD_LIMIT = 20
@@ -98,12 +98,12 @@ export default function PostLoginUnreadModal({ open, onClose }) {
     try {
       await api.markNotificationRead(id)
       if (conversationId) {
-        success('Opening message thread')
+        success(MESSAGES_WIP_DISABLED ? 'Marked as read' : 'Opening message thread')
       } else {
         success('Notification marked as read')
       }
       setItems((prev) => prev.filter((n) => n.id !== id))
-      if (conversationId) {
+      if (conversationId && !MESSAGES_WIP_DISABLED) {
         handleClose()
         navigate('/messages', { state: { conversationId } })
       }

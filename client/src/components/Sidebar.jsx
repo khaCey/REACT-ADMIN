@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Users, UserCheck, History, Bell, Shield, LayoutDashboard, MessageSquare } from 'lucide-react'
-import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
 
 export default function Sidebar({ collapsed }) {
@@ -76,6 +76,7 @@ export default function Sidebar({ collapsed }) {
             </Link>
           </li>
           )}
+          {!MESSAGES_WIP_DISABLED && (
           <li>
             <Link
               to="/messages"
@@ -89,6 +90,7 @@ export default function Sidebar({ collapsed }) {
               <span>Messages</span>
             </Link>
           </li>
+          )}
           <li>
             <Link
               to="/change-history"

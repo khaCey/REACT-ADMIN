@@ -4,6 +4,8 @@
 const _GUIDES_WIP_HIDDEN = true
 /** When true, hide notification UI (bell, sidebar link, /notifications, post-login unread, polling). */
 const _NOTIFICATIONS_WIP_DISABLED = true
+/** When true, hide Messages (sidebar link, /messages) and skip deep-links from notifications. */
+const _MESSAGES_WIP_DISABLED = true
 
 // When set, only these guide slugs are enabled. Enables them even in production.
 // Use null to allow all guides (subject to GUIDES_WIP_HIDDEN).
@@ -30,4 +32,8 @@ export function areGuidesAvailable() {
 // Optional: VITE_NOTIFICATIONS_ENABLED=true in client/.env re-enables notifications (restart Vite).
 const forceEnableNotifications = import.meta.env.VITE_NOTIFICATIONS_ENABLED === 'true'
 export const NOTIFICATIONS_WIP_DISABLED = forceEnableNotifications ? false : _NOTIFICATIONS_WIP_DISABLED
+
+// Optional: VITE_MESSAGES_ENABLED=true in client/.env re-enables Messages (restart Vite).
+const forceEnableMessages = import.meta.env.VITE_MESSAGES_ENABLED === 'true'
+export const MESSAGES_WIP_DISABLED = forceEnableMessages ? false : _MESSAGES_WIP_DISABLED
 

@@ -9,7 +9,7 @@ import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
+import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
 export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
@@ -25,6 +25,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const dropdownRef = useRef(null)
   const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
+  const messagesDisabled = MESSAGES_WIP_DISABLED
   const guidesOn = areGuidesAvailable()
   const {
     unreadCount,
@@ -59,6 +60,10 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
       await refreshUnread()
       setIsNotificationOpen(false)
       setSelectedNotification(null)
+      if (messagesDisabled) {
+        success('Marked as read')
+        return true
+      }
       navigate('/messages', { state: { conversationId } })
       return true
     } finally {
