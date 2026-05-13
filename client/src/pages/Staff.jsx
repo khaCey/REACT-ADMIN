@@ -744,22 +744,25 @@ export default function Staff() {
                                 )
                               })}
                             </div>
-                            <div className="flex min-w-[600px] border-b border-gray-200">
-                              <div className="w-14 shrink-0" />
-                              {dateList.map((date) => (
+                            <div
+                              className="grid w-full min-w-[600px]"
+                              style={{
+                                gridTemplateColumns: `3.5rem repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                                gridTemplateRows: `auto ${timelineHeight}px`,
+                              }}
+                            >
+                              <div className="border-b border-gray-200 border-r border-gray-100" aria-hidden />
+                              {dateList.map((date, i) => (
                                 <div
-                                  key={date}
-                                  className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                                  key={`hdr-${date}-${i}`}
+                                  className={`min-w-0 border-b border-gray-200 py-1.5 text-center text-xs font-semibold text-gray-700 ${
+                                    i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                  }`}
                                 >
                                   {formatDayHeaderJapan(date)}
                                 </div>
                               ))}
-                            </div>
-                            <div className="flex min-w-[600px]">
-                              <div
-                                className="w-14 shrink-0 flex flex-col border-r border-gray-100"
-                                style={{ height: timelineHeight }}
-                              >
+                              <div className="flex min-w-0 flex-col border-r border-gray-100">
                                 {hourLabels.map((label) => (
                                   <div
                                     key={label}
@@ -770,16 +773,17 @@ export default function Staff() {
                                   </div>
                                 ))}
                               </div>
-                              {dateList.map((date) => {
+                              {dateList.map((date, i) => {
                                 const blocks = rosterByDate[date] || []
                                 const cascadeIndices = cascadeIndicesForBlocks(blocks)
                                 return (
                                   <div
-                                    key={date}
-                                    className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
-                                    style={{ height: timelineHeight }}
+                                    key={`c-${date}-${i}`}
+                                    className={`relative min-w-0 overflow-visible ${
+                                      i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                    }`}
                                   >
-                                    {blocks.map((block, i) => {
+                                    {blocks.map((block, j) => {
                                       const startMin = minutesFromTimelineStart(block.start_time)
                                       const endMin = minutesFromTimelineStart(block.end_time)
                                       const duration = Math.max(1, endMin - startMin)
@@ -795,10 +799,10 @@ export default function Staff() {
                                         className: 'bg-gray-100 border-gray-300 text-gray-800',
                                         style: undefined,
                                       }
-                                      const cascadeIndex = cascadeIndices[i] ?? 0
+                                      const cascadeIndex = cascadeIndices[j] ?? 0
                                       return (
                                         <div
-                                          key={`${block.staff_name}-${block.start_time}-${i}`}
+                                          key={`${block.staff_name}-${block.start_time}-${j}`}
                                           className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${pres.className}`}
                                           style={{
                                             ...(pres.style || {}),
@@ -839,12 +843,24 @@ export default function Staff() {
                     slots stay white.
                   </p>
               <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
-                <table className="min-w-full border-collapse">
+                <table className="w-full table-fixed border-collapse min-w-[640px]">
+                  <colgroup>
+                    <col className="w-40" />
+                    {dates.map((date) => (
+                      <col
+                        key={date}
+                        style={{
+                          width:
+                            dates.length > 0 ? `calc((100% - 10rem) / ${dates.length})` : undefined,
+                        }}
+                      />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr className="bg-gray-50">
-                      <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700 w-40">Shift</th>
+                      <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700">Shift</th>
                       {dates.map((date) => (
-                          <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-[140px]">
+                          <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-0">
                             {formatDayHeaderJapan(date)}
                           </th>
                         ))}
@@ -909,14 +925,14 @@ export default function Staff() {
 
                           if (!shiftType) {
                             return (
-                              <td key={date} className="px-2 py-2 min-w-[140px] bg-gray-50/50 align-top">
+                              <td key={date} className="px-2 py-2 min-w-0 bg-gray-50/50 align-top">
                                 <span className="text-gray-300 text-xs">—</span>
                               </td>
                             )
                           }
 
                           return (
-                            <td key={date} className="px-2 py-2 min-w-[140px] align-top">
+                            <td key={date} className="px-2 py-2 min-w-0 align-top">
                               <div
                                 className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint.className}`}
                                 style={shiftCellTint.style}
@@ -1260,22 +1276,25 @@ export default function Staff() {
                             )
                           })}
                         </div>
-                        <div className="flex min-w-[600px] border-b border-gray-200">
-                          <div className="w-14 shrink-0" />
-                          {dateList.map((date) => (
+                        <div
+                          className="grid w-full min-w-[600px]"
+                          style={{
+                            gridTemplateColumns: `3.5rem repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                            gridTemplateRows: `auto ${timelineHeight}px`,
+                          }}
+                        >
+                          <div className="border-b border-gray-200 border-r border-gray-100" aria-hidden />
+                          {dateList.map((date, i) => (
                             <div
-                              key={date}
-                              className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                              key={`th-${date}-${i}`}
+                              className={`min-w-0 border-b border-gray-200 py-1.5 text-center text-xs font-semibold text-gray-700 ${
+                                i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                              }`}
                             >
                               {formatDayHeaderJapan(date)}
                             </div>
                           ))}
-                        </div>
-                        <div className="flex min-w-[600px]">
-                          <div
-                            className="w-14 shrink-0 flex flex-col border-r border-gray-100"
-                            style={{ height: timelineHeight }}
-                          >
+                          <div className="flex min-w-0 flex-col border-r border-gray-100">
                             {hourLabels.map((label) => (
                               <div
                                 key={label}
@@ -1286,16 +1305,17 @@ export default function Staff() {
                               </div>
                             ))}
                           </div>
-                          {dateList.map((date) => {
+                          {dateList.map((date, i) => {
                             const blocks = byDate[date] || []
                             const cascadeIndices = cascadeIndicesForBlocks(blocks)
                             return (
                               <div
-                                key={date}
-                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
-                                style={{ height: timelineHeight }}
+                                key={`tc-${date}-${i}`}
+                                className={`relative min-w-0 overflow-visible ${
+                                  i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                }`}
                               >
-                                {blocks.map((block, i) => {
+                                {blocks.map((block, j) => {
                                   const startMin = minutesFromTimelineStart(block.start_time)
                                   const endMin = minutesFromTimelineStart(block.end_time)
                                   const duration = Math.max(1, endMin - startMin)
@@ -1311,10 +1331,10 @@ export default function Staff() {
                                           className: 'bg-gray-100 border-gray-300 text-gray-800',
                                           style: undefined,
                                         }
-                                  const cascadeIndex = cascadeIndices[i] ?? 0
+                                  const cascadeIndex = cascadeIndices[j] ?? 0
                                   return (
                                     <div
-                                      key={i}
+                                      key={j}
                                       className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${blockPres.className}`}
                                       style={{
                                         ...(blockPres.style || {}),
