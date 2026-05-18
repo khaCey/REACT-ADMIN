@@ -3,7 +3,7 @@
  */
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, extname } from 'path';
 import { unlink, statSync } from 'fs';
 import { promisify } from 'util';
 import { query } from '../db/index.js';
@@ -107,40 +107,11 @@ function getPsqlPath() {
 }
 
 /**
- * Restore the database from a backup by id (downloads from Drive, runs psql).
- * @param {number} backupId - Row id in backups table
- * @returns {Promise<{ fileName: string }>}
+ * Run psql against a local .sql file.
+ * @param {string} inputPath
  */
-export async function runRestore(backupId) {
-  const id = Number(backupId);
-  if (!Number.isInteger(id) || id < 1) throw new Error('Invalid backup id');
-  const result = await query(
-    `SELECT id, file_name, drive_file_id FROM backups WHERE id = $1`,
-    [id]
-  );
-  if (!result.rows.length) throw new Error('Backup not found');
-  const row = result.rows[0];
-  if (!row.drive_file_id) throw new Error('Backup has no Drive file; cannot restore');
+export async function runPsqlFromFile(inputPath) {
   const psqlPath = getPsqlPath();
-  const tempPath = join(tmpdir(), `restore-${Date.now()}.sql`);
-  try {
-    await downloadBackupFile(row.drive_file_id, tempPath);
-    await runPsql(psqlPath, tempPath);
-    return { fileName: row.file_name };
-  } finally {
-    try {
-      await unlinkAsync(tempPath);
-    } catch (_) {
-      // ignore
-    }
-  }
-}
-
-/**
- * @param {string} psqlPath
- * @param {string} inputPath - Path to .sql file
- */
-function runPsql(psqlPath, inputPath) {
   return new Promise((resolve, reject) => {
     const child = spawn(psqlPath, ['-f', inputPath, connectionString], {
       env: process.env,
@@ -156,4 +127,66 @@ function runPsql(psqlPath, inputPath) {
       else reject(new Error(`psql exited ${code}${stderr ? ': ' + stderr.trim() : ''}`));
     });
   });
+}
+
+/**
+ * Restore from a Google Drive file id (downloads to temp, runs psql).
+ * @param {string} driveFileId
+ * @param {string} [fileName]
+ * @returns {Promise<{ fileName: string }>}
+ */
+export async function runRestoreFromDriveFileId(driveFileId, fileName = '') {
+  const id = String(driveFileId || '').trim();
+  if (!id) throw new Error('Drive file ID required');
+  const tempPath = join(tmpdir(), `restore-${Date.now()}.sql`);
+  try {
+    await downloadBackupFile(id, tempPath);
+    await runPsqlFromFile(tempPath);
+    return { fileName: fileName || id };
+  } finally {
+    try {
+      await unlinkAsync(tempPath);
+    } catch (_) {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Restore from an uploaded local .sql file path.
+ * @param {string} localPath
+ * @param {string} [originalName]
+ * @returns {Promise<{ fileName: string }>}
+ */
+export async function runRestoreFromUpload(localPath, originalName = '') {
+  const ext = extname(originalName || localPath).toLowerCase();
+  if (ext !== '.sql') throw new Error('Only .sql backup files are supported');
+  try {
+    await runPsqlFromFile(localPath);
+    return { fileName: originalName || 'uploaded-backup.sql' };
+  } finally {
+    try {
+      await unlinkAsync(localPath);
+    } catch (_) {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Restore the database from a backup by id (downloads from Drive, runs psql).
+ * @param {number} backupId - Row id in backups table
+ * @returns {Promise<{ fileName: string }>}
+ */
+export async function runRestore(backupId) {
+  const id = Number(backupId);
+  if (!Number.isInteger(id) || id < 1) throw new Error('Invalid backup id');
+  const result = await query(
+    `SELECT id, file_name, drive_file_id FROM backups WHERE id = $1`,
+    [id]
+  );
+  if (!result.rows.length) throw new Error('Backup not found');
+  const row = result.rows[0];
+  if (!row.drive_file_id) throw new Error('Backup has no Drive file; cannot restore');
+  return runRestoreFromDriveFileId(row.drive_file_id, row.file_name);
 }

@@ -148,6 +148,52 @@ export async function downloadBackupFile(fileId, localFilePath) {
 }
 
 /**
+ * List .sql backup files in the configured Drive backup folder (newest first).
+ * @returns {Promise<Array<{ id: string, name: string, createdTime: string, size: number|null }>>}
+ */
+export async function listBackupFilesInFolder() {
+  const auth = getDriveAuth();
+  if (!auth) {
+    throw new Error('Google Drive not configured: set GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON');
+  }
+
+  const folderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID;
+  if (!folderId || !String(folderId).trim()) {
+    throw new Error(
+      'GOOGLE_DRIVE_BACKUP_FOLDER_ID is not set. Create a folder in Google Drive, share it with the service account, and set the folder ID in .env.'
+    );
+  }
+
+  const drive = google.drive({ version: 'v3', auth });
+  const trimmedFolderId = folderId.trim();
+  const allFiles = [];
+  let pageToken;
+
+  do {
+    const res = await drive.files.list({
+      q: `'${trimmedFolderId}' in parents and trashed=false`,
+      fields: 'nextPageToken, files(id, name, createdTime, size)',
+      orderBy: 'createdTime desc',
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    allFiles.push(...(res.data.files || []));
+    pageToken = res.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  return allFiles
+    .filter((f) => f.name && String(f.name).toLowerCase().endsWith('.sql'))
+    .map((f) => ({
+      id: f.id,
+      name: f.name,
+      createdTime: f.createdTime,
+      size: f.size != null ? Number(f.size) : null,
+    }));
+}
+
+/**
  * Delete a file from Drive (e.g. when pruning old backups).
  * @param {string} fileId - Drive file ID
  */

@@ -73,8 +73,29 @@ export const api = {
   getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
   createBackup: () => fetchApi('/admin/backup', { method: 'POST' }),
   getBackups: () => fetchApi('/admin/backups'),
+  getDriveBackups: () => fetchApi('/admin/backups/drive'),
   restoreBackup: (backupId) =>
     fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
+  restoreBackupFromDrive: (driveFileId, fileName) =>
+    fetchApi('/admin/restore', {
+      method: 'POST',
+      body: JSON.stringify({ driveFileId, fileName: fileName || undefined }),
+    }),
+  restoreBackupFile: async (file) => {
+    const url = `${API_BASE}/admin/restore/upload`;
+    const token = getStoredToken();
+    const form = new FormData();
+    form.append('file', file);
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'POST', headers, body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      if (res.status === 401) clearStoredSession();
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
   clearTable: (table) =>
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
   getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', q = '', limit = 100, offset = 0 } = {}) => {

@@ -214,20 +214,6 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_lesson_uuid
 -- DROP INDEX IF EXISTS idx_monthly_schedule_group_id;
 -- ALTER TABLE monthly_schedule DROP COLUMN IF EXISTS group_id;
 
--- Linked reschedules: source lesson -> destination lesson
-CREATE TABLE IF NOT EXISTS reschedules (
-  id SERIAL PRIMARY KEY,
-  from_event_id VARCHAR(255) NOT NULL,
-  from_student_name VARCHAR(255) NOT NULL,
-  to_event_id VARCHAR(255) NOT NULL,
-  to_student_name VARCHAR(255) NOT NULL,
-  created_by_staff_id INTEGER REFERENCES staff(id),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT reschedules_from_unique UNIQUE (from_event_id, from_student_name)
-);
-CREATE INDEX IF NOT EXISTS idx_reschedules_from ON reschedules(from_event_id, from_student_name);
-CREATE INDEX IF NOT EXISTS idx_reschedules_to ON reschedules(to_event_id, to_student_name);
-
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (
   date DATE,
@@ -322,6 +308,20 @@ ALTER TABLE staff ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS calendar_color_id VARCHAR(8);
 
 CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(name);
+
+-- Linked reschedules: source lesson -> destination lesson (requires staff)
+CREATE TABLE IF NOT EXISTS reschedules (
+  id SERIAL PRIMARY KEY,
+  from_event_id VARCHAR(255) NOT NULL,
+  from_student_name VARCHAR(255) NOT NULL,
+  to_event_id VARCHAR(255) NOT NULL,
+  to_student_name VARCHAR(255) NOT NULL,
+  created_by_staff_id INTEGER REFERENCES staff(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT reschedules_from_unique UNIQUE (from_event_id, from_student_name)
+);
+CREATE INDEX IF NOT EXISTS idx_reschedules_from ON reschedules(from_event_id, from_student_name);
+CREATE INDEX IF NOT EXISTS idx_reschedules_to ON reschedules(to_event_id, to_student_name);
 
 -- Staff-created notifications
 CREATE TABLE IF NOT EXISTS notifications (

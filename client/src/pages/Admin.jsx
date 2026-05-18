@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
@@ -32,8 +32,13 @@ export default function Admin() {
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupError, setBackupError] = useState('')
-  const [restoreBackupId, setRestoreBackupId] = useState(null)
+  const [restoreTarget, setRestoreTarget] = useState(null)
   const [restoreConfirming, setRestoreConfirming] = useState(false)
+  const [restoreFile, setRestoreFile] = useState(null)
+  const restoreFileInputRef = useRef(null)
+  const [driveBackups, setDriveBackups] = useState([])
+  const [driveBackupsLoading, setDriveBackupsLoading] = useState(true)
+  const [driveBackupsError, setDriveBackupsError] = useState('')
   const [tableToClear, setTableToClear] = useState('monthly_schedule')
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [clearingTable, setClearingTable] = useState(false)
@@ -89,9 +94,24 @@ export default function Admin() {
     }
   }, [])
 
+  const fetchDriveBackups = useCallback(async () => {
+    setDriveBackupsLoading(true)
+    setDriveBackupsError('')
+    try {
+      const list = await api.getDriveBackups()
+      setDriveBackups(Array.isArray(list) ? list : [])
+    } catch (err) {
+      setDriveBackups([])
+      setDriveBackupsError(err.message || 'Could not load Drive backups')
+    } finally {
+      setDriveBackupsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchBackups()
-  }, [fetchBackups])
+    fetchDriveBackups()
+  }, [fetchBackups, fetchDriveBackups])
 
   useEffect(() => {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
@@ -133,9 +153,10 @@ export default function Admin() {
     setBackupError('')
     setBackupLoading(true)
     try {
-      const res = await api.createBackup()
+      await api.createBackup()
       success('Backup created')
       await fetchBackups()
+      await fetchDriveBackups()
     } catch (err) {
       setBackupError(err.message || 'Backup failed')
     } finally {
@@ -144,20 +165,37 @@ export default function Admin() {
   }
 
   const handleRestoreConfirm = async () => {
-    if (!restoreBackupId) return
+    if (!restoreTarget) return
     setRestoreConfirming(true)
     setBackupError('')
     try {
-      await api.restoreBackup(restoreBackupId)
+      if (restoreTarget.kind === 'db') {
+        await api.restoreBackup(restoreTarget.id)
+      } else if (restoreTarget.kind === 'drive') {
+        await api.restoreBackupFromDrive(restoreTarget.driveFileId, restoreTarget.fileName)
+      } else if (restoreTarget.kind === 'file') {
+        await api.restoreBackupFile(restoreTarget.file)
+      }
       success('Database restored')
-      setRestoreBackupId(null)
+      setRestoreTarget(null)
+      setRestoreFile(null)
+      if (restoreFileInputRef.current) restoreFileInputRef.current.value = ''
       await fetchBackups()
+      await fetchDriveBackups()
     } catch (err) {
       setBackupError(err.message || 'Restore failed')
     } finally {
       setRestoreConfirming(false)
     }
   }
+
+  const restoreTargetLabel = restoreTarget
+    ? restoreTarget.kind === 'db'
+      ? restoreTarget.fileName
+      : restoreTarget.kind === 'drive'
+        ? restoreTarget.fileName
+        : restoreTarget.file?.name
+    : ''
 
   const handleClearTableConfirm = async () => {
     if (!tableToClear) return
@@ -254,13 +292,92 @@ export default function Admin() {
                         {b.drive_file_id ? (
                           <button
                             type="button"
-                            onClick={() => setRestoreBackupId(b.id)}
+                            onClick={() => setRestoreTarget({ kind: 'db', id: b.id, fileName: b.file_name })}
                             className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
                           >
                             <RotateCcw className="w-4 h-4" />
                             Restore backup
                           </button>
                         ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Restore from file on this computer</h4>
+            <p className="text-sm text-gray-500 mb-3">
+              Choose a <code className="text-xs bg-gray-100 px-1 rounded">.sql</code> dump (for example downloaded from Google Drive on another server).
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={restoreFileInputRef}
+                type="file"
+                accept=".sql"
+                className="hidden"
+                onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => restoreFileInputRef.current?.click()}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Choose file…
+              </button>
+              {restoreFile ? (
+                <span className="text-sm text-gray-600 truncate max-w-xs" title={restoreFile.name}>
+                  {restoreFile.name}
+                </span>
+              ) : (
+                <span className="text-sm text-gray-400">No file selected</span>
+              )}
+              <button
+                type="button"
+                disabled={!restoreFile}
+                onClick={() => restoreFile && setRestoreTarget({ kind: 'file', file: restoreFile })}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4" />
+                Restore from file
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-200" layout>
+            <h4 className="text-sm font-medium text-gray-700 mb-2">All backups in Google Drive folder</h4>
+            <p className="text-sm text-gray-500 mb-3">
+              Includes backups from other servers that are not listed above.
+            </p>
+            {driveBackupsLoading ? (
+              <p className="text-sm text-gray-500">Loading Drive backups…</p>
+            ) : driveBackupsError ? (
+              <p className="text-sm text-amber-700">{driveBackupsError}</p>
+            ) : driveBackups.length === 0 ? (
+              <p className="text-sm text-gray-500">No .sql files in the backup folder.</p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="max-h-[18rem] overflow-y-auto overscroll-y-contain">
+                  <ul className="divide-y divide-gray-200">
+                    {driveBackups.map((b) => (
+                      <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
+                        <div className="min-w-0" layout>
+                          <p className="text-sm font-medium text-gray-900 truncate">{b.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatBackupDate(b.createdTime)}
+                            {b.size != null ? ` · ${(b.size / 1024 / 1024).toFixed(1)} MB` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRestoreTarget({ kind: 'drive', driveFileId: b.id, fileName: b.name })}
+                          className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Restore
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -654,15 +771,15 @@ export default function Admin() {
       {showBackfillModal && (
         <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
       )}
-      {restoreBackupId != null && (
+      {restoreTarget != null && (
         <ConfirmActionModal
           title="Restore database"
-          message="This will overwrite the current database with the selected backup. All current data will be replaced. Continue?"
+          message={`This will overwrite the current database with "${restoreTargetLabel || 'the selected backup'}". All current data will be replaced. Continue?`}
           confirmLabel="Restore"
           destructive
           confirming={restoreConfirming}
           onConfirm={handleRestoreConfirm}
-          onClose={() => !restoreConfirming && setRestoreBackupId(null)}
+          onClose={() => !restoreConfirming && setRestoreTarget(null)}
         />
       )}
       {clearConfirmOpen && (

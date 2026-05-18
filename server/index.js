@@ -44,15 +44,43 @@ import {
   normaliseGasEvents,
   syncOneStaffCalendarFromGas,
 } from './lib/staffScheduleGasSync.js';
-import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
+import {
+  runBackup,
+  cleanupBackupsOlderThan,
+  runRestore,
+  runRestoreFromDriveFileId,
+  runRestoreFromUpload,
+} from './lib/backup.js';
+import { listBackupFilesInFolder } from './lib/googleDrive.js';
 import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
 import cron from 'node-cron';
+import multer from 'multer';
+import { tmpdir } from 'os';
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+const backupUploadMaxMb = Math.max(1, parseInt(process.env.BACKUP_UPLOAD_MAX_MB || '500', 10) || 500);
+const backupUpload = multer({
+  storage: multer.diskStorage({
+    destination: tmpdir(),
+    filename: (_req, file, cb) => {
+      const safe = String(file.originalname || 'backup.sql').replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `restore-upload-${Date.now()}-${safe}`);
+    },
+  }),
+  limits: { fileSize: backupUploadMaxMb * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!String(file.originalname || '').toLowerCase().endsWith('.sql')) {
+      cb(new Error('Only .sql backup files are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 app.use('/api/auth', authRouter);
 
@@ -432,18 +460,70 @@ app.get('/api/admin/backups', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-/** Admin: restore database from a backup (by id). Downloads from Drive, runs psql. Admin only. */
+/** Admin: list .sql backup files in the Google Drive backup folder. Admin only. */
+app.get('/api/admin/backups/drive', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const files = await listBackupFilesInFolder();
+    res.json(files);
+  } catch (err) {
+    console.error('[admin/backups/drive]', err.message);
+    const code = err.message?.includes('not configured') || err.message?.includes('not set') ? 503 : 500;
+    res.status(code).json({ error: err.message || 'Failed to list Drive backups' });
+  }
+});
+
+/** Admin: restore database from a backup (by id or Drive file id). Admin only. */
 app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { backupId } = req.body || {};
-    const { fileName } = await runRestore(backupId);
+    const { backupId, driveFileId, fileName: driveFileName } = req.body || {};
+    const hasBackupId = backupId != null && backupId !== '';
+    const hasDriveId = driveFileId != null && String(driveFileId).trim() !== '';
+    if (hasBackupId && hasDriveId) {
+      return res.status(400).json({ error: 'Provide backupId or driveFileId, not both' });
+    }
+    if (!hasBackupId && !hasDriveId) {
+      return res.status(400).json({ error: 'Provide backupId or driveFileId' });
+    }
+    const { fileName } = hasBackupId
+      ? await runRestore(backupId)
+      : await runRestoreFromDriveFileId(driveFileId, driveFileName || '');
     res.json({ ok: true, fileName });
   } catch (err) {
     console.error('[admin/restore]', err.message);
-    const status = err.message?.includes('not found') ? 404 : err.message?.includes('Invalid') ? 400 : 500;
+    const status = err.message?.includes('not found') ? 404 : err.message?.includes('Invalid') || err.message?.includes('required') ? 400 : 500;
     res.status(status).json({ error: err.message || 'Restore failed' });
   }
 });
+
+/** Admin: restore database from an uploaded .sql file. Admin only. */
+app.post(
+  '/api/admin/restore/upload',
+  requireAuth,
+  requireAdmin,
+  (req, res, next) => {
+    backupUpload.single('file')(req, res, (err) => {
+      if (err) {
+        const msg = err.code === 'LIMIT_FILE_SIZE'
+          ? `File too large (max ${backupUploadMaxMb} MB)`
+          : err.message || 'Upload failed';
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    try {
+      const { fileName } = await runRestoreFromUpload(req.file.path, req.file.originalname);
+      res.json({ ok: true, fileName });
+    } catch (err) {
+      console.error('[admin/restore/upload]', err.message);
+      res.status(500).json({ error: err.message || 'Restore failed' });
+    }
+  }
+);
 
 const ADMIN_CLEARABLE_TABLES = new Set([
   'backups',
