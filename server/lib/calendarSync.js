@@ -3,30 +3,56 @@
  * Used by both /api/calendar-poll/sync (from GAS) and /api/calendar-poll/sync-from-sheet (from Google Sheets API).
  */
 import { query } from '../db/index.js';
+import { GOOGLE_INSTANCE_SUFFIX_RE } from './calendarEventId.js';
+import { utcToJstDateAndTime } from './timezone.js';
+
+/** Appended in buildMonthlyScheduleRows: _YYYY-MM-DD or _YYYY-MM-DD_HH-mm-ss */
+const OUR_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
+
+function isPrecisePollEventKey(eventId) {
+  const id = String(eventId || '').trim();
+  return OUR_DISAMBIGUATION_SUFFIX_RE.test(id) || GOOGLE_INSTANCE_SUFFIX_RE.test(id);
+}
 
 /**
- * Delete rows for a calendar event removed at source. DB event_id is raw Google id or raw + _date + _time.
+ * Delete rows for a calendar event removed at source. Never prefix-delete on a bare series master id
+ * (that removed every recurring occurrence for the student).
  * @param {string} studentName
  * @param {string} rawEventId
  */
 export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
   const sn = (studentName || '').trim();
   const rid = (rawEventId || '').trim();
-  const normalizedRid = rid.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
   if (!sn || !rid) return 0;
+
+  const matchSql = isPrecisePollEventKey(rid)
+    ? `(ms.event_id = $2 OR TRIM(ms.calendar_source_event_id) = $2)`
+    : `(
+         ms.event_id = $2
+         OR (
+           TRIM(ms.calendar_source_event_id) = $2
+           AND 1 = (
+             SELECT COUNT(*)::int
+             FROM monthly_schedule m2
+             WHERE m2.student_name = $1
+               AND TRIM(m2.calendar_source_event_id) = $2
+               AND COALESCE(m2.calendar_sync_status, 'synced') = 'synced'
+           )
+         )
+       )`;
+
   const result = await query(
     `DELETE FROM monthly_schedule ms
      WHERE ms.student_name = $1
        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
-       AND (ms.event_id = $2 OR starts_with(ms.event_id, $2 || '_'))
+       AND ${matchSql}
        AND NOT EXISTS (
          SELECT 1 FROM reschedules rs
-         WHERE REGEXP_REPLACE(TRIM(rs.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                 = $3
+         WHERE TRIM(rs.from_event_id) = TRIM(ms.event_id)
            AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
              = REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g')
        )`,
-    [sn, rid, normalizedRid]
+    [sn, rid]
   );
   return result.rowCount ?? 0;
 }
@@ -103,6 +129,17 @@ function normalizeName(s) {
   return s.trim().replace(/\s+/g, ' ');
 }
 
+/** Match reconcile candidates when event_id string changed but lesson instant did not (recurring id churn). */
+function lessonSlotKey(studentName, startIso) {
+  if (!studentName || !startIso) return null;
+  const d = new Date(startIso);
+  if (Number.isNaN(d.getTime())) return null;
+  const jst = utcToJstDateAndTime(d);
+  if (!jst) return null;
+  const timeSuffix = d.toISOString().slice(11, 19).replace(/:/g, '-');
+  return `${normalizeName(studentName)}\t${jst.date}\t${timeSuffix}`;
+}
+
 /**
  * Parse a date+time string as Asia/Tokyo and return ISO string in UTC.
  * Source data (CSV, Sheets, GAS) is Japan-facing; we store UTC in the DB.
@@ -140,7 +177,7 @@ async function buildStudentNameToIdMap() {
 
 /**
  * @param {Array<Record<string, unknown>>} data
- * @returns {Promise<{ rows: Array<Record<string, unknown>>, months: Set<string>, incomingKeys: Set<string> }>}
+ * @returns {Promise<{ rows: Array<Record<string, unknown>>, months: Set<string>, incomingKeys: Set<string>, incomingSlotKeys: Set<string> }>}
  */
 async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
@@ -187,15 +224,23 @@ async function buildMonthlyScheduleRows(data) {
       if (!isNaN(d.getTime())) endTs = d.toISOString();
     }
 
-    // Derive date from start/end when missing (handles GAS sending same ID for different occurrences)
+    // Derive date from start/end when missing (handles GAS sending same ID for different occurrences).
+    // Use Japan calendar date, not UTC yyyy-mm-dd — otherwise Wednesday 10:00 JST becomes Tuesday UTC and
+    // event_id disagrees with DB / prior syncs → reconcile deletes "orphan" rows that still exist on Calendar.
     let resolvedDate = date;
     if (!resolvedDate && startVal) {
       const d = new Date(startVal);
-      if (!isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+      if (!isNaN(d.getTime())) {
+        const jst = utcToJstDateAndTime(d);
+        if (jst) resolvedDate = jst.date;
+      }
     }
     if (!resolvedDate && endVal) {
       const d = new Date(endVal);
-      if (!isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+      if (!isNaN(d.getTime())) {
+        const jst = utcToJstDateAndTime(d);
+        if (jst) resolvedDate = jst.date;
+      }
     }
 
     if (startTs && endTs) {
@@ -234,6 +279,7 @@ async function buildMonthlyScheduleRows(data) {
     const awaitingReschedulePollMerge = parseAwaitingReschedulePollMerge(r);
     rows.push({
       eventId,
+      calendarSourceEventId: rawEventId,
       title,
       date: resolvedDate || date,
       startTs,
@@ -250,19 +296,25 @@ async function buildMonthlyScheduleRows(data) {
   }
 
   const incomingKeys = new Set(rows.map((row) => `${row.eventId}\t${row.studentName}`));
-  return { rows, months, incomingKeys };
+  const incomingSlotKeys = new Set();
+  for (const row of rows) {
+    const sk = lessonSlotKey(row.studentName, row.startTs);
+    if (sk) incomingSlotKeys.add(sk);
+  }
+  return { rows, months, incomingKeys, incomingSlotKeys };
 }
 
 /**
  * Drop DB rows in each month that are not present in the incoming snapshot (calendar deleted / no longer in GAS cache).
  * @param {Set<string>} months - YYYY-MM
  * @param {Set<string>} incomingKeys - `${eventId}\t${studentName}`
+ * @param {Set<string>} incomingSlotKeys - student+JST date+UTC HH-mm-ss from start (see lessonSlotKey)
  */
-async function reconcileMonthsToSnapshot(months, incomingKeys) {
+async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys) {
   let deleted = 0;
   for (const ym of months) {
     const existing = await query(
-      `SELECT ms.event_id, ms.student_name
+      `SELECT ms.event_id, ms.student_name, ms.start
        FROM monthly_schedule ms
        WHERE ms.date IS NOT NULL
          AND to_char(ms.date, 'YYYY-MM') = $1
@@ -271,25 +323,29 @@ async function reconcileMonthsToSnapshot(months, incomingKeys) {
     );
     for (const r of existing.rows || []) {
       const k = `${r.event_id}\t${r.student_name}`;
-      if (!incomingKeys.has(k)) {
-        const block = await query(
-          `SELECT 1 FROM reschedules rs
-           WHERE REGEXP_REPLACE(TRIM(rs.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                   = REGEXP_REPLACE(TRIM($1::text), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+      if (incomingKeys.has(k)) {
+        continue;
+      }
+      const slot = lessonSlotKey(r.student_name, r.start);
+      if (slot && incomingSlotKeys.has(slot)) {
+        continue;
+      }
+      const block = await query(
+        `SELECT 1 FROM reschedules rs
+           WHERE TRIM(rs.from_event_id) = TRIM($1::text)
              AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
                = REGEXP_REPLACE(TRIM($2::text), '\\s+', ' ', 'g')
            LIMIT 1`,
-          [r.event_id, r.student_name]
-        );
-        if ((block.rows || []).length > 0) {
-          continue;
-        }
-        await query('DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
-          r.event_id,
-          r.student_name,
-        ]);
-        deleted++;
+        [r.event_id, r.student_name]
+      );
+      if ((block.rows || []).length > 0) {
+        continue;
       }
+      await query('DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
+        r.event_id,
+        r.student_name,
+      ]);
+      deleted++;
     }
   }
   return deleted;
@@ -394,16 +450,16 @@ export async function upsertMonthlySchedule(data, options = {}) {
   const { removed = [], reconcile = true } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
-  const { rows, months, incomingKeys } = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
+  const { rows, months, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
+    Array.isArray(data) ? data : []
+  );
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
-  let deletedOrphans = 0;
-  if (reconcile && monthsToReconcile.size > 0) {
-    deletedOrphans = await reconcileMonthsToSnapshot(monthsToReconcile, incomingKeys);
-  }
+  const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '1').trim() !== '0';
 
   let upserted = 0;
   for (const {
     eventId,
+    calendarSourceEventId,
     title,
     date,
     startTs,
@@ -427,14 +483,15 @@ export async function upsertMonthlySchedule(data, options = {}) {
     }
     await query(
       `INSERT INTO monthly_schedule
-        (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
+        (event_id, calendar_source_event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
          calendar_sync_status, calendar_sync_error, calendar_synced_at, awaiting_reschedule_date,
          reschedule_snapshot_to_date, reschedule_snapshot_to_time, reschedule_snapshot_from_date, reschedule_snapshot_from_time)
-       VALUES ($1,
+       VALUES ($1, $15,
          COALESCE((SELECT m.lesson_uuid FROM monthly_schedule m WHERE m.event_id = $14::text LIMIT 1), gen_random_uuid()),
          $2, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11, $12, 'synced', NULL, NOW(), COALESCE($13::boolean, FALSE),
          NULL, NULL, NULL, NULL)
        ON CONFLICT (event_id, student_name) DO UPDATE SET
+         calendar_source_event_id = COALESCE(EXCLUDED.calendar_source_event_id, monthly_schedule.calendar_source_event_id),
          lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
@@ -447,9 +504,32 @@ export async function upsertMonthlySchedule(data, options = {}) {
          reschedule_snapshot_to_time = monthly_schedule.reschedule_snapshot_to_time,
          reschedule_snapshot_from_date = monthly_schedule.reschedule_snapshot_from_date,
          reschedule_snapshot_from_time = monthly_schedule.reschedule_snapshot_from_time`,
-      [eventId, title, date, startTs, endTs, status, studentName, isKids, teacherName, lessonKind, lessonMode, studentId, awaitingReschedulePollMerge, eventId]
+      [
+        eventId,
+        title,
+        date,
+        startTs,
+        endTs,
+        status,
+        studentName,
+        isKids,
+        teacherName,
+        lessonKind,
+        lessonMode,
+        studentId,
+        awaitingReschedulePollMerge,
+        eventId,
+        calendarSourceEventId || null,
+      ]
     );
     upserted++;
+  }
+
+  let deletedOrphans = 0;
+  // Reconcile after upsert so rows are updated/inserted before we compare keys; avoids wiping lessons
+  // that are present in this payload but still keyed by an older event_id string.
+  if (reconcile && envAllowReconcile && monthsToReconcile.size > 0) {
+    deletedOrphans = await reconcileMonthsToSnapshot(monthsToReconcile, incomingKeys, incomingSlotKeys);
   }
 
   return {

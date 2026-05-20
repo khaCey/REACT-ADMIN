@@ -201,6 +201,7 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_dat
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_time VARCHAR(16);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_date DATE;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_time VARCHAR(16);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_source_event_id TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   ON monthly_schedule(calendar_sync_key)

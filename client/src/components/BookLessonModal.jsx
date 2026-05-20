@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
-import ExtendShiftModal from './ExtendShiftModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import PreBookLessonModal from './PreBookLessonModal'
 import ConfirmActionModal from './ConfirmActionModal'
@@ -304,6 +303,21 @@ function optimisticLessonKindForStudent(student) {
   return studentIsDemoOrTrial(student) ? 'demo' : 'regular'
 }
 
+/** Await GAS calendar create; treat "already synced" as success (background queue may finish first). */
+async function awaitCalendarSyncForEvent(eventId) {
+  const id = String(eventId || '').trim()
+  if (!id) throw new Error('Missing event id for calendar sync')
+  try {
+    return await api.syncScheduleEvent(id)
+  } catch (e) {
+    const msg = String(e?.message || '')
+    if (/already synced/i.test(msg)) {
+      return { ok: true, event_id: id, calendar_sync_status: 'synced' }
+    }
+    throw e
+  }
+}
+
 export default function BookLessonModal({
   studentId,
   student,
@@ -355,7 +369,6 @@ export default function BookLessonModal({
   const [submitting, setSubmitting] = useState(false)
   /** Hide the main calendar shell as soon as Submit runs; confirmation shows after the request. */
   const [hideBookingCalendar, setHideBookingCalendar] = useState(false)
-  const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
   const [weekCache, setWeekCache] = useState({})
   /** Visible month card(s): booked/paid from latest-by-month (see selectVisibleLessonMonthSummaries). */
@@ -628,7 +641,7 @@ export default function BookLessonModal({
         },
       })
       try {
-        await api.rescheduleLesson({
+        const rescheduleRes = await api.rescheduleLesson({
           source_event_id: rescheduleSource.eventID,
           source_student_name: student?.Name || student?.name || '',
           student_id: sidRaw,
@@ -637,8 +650,12 @@ export default function BookLessonModal({
           duration_minutes: 50,
           location: 'Cafe',
         })
-        success('Lesson rescheduled')
-        onBooked?.()
+        const newEventId = String(rescheduleRes?.new_event_id || '').trim()
+        if (!newEventId) {
+          throw new Error('Reschedule succeeded but no destination event id was returned')
+        }
+        await awaitCalendarSyncForEvent(newEventId)
+        onBooked?.({ eventIds: [] })
         const [weekData, latestRes] = await Promise.all([
           api
             .getWeekSchedule(weekStartStr, {
@@ -664,6 +681,7 @@ export default function BookLessonModal({
           setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
         }
         setSelectedSlotKeys([])
+        success('Lesson rescheduled')
         setSuccessModal({
           title: 'Reschedule completed',
           message: 'The lesson was rescheduled successfully.',
@@ -747,7 +765,7 @@ export default function BookLessonModal({
             },
           })
           await api.getBookingWarning(date, time, student_id)
-          await api.bookLesson({
+          const bookRes = await api.bookLesson({
             student_id,
             ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
             date: String(date),
@@ -756,6 +774,11 @@ export default function BookLessonModal({
             pack_total: packTotal,
             location: 'Cafe',
           })
+          const bookedEventId = String(bookRes?.event_id || '').trim()
+          if (!bookedEventId) {
+            throw new Error('Booking succeeded but no event id was returned')
+          }
+          await awaitCalendarSyncForEvent(bookedEventId)
           successCount += 1
         } catch (e) {
           onOptimisticScheduleMutation?.({
@@ -768,14 +791,7 @@ export default function BookLessonModal({
       }
 
       if (successCount > 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
-        onBooked?.()
-      }
-      if (failed.length > 0) {
-        setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
-        setHideBookingCalendar(false)
-      } else {
-        setSelectedSlotKeys([])
+        onBooked?.({ eventIds: [] })
       }
 
       const [weekData, latestRes] = await Promise.all([
@@ -802,11 +818,20 @@ export default function BookLessonModal({
       if (latestRes?.latestByMonth) {
         setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
       }
+      if (failed.length > 0) {
+        setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
+        setHideBookingCalendar(false)
+      } else {
+        setSelectedSlotKeys([])
+      }
       if (successCount > 0 && failed.length === 0) {
+        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
         setSuccessModal({
           title: 'Booking Confirmed',
           message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} confirmed.`,
         })
+      } else if (successCount > 0) {
+        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
       }
     } catch (e) {
       setError(e.message)
@@ -928,14 +953,6 @@ export default function BookLessonModal({
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 ml-auto">
               {lessonBalanceCorner}
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setExtendShiftOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                >
-                  <Clock className="w-4 h-4" />
-                  Extend shift
-                </button>
                 <button
                   type="button"
                   onClick={onClose}
@@ -1316,9 +1333,6 @@ export default function BookLessonModal({
             onClose?.()
           }}
         />
-      )}
-      {extendShiftOpen && (
-        <ExtendShiftModal onClose={() => setExtendShiftOpen(false)} />
       )}
       {moveBreakModal && (
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="moveBreakTitle">

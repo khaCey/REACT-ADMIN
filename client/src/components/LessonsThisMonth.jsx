@@ -126,6 +126,67 @@ function hasRealLessonAtDateTime(monthDataObj, monthKey, date, time, optimisticE
   })
 }
 
+function findRealLessonAtDateTime(monthDataObj, monthKey, date, time) {
+  if (!monthDataObj || !monthKey || !date || !time) return null
+  const day = String(date).slice(8, 10)
+  return (
+    (monthDataObj[monthKey]?.lessons || []).find((lesson) => {
+      const eventID = String(lesson?.eventID || '')
+      if (!eventID || eventID.startsWith('optimistic-')) return false
+      return String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
+    }) || null
+  )
+}
+
+function isLessonCalendarSyncPending(lesson) {
+  return String(lesson?.calendarSyncStatus || '').toLowerCase() === 'pending'
+}
+
+/** Drop temp optimistic rows at a slot when the server already has a real lesson there. */
+function removeOptimisticLessonsAtSlot(data, monthKey, date, time) {
+  if (!data || !monthKey || !date || !time) return data
+  if (!hasRealLessonAtDateTime(data, monthKey, date, time)) return data
+  return clearLessonsAtSlot(data, monthKey, date, time, { onlyOptimistic: true })
+}
+
+/** Remove lessons occupying a slot (e.g. before inserting a new optimistic reschedule target). */
+function clearLessonsAtSlot(data, monthKey, date, time, { onlyOptimistic = false, keepEventID = '' } = {}) {
+  if (!data || !monthKey || !date || !time) return data
+  const day = String(date).slice(8, 10)
+  return withPatchedMonth(data, monthKey, (entry) => ({
+    ...entry,
+    lessons: sortLessonsForDisplay(
+      (entry.lessons || []).filter((lesson) => {
+        const eventID = String(lesson?.eventID || '')
+        if (keepEventID && eventID === keepEventID) return true
+        const sameSlot =
+          String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
+        if (!sameSlot) return true
+        if (onlyOptimistic) return !eventID.startsWith('optimistic-')
+        return false
+      })
+    ),
+  }))
+}
+
+function stripOptimisticDuplicatesFromMonthData(data) {
+  if (!data) return data
+  let next = data
+  for (const monthKey of Object.keys(next)) {
+    for (const lesson of next[monthKey]?.lessons || []) {
+      const eventID = String(lesson?.eventID || '')
+      if (!eventID.startsWith('optimistic-')) continue
+      const yyyyMm = monthKey
+      const day = String(lesson?.day || '').padStart(2, '0')
+      const time = String(lesson?.time || '')
+      if (!day || day === '--' || !time || time === '--') continue
+      const date = `${yyyyMm}-${day}`
+      next = removeOptimisticLessonsAtSlot(next, monthKey, date, time)
+    }
+  }
+  return next
+}
+
 function buildOptimisticUnscheduled(monthKey, seed = Date.now()) {
   return {
     day: '--',
@@ -224,6 +285,10 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
         },
         calendarSyncError: null,
       }))
+      next = clearLessonsAtSlot(next, mutation.targetMonthKey, mutation.targetDate, mutation.targetTime, {
+        onlyOptimistic: true,
+        keepEventID: mutation.targetLesson?.eventID || '',
+      })
       if (
         !hasRealLessonAtDateTime(
           next,
@@ -266,20 +331,33 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
 function isOptimisticMutationResolved(serverData, mutation) {
   if (!serverData || !mutation) return false
   switch (mutation.type) {
-    case 'book_start':
-      return hasRealLessonAtDateTime(
+    case 'book_start': {
+      const realLesson = findRealLessonAtDateTime(
         serverData,
         mutation.monthKey,
         mutation.date,
-        mutation.time,
-        mutation.lesson?.eventID
+        mutation.time
       )
+      if (!realLesson) return false
+      return !isLessonCalendarSyncPending(realLesson)
+    }
     case 'reschedule_start': {
       const sourceMonthKey = findLessonMonthKey(serverData, mutation.sourceEventID)
       const sourceLesson = sourceMonthKey
         ? (serverData[sourceMonthKey]?.lessons || []).find((l) => l.eventID === mutation.sourceEventID)
         : null
-      return !!sourceLesson?.rescheduledTo
+      const sourceRescheduled =
+        !!sourceLesson?.rescheduledTo ||
+        String(sourceLesson?.status || '').toLowerCase() === 'rescheduled'
+      if (!sourceRescheduled) return false
+      const targetLesson = findRealLessonAtDateTime(
+        serverData,
+        mutation.targetMonthKey,
+        mutation.targetDate,
+        mutation.targetTime
+      )
+      if (!targetLesson) return false
+      return !isLessonCalendarSyncPending(targetLesson)
     }
     case 'patch_lesson': {
       const monthKey = findLessonMonthKey(serverData, mutation.eventID)
@@ -346,7 +424,30 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
 }
 
 const PENDING_SYNC_POLL_MS = 2000
-const PENDING_SYNC_POLL_MAX = 90
+const PENDING_SYNC_POLL_FAST_MS = 500
+const PENDING_SYNC_POLL_FAST_TICKS = 60
+const PENDING_SYNC_POLL_MAX = 120
+
+function normalizePendingEventIds(ids) {
+  if (!Array.isArray(ids)) return []
+  return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))]
+}
+
+function lessonMatchesPendingEventId(lesson, pendingIds) {
+  if (!lesson || pendingIds.length === 0) return false
+  const eventID = String(lesson?.eventID || '').trim()
+  if (!eventID) return false
+  if (pendingIds.includes(eventID)) return true
+  const base = eventID.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/i, '')
+  return pendingIds.some((id) => id.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/i, '') === base)
+}
+
+function monthDataHasPendingCalendarSync(monthDataObj) {
+  if (!monthDataObj) return false
+  return Object.values(monthDataObj).some((m) =>
+    (m?.lessons || []).some((l) => isLessonCalendarSyncPending(l))
+  )
+}
 
 /**
  * @param {unknown} refreshTrigger - e.g. calendar poll `lastSynced`; changes trigger a normal refetch.
@@ -427,6 +528,8 @@ export default function LessonsThisMonth({
   onLessonNotesChanged,
   optimisticScheduleMutations = [],
   scheduleRefreshKey = 0,
+  pendingCalendarEventIds = [],
+  onPendingCalendarEventIdsChange,
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
@@ -436,7 +539,13 @@ export default function LessonsThisMonth({
     scheduleRefreshKey
   )
   const pendingPollCountRef = useRef(0)
+  const pendingPollFastTicksRef = useRef(0)
   const processedOptimisticMutationCountRef = useRef(0)
+  const normalizedPendingEventIds = useMemo(
+    () => normalizePendingEventIds(pendingCalendarEventIds),
+    [pendingCalendarEventIds]
+  )
+  const pendingEventIdsKey = normalizedPendingEventIds.join('|')
   const [activeOptimisticMutations, setActiveOptimisticMutations] = useState([])
 
   useEffect(() => {
@@ -452,6 +561,18 @@ export default function LessonsThisMonth({
     processedOptimisticMutationCountRef.current = 0
     setActiveOptimisticMutations([])
   }, [studentId])
+
+  useEffect(() => {
+    if (!scheduleRefreshKey) return
+    setActiveOptimisticMutations([])
+    pendingPollCountRef.current = 0
+    pendingPollFastTicksRef.current = 0
+  }, [scheduleRefreshKey])
+
+  useEffect(() => {
+    pendingPollCountRef.current = 0
+    pendingPollFastTicksRef.current = 0
+  }, [pendingEventIdsKey])
 
   useEffect(() => {
     if (!Array.isArray(optimisticScheduleMutations) || optimisticScheduleMutations.length === 0) return
@@ -477,29 +598,56 @@ export default function LessonsThisMonth({
     for (const mutation of activeOptimisticMutations) {
       next = applyOptimisticMutationToMonthData(next, mutation)
     }
-    return next
+    return stripOptimisticDuplicatesFromMonthData(next)
   }, [serverData, activeOptimisticMutations])
 
-  const hasPendingCalendarSync =
-    !!data &&
-    Object.values(data).some((m) =>
-      (m?.lessons || []).some((l) => String(l.calendarSyncStatus || '').toLowerCase() === 'pending')
-    )
+  const hasPendingCalendarSync = useMemo(() => {
+    if (normalizedPendingEventIds.length > 0) return true
+    return monthDataHasPendingCalendarSync(data)
+  }, [data, normalizedPendingEventIds])
+
+  useEffect(() => {
+    if (!onPendingCalendarEventIdsChange || normalizedPendingEventIds.length === 0 || !serverData) return
+    const stillPending = normalizedPendingEventIds.filter((id) => {
+      const lesson = findLessonInMonthData(serverData, id)
+      if (lesson) return isLessonCalendarSyncPending(lesson)
+      for (const monthKey of Object.keys(serverData)) {
+        for (const l of serverData[monthKey]?.lessons || []) {
+          if (lessonMatchesPendingEventId(l, [id]) && isLessonCalendarSyncPending(l)) return true
+        }
+      }
+      return true
+    })
+    if (stillPending.length !== normalizedPendingEventIds.length) {
+      onPendingCalendarEventIdsChange(stillPending)
+    }
+  }, [serverData, normalizedPendingEventIds, onPendingCalendarEventIdsChange])
 
   useEffect(() => {
     if (!hasPendingCalendarSync || studentId == null) {
       pendingPollCountRef.current = 0
+      pendingPollFastTicksRef.current = 0
       return
     }
+    let cancelled = false
+    let timerId = null
     const tick = () => {
+      if (cancelled) return
       if (pendingPollCountRef.current >= PENDING_SYNC_POLL_MAX) return
       pendingPollCountRef.current += 1
+      const useFast = pendingPollFastTicksRef.current < PENDING_SYNC_POLL_FAST_TICKS
+      if (useFast) pendingPollFastTicksRef.current += 1
       refetchSilent()
+      if (cancelled || pendingPollCountRef.current >= PENDING_SYNC_POLL_MAX) return
+      const delay = useFast ? PENDING_SYNC_POLL_FAST_MS : PENDING_SYNC_POLL_MS
+      timerId = window.setTimeout(tick, delay)
     }
     tick()
-    const id = setInterval(tick, PENDING_SYNC_POLL_MS)
-    return () => clearInterval(id)
-  }, [hasPendingCalendarSync, studentId, refetchSilent])
+    return () => {
+      cancelled = true
+      if (timerId) clearTimeout(timerId)
+    }
+  }, [hasPendingCalendarSync, studentId, refetchSilent, pendingEventIdsKey])
 
   const selectedLessonKey = getLessonIdentityKey(selectedLesson)
 

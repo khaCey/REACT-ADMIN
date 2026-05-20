@@ -71,10 +71,35 @@ function getCurrentAndNextYyyyMmJst() {
   return { curYyyyMm, nextYyyyMm };
 }
 
+/**
+ * Dedupe key when merging month snapshots. Must be stable per occurrence.
+ * Recurring series often reuse the same calendar eventID for every instance — without date+time
+ * we collapse all instances into one row and reconcile then deletes the rest from PostgreSQL.
+ */
 function rowKey(row) {
   const eventId = String(row?.eventID || row?.event_id || '').trim();
   const studentName = String(row?.studentName || row?.student_name || '').trim();
   if (!eventId || !studentName) return '';
+  const dateStr = String(row?.date || '').trim();
+  const startVal = row?.start;
+  let resolvedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : '';
+  if (!resolvedDate && startVal) {
+    const d = new Date(startVal);
+    if (!Number.isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+  }
+  let timeSuffix = '';
+  if (startVal) {
+    const d = new Date(startVal);
+    if (!Number.isNaN(d.getTime())) {
+      timeSuffix = d.toISOString().slice(11, 19).replace(/:/g, '-');
+    }
+  }
+  if (resolvedDate && timeSuffix) {
+    return `${eventId}|${studentName}|${resolvedDate}|${timeSuffix}`;
+  }
+  if (resolvedDate) {
+    return `${eventId}|${studentName}|${resolvedDate}`;
+  }
   return `${eventId}|${studentName}`;
 }
 

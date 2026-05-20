@@ -146,6 +146,40 @@ function formatFetchError(err) {
   return parts.join(' — ');
 }
 
+/** Prefer synced scheduled rows when poll/sync left duplicate DB rows at the same slot. */
+function dedupeStudentLessonsBySlot(lessons) {
+  const rank = (lesson) => {
+    let score = 0;
+    const sync = String(lesson?.calendarSyncStatus || '').toLowerCase();
+    const status = String(lesson?.status || '').toLowerCase();
+    const eventId = String(lesson?.eventID || '');
+    if (sync === 'synced') score += 40;
+    if (status === 'scheduled') score += 20;
+    if (status === 'rescheduled') score += 10;
+    if (!eventId.startsWith('local-booking-') && !eventId.startsWith('optimistic-')) score += 8;
+    if (sync === 'pending') score += 2;
+    return score;
+  };
+  const bySlot = new Map();
+  const unscheduled = [];
+  for (const lesson of lessons || []) {
+    if (String(lesson?.status || '').toLowerCase() === 'unscheduled') {
+      unscheduled.push(lesson);
+      continue;
+    }
+    const day = String(lesson?.day || '').padStart(2, '0');
+    const time = String(lesson?.time || '');
+    if (!day || day === '--' || !time || time === '--') {
+      unscheduled.push(lesson);
+      continue;
+    }
+    const key = `${day}\t${time}`;
+    const prev = bySlot.get(key);
+    if (!prev || rank(lesson) > rank(prev)) bySlot.set(key, lesson);
+  }
+  return [...bySlot.values(), ...unscheduled];
+}
+
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
   try {
     const { id } = req.params;
@@ -240,8 +274,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   mt.event_id,
                   (SELECT x.event_id FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1),
                   rt.to_event_id
@@ -250,8 +283,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mt.date, 'YYYY-MM-DD'),
                   (SELECT to_char(x.date, 'YYYY-MM-DD') FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_to_date,
@@ -259,8 +291,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
                   (SELECT to_char(x.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_to_time,
@@ -268,8 +299,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   mf.event_id,
                   (SELECT y.event_id FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1),
                   rf.from_event_id
@@ -278,8 +308,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mf.date, 'YYYY-MM-DD'),
                   (SELECT to_char(y.date, 'YYYY-MM-DD') FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_from_date,
@@ -287,35 +316,30 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
                   (SELECT to_char(y.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
          INNER JOIN students canst ON canst.id = $3::integer
-         LEFT JOIN reschedules rt ON REGEXP_REPLACE(TRIM(rt.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                   = REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN reschedules rt ON TRIM(rt.from_event_id) = TRIM(m.event_id)
            AND (
              REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN monthly_schedule mt ON REGEXP_REPLACE(TRIM(mt.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN monthly_schedule mt ON TRIM(mt.event_id) = TRIM(rt.to_event_id)
            AND (
              mt.student_id = $3::integer
              OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN reschedules rf ON REGEXP_REPLACE(TRIM(rf.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                   = REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN reschedules rf ON TRIM(rf.to_event_id) = TRIM(m.event_id)
            AND (
              REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN monthly_schedule mf ON REGEXP_REPLACE(TRIM(mf.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN monthly_schedule mf ON TRIM(mf.event_id) = TRIM(rf.from_event_id)
            AND (
              mf.student_id = $3::integer
              OR REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
@@ -328,7 +352,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         [normalizedVariants, yyyyMm, studentIdForJoin]
       );
 
-      const lessons = scheduleResult.rows.map((r) => {
+      const lessonsRaw = scheduleResult.rows.map((r) => {
         const dateStr = r.date ? String(r.date).trim() : '';
         const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
         const day = dateMatch ? dateMatch[3] : '--';
@@ -364,6 +388,9 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           })(),
         };
       });
+
+      /** One card per day+time; avoids duplicate pending rows after reschedule/calendar sync retries. */
+      const lessons = dedupeStudentLessonsBySlot(lessonsRaw);
 
       const isPaid = paidMonths.has(yyyyMm);
       const sumPaid = paidLessonsSumByMonth[yyyyMm] || 0;

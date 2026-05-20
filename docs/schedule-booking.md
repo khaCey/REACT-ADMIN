@@ -11,7 +11,7 @@
   - Rows without a usable `event_id` fall back to one count per `(student_name, date, hour)` key.
   - Rows whose **`student_id`** is in the server **booking-disabled** set (see `server/lib/bookingExclusions.js`, e.g. students excluded from in-app booking) are **omitted** from `slots`, `slotTypes`, and `slotMix` so they do not reduce capacity for others. Rows with **`student_id` null** are still included (legacy data).
   - Rows with **`lesson_kind = 'staff_break'`** are **omitted** from `slots`, `slotTypes`, and `slotMix` (they do not consume teacher capacity).
-- **`teachersBySlot`**: same keys → list of teacher names on shift for that date/hour (from `teacher_schedules`, including `teacher_shift_extensions`).
+- **`teachersBySlot`**: same keys → list of teacher names on shift for that date/hour (from `teacher_schedules`, including `teacher_shift_extensions`). Extensions are set on **Staff → Extend shift (app only)**; they do not change Google Calendar.
 - **`slotTypes`**: `kids` if only kids lessons in that hour, `adult` if only non-kids, `mixed` if both (for UI hint).
 - **`slotMix`**: same keys → `{ hasKids, hasAdult }` so the client can disable bookings that **`POST /book`** would reject (kid vs adult separation, hour-bucket approximation).
 - **`breakRuleBlocked`**: map of slot keys → `true` when the slot has **spare capacity** (`booked < number of teachers on shift`) but **no** on-shift teacher could accept **one more regular lesson** at that hour without creating a run of **more than 5 consecutive JST clock hours** with a counting lesson. Logic lives in `server/lib/teacherBreakRules.js` and matches **`POST /book`** assignment. **`BookLessonModal`** disables these cells and shows “Break needed”.

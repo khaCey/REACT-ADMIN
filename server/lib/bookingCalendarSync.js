@@ -2,7 +2,17 @@
  * Server -> GAS calendar booking sync.
  * Called from POST /api/schedule/book to create a real Calendar event.
  */
- 
+
+import {
+  GOOGLE_INSTANCE_SUFFIX_RE,
+  gasCalendarEventIdFromMonthly,
+  isAmbiguousRecurringSeriesMaster,
+  occurrenceStartIsoFromScheduleRows,
+  stripOurMonthlyDisambiguationSuffix,
+} from './calendarEventId.js';
+
+export { isAmbiguousRecurringSeriesMaster };
+
 function normalizeResult(data, fallbackError = null) {
   return {
     ok: !!data?.ok,
@@ -12,7 +22,7 @@ function normalizeResult(data, fallbackError = null) {
     error: data?.error || fallbackError || null,
   };
 }
- 
+
 /** Node fetch often throws TypeError("fetch failed") with real reason in err.cause */
 function formatFetchError(err) {
   if (!err) return 'Unknown error';
@@ -33,19 +43,19 @@ function formatFetchError(err) {
   if (parts.length === 0) return 'fetch failed';
   return parts.join(' — ');
 }
- 
+
 const DEFAULT_TIMEOUT_MS = 30000;
- 
+
 export function isBookingGasEnabled() {
   const url = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const key = String(process.env.BOOKING_API_KEY || '').trim();
   return Boolean(url && key);
 }
- 
+
 /**
  * @typedef {{ id:number, name:string, status?:string|null, payment?:string|null, is_child?:boolean }} StudentForBooking
  */
- 
+
 function deriveLessonKind(student) {
   const payment = String(student?.payment || '').toLowerCase();
   if (payment.includes('owner')) return 'owner';
@@ -67,6 +77,50 @@ export function bookingEventColorId(lessonKind) {
 }
 
 /**
+ * @param {{
+ *   occurrenceStartIso?: string|null,
+ *   calendarSourceEventId?: string|null,
+ *   scheduleRows?: Array<{ start?: Date|string|null, calendar_source_event_id?: string|null }>,
+ * }} [gasOptions]
+ */
+function resolveGasEventId(monthlyEventId, gasOptions = {}) {
+  const occurrenceStartIso =
+    gasOptions.occurrenceStartIso != null && gasOptions.occurrenceStartIso !== ''
+      ? String(gasOptions.occurrenceStartIso)
+      : occurrenceStartIsoFromScheduleRows(gasOptions.scheduleRows);
+  const calendarSourceEventId =
+    gasOptions.calendarSourceEventId != null && gasOptions.calendarSourceEventId !== ''
+      ? String(gasOptions.calendarSourceEventId)
+      : String(gasOptions.scheduleRows?.[0]?.calendar_source_event_id || '').trim() || null;
+  return gasCalendarEventIdFromMonthly(monthlyEventId, occurrenceStartIso, calendarSourceEventId);
+}
+
+function buildGasUpdatePayload(monthlyEventId, updates, gasOptions = {}) {
+  const occurrenceStartIso =
+    gasOptions.occurrenceStartIso != null && gasOptions.occurrenceStartIso !== ''
+      ? String(gasOptions.occurrenceStartIso)
+      : occurrenceStartIsoFromScheduleRows(gasOptions.scheduleRows);
+  const calendarSourceEventId =
+    gasOptions.calendarSourceEventId != null && gasOptions.calendarSourceEventId !== ''
+      ? String(gasOptions.calendarSourceEventId)
+      : String(gasOptions.scheduleRows?.[0]?.calendar_source_event_id || '').trim() || null;
+  const eventId = resolveGasEventId(monthlyEventId, gasOptions);
+  const seriesMasterId = stripOurSuffixForPayload(monthlyEventId, calendarSourceEventId);
+  return {
+    eventId,
+    occurrenceStartIso: occurrenceStartIso || null,
+    seriesMasterId,
+    updateScope: 'thisInstanceOnly',
+  };
+}
+
+function stripOurSuffixForPayload(monthlyEventId, calendarSourceEventId) {
+  const src = String(calendarSourceEventId || '').trim();
+  if (src && !GOOGLE_INSTANCE_SUFFIX_RE.test(src)) return src;
+  return stripOurMonthlyDisambiguationSuffix(monthlyEventId);
+}
+
+/**
  * Create a Calendar event via GAS.
  * @param {{ student: StudentForBooking, students?: StudentForBooking[], startIso: string, endIso: string, assignedTeacherName: string|null, title: string, location?: string|null, lessonKind?: string|null, bookingKey?: string|null }} args
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
@@ -77,13 +131,12 @@ export async function createBookedLessonEventInGas(args) {
   if (!baseUrl || !apiKey) {
     return normalizeResult(null, 'BOOKING_GAS_URL (or CALENDAR_POLL_URL) / BOOKING_API_KEY is not configured');
   }
- 
+
   const url = new URL(baseUrl);
   url.searchParams.set('key', apiKey);
- 
+
   const student = args?.student;
   const students = Array.isArray(args?.students) && args.students.length > 0 ? args.students : student ? [student] : [];
-  // Prefer student payment/status so demo/owner never get a manual palette color when DB lesson_kind is stale.
   const lessonKind = student
     ? deriveLessonKind(student)
     : String(args?.lessonKind || '').trim().toLowerCase() || 'regular';
@@ -99,7 +152,7 @@ export async function createBookedLessonEventInGas(args) {
     teacher ? `#teacher${teacher}` : null,
     bookingKey ? `BookingSyncKey: ${bookingKey}` : null,
   ].filter(Boolean);
- 
+
   const explicitColorId = bookingEventColorId(lessonKind);
   const payload = {
     action: 'lesson_book_create',
@@ -114,12 +167,12 @@ export async function createBookedLessonEventInGas(args) {
     source: 'student-admin-server',
     timestamp: new Date().toISOString(),
   };
- 
+
   const timeoutMs = Math.min(
     120000,
     Math.max(5000, parseInt(process.env.BOOKING_SYNC_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS)
   );
- 
+
   const requestOnce = async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -141,23 +194,20 @@ export async function createBookedLessonEventInGas(args) {
       clearTimeout(timeout);
     }
   };
- 
+
   const first = await requestOnce();
   if (first.ok) return first;
   const second = await requestOnce();
   return second.ok ? second : first;
 }
 
-function rawEventIdFromMonthlyEventId(eventId) {
-  return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
-}
-
 /**
  * Delete a Calendar event via GAS.
  * @param {string} monthlyEventId
+ * @param {{ occurrenceStartIso?: string|null, scheduleRows?: Array<{ start?: Date|string|null }> }} [gasOptions]
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
-export async function deleteBookedLessonEventInGas(monthlyEventId) {
+export async function deleteBookedLessonEventInGas(monthlyEventId, gasOptions = {}) {
   const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
   if (!baseUrl || !apiKey) {
@@ -166,9 +216,13 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
 
   const url = new URL(baseUrl);
   url.searchParams.set('key', apiKey);
+  const ids = buildGasUpdatePayload(monthlyEventId, {}, gasOptions);
   const payload = {
     action: 'lesson_book_delete',
-    eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
+    eventId: ids.eventId,
+    occurrenceStartIso: ids.occurrenceStartIso,
+    seriesMasterId: ids.seriesMasterId,
+    updateScope: ids.updateScope,
     source: 'student-admin-server',
     timestamp: new Date().toISOString(),
   };
@@ -210,9 +264,10 @@ export async function deleteBookedLessonEventInGas(monthlyEventId) {
  * Omit start/end to change metadata only (e.g. linked reschedule: graphite old slot without moving time).
  * @param {string} monthlyEventId
  * @param {{ title?: string, colorId?: string, clearColor?: boolean, startIso?: string, endIso?: string, mergeStudentAdminDescription?: { awaiting_reschedule_date?: boolean } }} updates
+ * @param {{ occurrenceStartIso?: string|null, scheduleRows?: Array<{ start?: Date|string|null }> }} [gasOptions] - use original occurrence start for recurring instance id (not new startIso)
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
-export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}) {
+export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}, gasOptions = {}) {
   const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
   if (!baseUrl || !apiKey) {
@@ -224,9 +279,13 @@ export async function updateBookedLessonEventInGas(monthlyEventId, updates = {})
   const merge = updates?.mergeStudentAdminDescription;
   const startIso = updates?.startIso != null ? String(updates.startIso).trim() : '';
   const endIso = updates?.endIso != null ? String(updates.endIso).trim() : '';
+  const ids = buildGasUpdatePayload(monthlyEventId, updates, gasOptions);
   const payload = {
     action: 'lesson_book_update',
-    eventId: rawEventIdFromMonthlyEventId(monthlyEventId),
+    eventId: ids.eventId,
+    occurrenceStartIso: ids.occurrenceStartIso,
+    seriesMasterId: ids.seriesMasterId,
+    updateScope: ids.updateScope,
     ...(updates?.title ? { title: String(updates.title) } : {}),
     ...(updates?.colorId ? { colorId: String(updates.colorId) } : {}),
     ...(updates?.clearColor ? { clearColor: true } : {}),
@@ -268,4 +327,3 @@ export async function updateBookedLessonEventInGas(monthlyEventId, updates = {})
   const second = await requestOnce();
   return second.ok ? second : first;
 }
-

@@ -11,7 +11,7 @@ This repo describes **what** your Web Apps must implement in [`gas-calendar-poll
 ### Update the script code
 
 1. Open [script.google.com](https://script.google.com) and select the project bound to your **student schedule** Web App (or open the project from the spreadsheet/container it is attached to).
-2. Edit `Code.gs` (and any included files). If you keep a local copy (e.g. a `Calendar API/` folder), paste or sync changes into the online project—**that folder is not committed**; see note at the bottom of [`gas-calendar-poll-prompt.md`](gas-calendar-poll-prompt.md).
+2. Edit `Code.gs` (and any included files). Or use the **local clone** [`calendarAPI/`](https://github.com/khaCey/calendarAPI) at the REACT-ADMIN repo root (`git clone https://github.com/khaCey/calendarAPI.git calendarAPI`). That folder is **gitignored** in REACT-ADMIN; use **`git pull` / `git push` inside `calendarAPI/`** for GitHub, and **`clasp pull` / `clasp push`** there to sync Google Apps Script (see **clasp** below).
 3. **Deploy a new version** (required for the live URL to run new code):
    - **Deploy** → **Manage deployments**
    - Click the **pencil** on the active **Web app** deployment
@@ -24,6 +24,20 @@ This repo describes **what** your Web Apps must implement in [`gas-calendar-poll
 - Open the Admin UI **Test GAS** (staff URL) only applies to staff GAS; for the poll URL, use a browser or `curl` with your secret, e.g.  
   `GET <CALENDAR_POLL_URL>?key=YOUR_KEY&full=1`
 - Check server logs when the app triggers backfill/sync if something fails.
+
+### clasp (optional — `calendarAPI/` clone)
+
+From the REACT-ADMIN root, `calendarAPI/` should contain `.clasp.json` (from the [calendarAPI](https://github.com/khaCey/calendarAPI) repo).
+
+```bash
+cd calendarAPI
+clasp login          # once per machine
+clasp pull           # Google → disk
+# edit .js files
+clasp push           # disk → Google
+```
+
+Then **Manage deployments → Web app → New version → Deploy** so the `/exec` URL runs the new code. Secrets stay in **Script properties**, not in committed files.
 
 ---
 

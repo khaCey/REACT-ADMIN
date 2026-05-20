@@ -71,6 +71,8 @@ export default function StudentDetailsModal({
   const [studentGroup, setStudentGroup] = useState(null)
   /** Bumped after a successful book so LessonsThisMonth refetches (independent of calendar poll). */
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
+  /** Event IDs awaiting GAS calendar sync (drives faster polling in LessonsThisMonth). */
+  const [pendingCalendarEventIds, setPendingCalendarEventIds] = useState([])
   /** Queue of optimistic lesson-card mutations consumed by LessonsThisMonth. */
   const [optimisticScheduleMutations, setOptimisticScheduleMutations] = useState([])
   const [noteSearch, setNoteSearch] = useState('')
@@ -90,6 +92,7 @@ export default function StudentDetailsModal({
   useEffect(() => {
     setScheduleRefreshKey(0)
     setOptimisticScheduleMutations([])
+    setPendingCalendarEventIds([])
   }, [studentId])
 
   const handleOptimisticScheduleMutation = useCallback((mutation) => {
@@ -126,6 +129,29 @@ export default function StudentDetailsModal({
         if (!silent) setLoading(false)
       })
   }, [studentId])
+
+  const handleBooked = useCallback(
+    (opts = {}) => {
+      const eventIds = Array.isArray(opts?.eventIds)
+        ? opts.eventIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : []
+      setOptimisticScheduleMutations([])
+      if (eventIds.length > 0) {
+        setPendingCalendarEventIds((prev) => [...new Set([...prev, ...eventIds])])
+      }
+      fetchData({ silent: true })
+      setScheduleRefreshKey((k) => k + 1)
+    },
+    [fetchData]
+  )
+
+  const handlePendingCalendarEventIdsChange = useCallback((ids) => {
+    if (!Array.isArray(ids)) {
+      setPendingCalendarEventIds([])
+      return
+    }
+    setPendingCalendarEventIds([...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -366,6 +392,8 @@ export default function StudentDetailsModal({
                   onLoadingChange={setLessonsLoading}
                   optimisticScheduleMutations={optimisticScheduleMutations}
                   scheduleRefreshKey={scheduleRefreshKey}
+                  pendingCalendarEventIds={pendingCalendarEventIds}
+                  onPendingCalendarEventIdsChange={handlePendingCalendarEventIdsChange}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
 
@@ -629,10 +657,7 @@ export default function StudentDetailsModal({
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
         }}
-        onBooked={() => {
-          fetchData({ silent: true })
-          setScheduleRefreshKey((k) => k + 1)
-        }}
+        onBooked={handleBooked}
         onOptimisticScheduleMutation={handleOptimisticScheduleMutation}
         rescheduleSource={rescheduleSourceLesson}
       />

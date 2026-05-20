@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
+import ExtendShiftModal from '../components/ExtendShiftModal'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
 import {
@@ -129,6 +130,16 @@ function minutesFromTimelineStart(timeStr) {
   const minutes = parseInt(match[1], 10) * 60 + parseInt(match[2], 10)
   const fromStart = minutes - TEACHER_CALENDAR_START_HOUR * 60
   return Math.max(0, Math.min(TEACHER_CALENDAR_TOTAL_MINUTES, fromStart))
+}
+
+function addMinutesToHHMM(hhmm, deltaMinutes) {
+  const match = String(hhmm || '').trim().match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return hhmm
+  let total = parseInt(match[1], 10) * 60 + parseInt(match[2], 10) + deltaMinutes
+  total = Math.max(0, Math.min(24 * 60 - 1, total))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 /** Horizontal cascade index for overlapping blocks (same day). */
@@ -280,6 +291,7 @@ export default function Staff() {
   const { staff: authStaff } = useAuth()
   const { success } = useToast()
   const isAdmin = !!authStaff?.is_admin || String(authStaff?.name || '').trim().toLowerCase() === 'khacey'
+  const canManageShifts = isAdmin || !!authStaff?.is_operator
 
   const [staffList, setStaffList] = useState([])
   const [fetchScheduleStaffId, setFetchScheduleStaffId] = useState('')
@@ -300,6 +312,7 @@ export default function Staff() {
   const [showAddStaffModal, setShowAddStaffModal] = useState(false)
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [adjustSlot, setAdjustSlot] = useState(null)
+  const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   const [teacherCalendarEvents, setTeacherCalendarEvents] = useState([])
   const [teacherCalendarLoading, setTeacherCalendarLoading] = useState(false)
   const [breakPresets, setBreakPresets] = useState([])
@@ -1128,6 +1141,17 @@ export default function Staff() {
                 {fetchScheduleError && (
                   <span className="text-sm text-red-600">{fetchScheduleError}</span>
                 )}
+                {canManageShifts && (
+                  <button
+                    type="button"
+                    onClick={() => setExtendShiftOpen(true)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 text-sm font-medium cursor-pointer"
+                    title="Widen bookable hours in the app only (does not edit Google Calendar)"
+                  >
+                    <Clock className="w-4 h-4" />
+                    Extend shift (app only)
+                  </button>
+                )}
               </div>
             )}
             <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 mb-4">
@@ -1238,12 +1262,41 @@ export default function Staff() {
                       const d = ev.date != null ? String(ev.date).slice(0, 10) : ''
                       if (!d) continue
                       if (!byDate[d]) byDate[d] = []
+                      const startTime = ev.start_time != null ? String(ev.start_time) : ''
+                      const endTime = ev.end_time != null ? String(ev.end_time) : ''
+                      const kind = ev.kind != null ? String(ev.kind) : 'shift'
                       byDate[d].push({
                         teacher: t,
-                        start_time: ev.start_time != null ? String(ev.start_time) : '',
-                        end_time: ev.end_time != null ? String(ev.end_time) : '',
-                        kind: ev.kind != null ? String(ev.kind) : 'shift',
+                        start_time: startTime,
+                        end_time: endTime,
+                        kind,
                       })
+                      if (kind === 'shift') {
+                        const extendBefore = Math.min(
+                          120,
+                          Math.max(0, parseInt(ev.extend_before_minutes, 10) || 0)
+                        )
+                        const extendAfter = Math.min(
+                          120,
+                          Math.max(0, parseInt(ev.extend_after_minutes, 10) || 0)
+                        )
+                        if (extendBefore > 0 && startTime) {
+                          byDate[d].push({
+                            teacher: t,
+                            start_time: addMinutesToHHMM(startTime, -extendBefore),
+                            end_time: startTime,
+                            kind: 'shift_extension',
+                          })
+                        }
+                        if (extendAfter > 0 && endTime) {
+                          byDate[d].push({
+                            teacher: t,
+                            start_time: endTime,
+                            end_time: addMinutesToHHMM(endTime, extendAfter),
+                            kind: 'shift_extension',
+                          })
+                        }
+                      }
                     }
                     const dateList = Array.isArray(dates) ? dates : []
                     if (englishTeachers.length === 0) {
@@ -1333,10 +1386,16 @@ export default function Staff() {
                                           className: 'bg-slate-100 border-slate-300 text-slate-700',
                                           style: undefined,
                                         }
-                                      : teacherColorIndex[block.teacher] || {
-                                          className: 'bg-gray-100 border-gray-300 text-gray-800',
-                                          style: undefined,
-                                        }
+                                      : block.kind === 'shift_extension'
+                                        ? {
+                                            className:
+                                              'bg-transparent border-dashed border-2 border-amber-500/70 text-amber-900',
+                                            style: undefined,
+                                          }
+                                        : teacherColorIndex[block.teacher] || {
+                                            className: 'bg-gray-100 border-gray-300 text-gray-800',
+                                            style: undefined,
+                                          }
                                   const cascadeIndex = cascadeIndices[j] ?? 0
                                   return (
                                     <div
@@ -1355,16 +1414,20 @@ export default function Staff() {
                                       title={
                                         block.kind === 'preset_break'
                                           ? `${block.teacher} · ${block.start_time} (1h)`
-                                          : `${block.teacher}: ${block.start_time} – ${block.end_time}`
+                                          : block.kind === 'shift_extension'
+                                            ? `${block.teacher} · app extension (+bookable, not on Google Calendar) ${block.start_time}–${block.end_time}`
+                                            : `${block.teacher}: ${block.start_time} – ${block.end_time}`
                                       }
                                     >
                                       <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
-                                        {block.teacher}
+                                        {block.kind === 'shift_extension' ? `${block.teacher} +ext` : block.teacher}
                                       </span>
                                       <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
                                         {block.kind === 'preset_break'
                                           ? `${block.start_time} (1h)`
-                                          : `${block.start_time}–${block.end_time}`}
+                                          : block.kind === 'shift_extension'
+                                            ? `${block.start_time}–${block.end_time}`
+                                            : `${block.start_time}–${block.end_time}`}
                                       </span>
                                     </div>
                                   )
@@ -1455,6 +1518,15 @@ export default function Staff() {
             handleAssignShift(adjustSlot, adjustSlot.staff_name, start, end)
           }}
           onClose={() => setAdjustSlot(null)}
+        />
+      )}
+
+      {extendShiftOpen && (
+        <ExtendShiftModal
+          initialDate={weekStart}
+          defaultTeacherName="Sham"
+          onClose={() => setExtendShiftOpen(false)}
+          onSaved={() => loadTeacherCalendar()}
         />
       )}
     </div>

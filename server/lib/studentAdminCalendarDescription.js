@@ -1,6 +1,6 @@
 /**
  * Machine-readable block appended to Google Calendar event descriptions by Student Admin ↔ GAS.
- * GAS must use the same marker (see Calendar API merge + MonthlyCache parsing).
+ * GAS must use the same marker (see calendarAPI merge + MonthlyCache parsing).
  */
 export const STUDENT_ADMIN_DESCRIPTION_BLOCK_START = '---student-admin---';
 

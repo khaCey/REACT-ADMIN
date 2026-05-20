@@ -194,4 +194,4 @@ Reject invalid input clearly. Use ContentService.createTextOutput(JSON.stringify
 - Client polling: `client/src/api/pollingApi.js`, `client/src/hooks/useCalendarPolling.js`, `client/src/context/CalendarPollingContext.jsx`
 - Server sync / deletes: `server/lib/calendarSync.js`, `POST /api/calendar-poll/sync`, `POST /api/calendar-poll/backfill`
 
-The **`Calendar API/`** folder in this workspace (if present) is a **separate** GAS project for reference only and is not committed per `.gitignore`; copy any changes into your live Apps Script project manually.
+The **`calendarAPI/`** folder ([khaCey/calendarAPI](https://github.com/khaCey/calendarAPI)) at the REACT-ADMIN root is a **separate** GAS clone and is not tracked by REACT-ADMIN’s git (see `.gitignore`). Use `git` / `clasp` inside that directory to sync GitHub and Apps Script.

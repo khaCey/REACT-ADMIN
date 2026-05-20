@@ -22,7 +22,7 @@ export function normalizeRemovedDiffEntry(entry) {
   return null
 }
 
-/** Same format as rowKey() in useCalendarPolling — must match monthly_schedule row keys in cache. */
+/** Poll `removed` keys use `eventID|studentName`; recurring rows should use per-occurrence eventIDs from GAS when possible. */
 export function removedEntryRowKey(p) {
   return `${p.eventID}|${p.studentName}`
 }

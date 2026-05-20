@@ -118,11 +118,31 @@ export async function fetchFullCalendar() {
   return data
 }
 
+/**
+ * Dedupe key when merging cur+next month GAS responses. Recurring events often share eventID;
+ * include date + UTC time (HH-mm-ss) so each instance stays distinct (matches server calendarPollServerJob).
+ */
 function pollRowKey(row) {
   if (!row || typeof row !== 'object') return ''
-  const id = String(row.eventID ?? '').trim()
-  const sn = String(row.studentName ?? '').trim()
+  const id = String(row.eventID ?? row.event_id ?? '').trim()
+  const sn = String(row.studentName ?? row.student_name ?? '').trim()
   if (!id || !sn) return ''
+  const dateStr = String(row.date ?? '').trim()
+  const startVal = row.start
+  let resolvedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : ''
+  if (!resolvedDate && startVal) {
+    const d = new Date(startVal)
+    if (!Number.isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10)
+  }
+  let timeSuffix = ''
+  if (startVal) {
+    const d = new Date(startVal)
+    if (!Number.isNaN(d.getTime())) {
+      timeSuffix = d.toISOString().slice(11, 19).replace(/:/g, '-')
+    }
+  }
+  if (resolvedDate && timeSuffix) return `${id}|${sn}|${resolvedDate}|${timeSuffix}`
+  if (resolvedDate) return `${id}|${sn}|${resolvedDate}`
   return `${id}|${sn}`
 }
 

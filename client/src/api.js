@@ -255,10 +255,22 @@ export const api = {
 
   getScheduleTeachers: (date) =>
     fetchApi(`/schedule/teachers?date=${encodeURIComponent(date)}`),
+  getShiftTeachers: (date) =>
+    fetchApi(`/shifts/teachers?date=${encodeURIComponent(date)}`),
+  getShiftExtend: (date, teacherName) =>
+    fetchApi(
+      `/shifts/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`
+    ),
+  updateShiftExtend: (body) =>
+    fetchApi('/shifts/extend', { method: 'PUT', body: JSON.stringify(body) }),
+  /** @deprecated use getShiftExtend */
   getScheduleExtend: (date, teacherName) =>
-    fetchApi(`/schedule/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`),
+    fetchApi(
+      `/shifts/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`
+    ),
+  /** @deprecated use updateShiftExtend */
   updateScheduleExtend: (body) =>
-    fetchApi('/schedule/extend', { method: 'PUT', body: JSON.stringify(body) }),
+    fetchApi('/shifts/extend', { method: 'PUT', body: JSON.stringify(body) }),
 
   syncCalendarPoll: ({ data = [], removed = [] } = {}) =>
     fetchApi('/calendar-poll/sync', {

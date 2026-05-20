@@ -23,8 +23,54 @@ import {
   createBookedLessonEventInGas,
   deleteBookedLessonEventInGas,
   updateBookedLessonEventInGas,
-  isBookingGasEnabled
+  isBookingGasEnabled,
+  isAmbiguousRecurringSeriesMaster,
 } from '../lib/bookingCalendarSync.js';
+import {
+  occurrenceStartIsoFromScheduleRows,
+  stripOurMonthlyDisambiguationSuffix,
+} from '../lib/calendarEventId.js';
+
+/** Pass original lesson start and poll source id so GAS targets one recurring occurrence, not the series master. */
+function calendarGasOptions(rows) {
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  const occurrenceStartIso = occurrenceStartIsoFromScheduleRows(rows);
+  const calendarSourceEventId = row?.calendar_source_event_id
+    ? String(row.calendar_source_event_id).trim()
+    : null;
+  return {
+    scheduleRows: rows,
+    ...(occurrenceStartIso ? { occurrenceStartIso } : {}),
+    ...(calendarSourceEventId ? { calendarSourceEventId } : {}),
+  };
+}
+
+/** Skip GAS styling when we only have a recurring series master and multiple DB occurrences exist. */
+async function shouldSkipAmbiguousRecurringCalendarUpdate(monthlyEventId, calendarSourceEventId, studentId) {
+  if (!isAmbiguousRecurringSeriesMaster(monthlyEventId, calendarSourceEventId)) return false;
+  const master = stripOurMonthlyDisambiguationSuffix(monthlyEventId);
+  if (!master || !Number.isFinite(Number(studentId))) return true;
+  const r = await query(
+    `SELECT COUNT(DISTINCT date) AS cnt
+     FROM monthly_schedule
+     WHERE student_id = $1
+       AND (
+         TRIM(calendar_source_event_id) = $2
+         OR REGEXP_REPLACE(TRIM(event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $2
+       )`,
+    [studentId, master]
+  );
+  return (parseInt(r.rows[0]?.cnt, 10) || 0) > 1;
+}
+
+async function shouldSkipAmbiguousRecurringForRows(monthlyEventId, rows) {
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  return shouldSkipAmbiguousRecurringCalendarUpdate(
+    monthlyEventId,
+    row?.calendar_source_event_id,
+    row?.student_id
+  );
+}
 import {
   buildLessonTitleForOrderedStudents,
   rewriteLessonTitleStudentNames,
@@ -159,10 +205,6 @@ function buildMonthlyEventId(rawEventId, lessonDate, startTs) {
   if (!start || Number.isNaN(start.getTime())) return `${raw}_${date}`;
   const timeSuffix = start.toISOString().slice(11, 19).replace(/:/g, '-');
   return `${raw}_${date}_${timeSuffix}`;
-}
-
-function rawEventIdFromMonthlyEventId(eventId) {
-  return String(eventId || '').trim().replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '');
 }
 
 function lessonModeToLocationLabel(lessonMode) {
@@ -1070,58 +1112,6 @@ router.get('/teachers', async (req, res) => {
   }
 });
 
-/** GET /api/schedule/extend?date=YYYY-MM-DD&teacher_name= - get shift extension for a teacher on a date. */
-router.get('/extend', async (req, res) => {
-  try {
-    const { date: dateStr, teacher_name: teacherName } = req.query || {};
-    if (!dateStr || !teacherName) {
-      return res.status(400).json({ error: 'Query date and teacher_name required' });
-    }
-    const r = await query(
-      'SELECT extend_before_minutes, extend_after_minutes FROM teacher_shift_extensions WHERE date = $1::date AND teacher_name = $2',
-      [dateStr, teacherName]
-    );
-    if (r.rows.length === 0) {
-      return res.json({ extend_before_minutes: 0, extend_after_minutes: 0 });
-    }
-    const row = r.rows[0];
-    res.json({
-      extend_before_minutes: parseInt(row.extend_before_minutes, 10) || 0,
-      extend_after_minutes: parseInt(row.extend_after_minutes, 10) || 0,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/** PUT /api/schedule/extend - set shift extension (up to 120 minutes before/after). Creates row if teacher has a shift on that date. */
-router.put('/extend', async (req, res) => {
-  try {
-    const { date: dateStr, teacher_name: teacherName, extend_before_minutes, extend_after_minutes } = req.body || {};
-    if (!dateStr || !teacherName) {
-      return res.status(400).json({ error: 'Body date and teacher_name required' });
-    }
-    const before = Math.min(120, Math.max(0, parseInt(extend_before_minutes, 10) || 0));
-    const after = Math.min(120, Math.max(0, parseInt(extend_after_minutes, 10) || 0));
-    const hasShift = await query(
-      'SELECT 1 FROM teacher_schedules WHERE date = $1::date AND teacher_name = $2 LIMIT 1',
-      [dateStr, teacherName]
-    );
-    if (hasShift.rows.length === 0) {
-      return res.status(400).json({ error: 'No shift found for this teacher on this date. Add a base shift first.' });
-    }
-    await query(
-      `INSERT INTO teacher_shift_extensions (date, teacher_name, extend_before_minutes, extend_after_minutes)
-       VALUES ($1::date, $2, $3, $4)
-       ON CONFLICT (date, teacher_name) DO UPDATE SET extend_before_minutes = $3, extend_after_minutes = $4`,
-      [dateStr, teacherName, before, after]
-    );
-    res.json({ ok: true, extend_before_minutes: before, extend_after_minutes: after });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 /** Book a new lesson: create a Calendar event via GAS (source of truth). */
 router.post('/book', async (req, res) => {
   try {
@@ -1564,13 +1554,18 @@ router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
+    const skipAmbiguousGas = await shouldSkipAmbiguousRecurringForRows(eventId, oldRows);
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && !skipAmbiguousGas) {
       const pendingTitle = applyRescheduleTitleMarker(oldRows[0]?.title || '', 'to', '???');
-      await updateBookedLessonEventInGas(eventId, {
-        title: pendingTitle,
-        colorId: '8',
-        mergeStudentAdminDescription: { awaiting_reschedule_date: true },
-      });
+      await updateBookedLessonEventInGas(
+        eventId,
+        {
+          title: pendingTitle,
+          colorId: '8',
+          mergeStudentAdminDescription: { awaiting_reschedule_date: true },
+        },
+        calendarGasOptions(oldRows)
+      );
     }
     await query(
       `UPDATE monthly_schedule
@@ -1609,12 +1604,17 @@ router.patch(/^\/(.+)\/cancel\/?$/, async (req, res) => {
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
+    const skipAmbiguousGas = await shouldSkipAmbiguousRecurringForRows(eventId, oldRows);
+    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && !skipAmbiguousGas) {
       // Google Calendar Graphite = colorId "8".
-      await updateBookedLessonEventInGas(eventId, {
-        colorId: '8',
-        mergeStudentAdminDescription: { awaiting_reschedule_date: false },
-      });
+      await updateBookedLessonEventInGas(
+        eventId,
+        {
+          colorId: '8',
+          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
+        },
+        calendarGasOptions(oldRows)
+      );
     }
     await query(
       `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
@@ -1654,10 +1654,11 @@ router.patch(/^\/(.+)\/uncancel\/?$/, async (req, res) => {
       const cid = bookingEventColorId(lk);
       const restoredTitle = stripRescheduleTitleMarker(oldRows[0]?.title || '');
       const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
+      const gasOpts = calendarGasOptions(oldRows);
       if (cid) {
-        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, colorId: cid, ...merge });
+        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, colorId: cid, ...merge }, gasOpts);
       } else {
-        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, clearColor: true, ...merge });
+        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, clearColor: true, ...merge }, gasOpts);
       }
     }
     await query(
@@ -1749,7 +1750,7 @@ router.patch(/^\/(.+)\/reschedule\/?$/, async (req, res) => {
         ...(endIso ? { endIso } : {}),
       };
       if (Object.keys(patch).length > 0) {
-        updateBookedLessonEventInGas(eventId, patch).catch((err) => {
+        updateBookedLessonEventInGas(eventId, patch, calendarGasOptions(oldRows)).catch((err) => {
           console.error('[schedule/reschedule] calendar update failed:', err?.message || err);
         });
       }
@@ -1824,9 +1825,12 @@ router.post('/reschedule-linked', async (req, res) => {
     if (sourceRescheduled && !awaitingDate) {
       return res.status(400).json({ error: 'Source lesson is already rescheduled' });
     }
-    const sourceRowsForReschedule = candidateRows.filter(
-      (row) => String(row.status || '').toLowerCase() !== 'cancelled'
-    );
+    const sourceRowsForReschedule = candidateRows.filter((row) => {
+      if (String(row.status || '').toLowerCase() === 'cancelled') return false;
+      if (Number(row.student_id) === studentIdNum) return true;
+      const n = String(row.student_name || '').replace(/\s+/g, ' ').trim();
+      return nameCandidates.includes(n);
+    });
     if (sourceRowsForReschedule.length === 0) {
       return res.status(400).json({ error: 'No reschedulable source rows found for this event' });
     }
@@ -1903,11 +1907,16 @@ router.post('/reschedule-linked', async (req, res) => {
           : 'cafe';
 
     const sourceRowsFull = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const skipAmbiguousRecurringCalendar = await shouldSkipAmbiguousRecurringForRows(
+      sourceEventId,
+      sourceRowsForReschedule
+    );
     /** Same predicate as PATCH cancel: style source Calendar (graphite) when lesson was on Calendar. */
     const shouldStyleSourceCalendar =
       isBookingGasEnabled() &&
       shouldSyncCalendarForRows(sourceRowsFull) &&
-      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX);
+      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
+      !skipAmbiguousRecurringCalendar;
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -2102,11 +2111,15 @@ router.post('/reschedule-linked', async (req, res) => {
 
     if (shouldStyleSourceCalendar) {
       try {
-        const styleUpd = await updateBookedLessonEventInGas(sourceEventId, {
-          title: canonicalSourceTitleUpdated,
-          colorId: '8',
-          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
-        });
+        const styleUpd = await updateBookedLessonEventInGas(
+          sourceEventId,
+          {
+            title: canonicalSourceTitleUpdated,
+            colorId: '8',
+            mergeStudentAdminDescription: { awaiting_reschedule_date: false },
+          },
+          calendarGasOptions(sourceRowsForReschedule)
+        );
         if (styleUpd.ok) {
           calendarSourceGraphiteOk = true;
         } else {
@@ -2241,13 +2254,18 @@ router.post('/unreschedule-linked', async (req, res) => {
     }
 
     const sourceRowsFullBefore = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const skipAmbiguousRecurringCalendar = await shouldSkipAmbiguousRecurringForRows(
+      sourceEventId,
+      sourceRowsFullBefore
+    );
     const shouldStyleSourceCalendar =
       isBookingGasEnabled() &&
       shouldSyncCalendarForRows(sourceRowsFullBefore) &&
-      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX);
+      !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
+      !skipAmbiguousRecurringCalendar;
 
     if (isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(destRows)) {
-      const del = await deleteBookedLessonEventInGas(toEventId);
+      const del = await deleteBookedLessonEventInGas(toEventId, calendarGasOptions(destRows));
       if (!del.ok) {
         return res.status(502).json({
           error: del.error || 'Failed to remove destination lesson from Google Calendar',
@@ -2361,9 +2379,18 @@ router.post('/unreschedule-linked', async (req, res) => {
           const lk = String(activeForTitle[0]?.lesson_kind || 'regular').toLowerCase();
           const cid = bookingEventColorId(lk);
           const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
+          const restoreGasOpts = calendarGasOptions(sourceRowsFullBefore);
           const styleUpd = cid
-            ? await updateBookedLessonEventInGas(sourceEventId, { title: gasTitle, colorId: cid, ...merge })
-            : await updateBookedLessonEventInGas(sourceEventId, { title: gasTitle, clearColor: true, ...merge });
+            ? await updateBookedLessonEventInGas(
+                sourceEventId,
+                { title: gasTitle, colorId: cid, ...merge },
+                restoreGasOpts
+              )
+            : await updateBookedLessonEventInGas(
+                sourceEventId,
+                { title: gasTitle, clearColor: true, ...merge },
+                restoreGasOpts
+              );
           if (!styleUpd.ok) {
             calendarSourceRestoreError = styleUpd.error || 'Calendar source restore failed';
             console.error('[unreschedule-linked] source calendar restore failed:', calendarSourceRestoreError);
@@ -2404,7 +2431,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     const localOnlyRemove =
       req.query?.localOnly === '1' || String(req.query?.localOnly || '').toLowerCase() === 'true';
     if (!localOnlyRemove && isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(oldRows)) {
-      const del = await deleteBookedLessonEventInGas(eventId);
+      const del = await deleteBookedLessonEventInGas(eventId, calendarGasOptions(oldRows));
       if (!del.ok) {
         return res.status(502).json({
           error: del.error || 'Failed to remove lesson from Google Calendar',
