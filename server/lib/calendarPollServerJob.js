@@ -4,6 +4,7 @@
  * Uses current + next month snapshots (month=YYYY-MM) + reconcile to mirror backfill behavior.
  */
 import { upsertMonthlySchedule } from './calendarSync.js';
+import { utcToJstDateAndTime } from './timezone.js';
 import {
   bulkSyncCalendarsFromGasForStaffType,
   getMonthAndNextMonthJapanRange,
@@ -85,7 +86,10 @@ function rowKey(row) {
   let resolvedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : '';
   if (!resolvedDate && startVal) {
     const d = new Date(startVal);
-    if (!Number.isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10);
+    if (!Number.isNaN(d.getTime())) {
+      const jst = utcToJstDateAndTime(d);
+      resolvedDate = jst ? jst.date : d.toISOString().slice(0, 10);
+    }
   }
   let timeSuffix = '';
   if (startVal) {

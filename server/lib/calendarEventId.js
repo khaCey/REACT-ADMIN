@@ -45,8 +45,9 @@ export function occurrenceStartIsoFromMonthlyEventId(monthlyEventId) {
     const d = new Date(`${date}T${hh}:${mm}:${ss}Z`);
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
-  const d = new Date(`${date}T00:00:00.000Z`);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  // Date-only disambiguation must not invent midnight UTC — that builds the wrong Google instance
+  // suffix and can make the server send a bogus id while the real lesson time lives on the row.
+  return null;
 }
 
 /**
@@ -88,17 +89,29 @@ export function gasCalendarEventIdFromMonthly(
   const id = String(monthlyEventId || '').trim();
   if (!id) return '';
 
+  // After stripping our _YYYY-MM-DD disambiguation, the key may already be Google's instance id
+  // (…_YYYYMMDDTHHMMSSZ). Prefer that over calendar_source_event_id, which is often the bare series
+  // master — returning src would make GAS delete the whole recurring series.
+  const strippedEarly = stripOurMonthlyDisambiguationSuffix(id);
+  if (GOOGLE_INSTANCE_SUFFIX_RE.test(strippedEarly)) {
+    return strippedEarly;
+  }
+
   const src = String(calendarSourceEventId || '').trim();
   if (src) {
     if (GOOGLE_INSTANCE_SUFFIX_RE.test(src)) return src;
-    if (src === stripOurMonthlyDisambiguationSuffix(id)) {
-      const iso =
-        (occurrenceStartIso && String(occurrenceStartIso).trim()) ||
-        occurrenceStartIsoFromMonthlyEventId(id) ||
-        null;
-      if (iso) {
+    const strippedId = stripOurMonthlyDisambiguationSuffix(id);
+    const iso =
+      (occurrenceStartIso && String(occurrenceStartIso).trim()) ||
+      occurrenceStartIsoFromMonthlyEventId(id) ||
+      null;
+    // Bare poll id often equals the recurring series master. When it disagrees with stripped event_id,
+    // prefer strippedId (authoritative for this row) so we never call GAS with only the master.
+    if (iso && !GOOGLE_INSTANCE_SUFFIX_RE.test(strippedId)) {
+      const masterBase = strippedId && src !== strippedId ? strippedId : src || strippedId;
+      if (masterBase && !GOOGLE_INSTANCE_SUFFIX_RE.test(masterBase)) {
         const instanceSuffix = formatGoogleCalendarInstanceSuffix(iso);
-        if (instanceSuffix) return `${src}_${instanceSuffix}`;
+        if (instanceSuffix) return `${masterBase}_${instanceSuffix}`;
       }
     }
     return src;
@@ -106,10 +119,6 @@ export function gasCalendarEventIdFromMonthly(
 
   const calendarPart = stripOurMonthlyDisambiguationSuffix(id);
   if (!calendarPart) return id;
-
-  if (GOOGLE_INSTANCE_SUFFIX_RE.test(calendarPart)) {
-    return calendarPart;
-  }
 
   const iso =
     (occurrenceStartIso && String(occurrenceStartIso).trim()) ||

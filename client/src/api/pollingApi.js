@@ -7,7 +7,7 @@
  */
 
 import { getStoredToken } from '../utils/authSession'
-import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst, utcInstantToJstYyyyMmDd } from '../utils/jstMonth'
 
 const viteBase = () => (import.meta.env.VITE_CALENDAR_POLL_URL || '').trim()
 const viteKey = () => (import.meta.env.VITE_CALENDAR_POLL_API_KEY || '').trim()
@@ -132,7 +132,9 @@ function pollRowKey(row) {
   let resolvedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : ''
   if (!resolvedDate && startVal) {
     const d = new Date(startVal)
-    if (!Number.isNaN(d.getTime())) resolvedDate = d.toISOString().slice(0, 10)
+    if (!Number.isNaN(d.getTime())) {
+      resolvedDate = utcInstantToJstYyyyMmDd(d) || d.toISOString().slice(0, 10)
+    }
   }
   let timeSuffix = ''
   if (startVal) {

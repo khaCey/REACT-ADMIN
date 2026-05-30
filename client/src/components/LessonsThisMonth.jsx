@@ -13,6 +13,14 @@ const DOW = ['日', '月', '火', '水', '木', '金', '土']
 
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
+  /** Calendar placeholder / yellow hold slots (see GAS MonthlyCache). */
+  reserved: {
+    accent: 'bg-cyan-600',
+    bg: 'bg-cyan-50',
+    dot: 'bg-cyan-600',
+    hoverRing: 'hover:ring-cyan-500/60',
+    label: 'Reserved',
+  },
   calendar_pending: {
     accent: 'bg-sky-600',
     bg: 'bg-sky-50',
@@ -42,11 +50,12 @@ const CARD_SIZES = {
   large: { date: 'text-[0.8rem]', dow: 'text-[0.7rem]', time: 'text-[0.75rem]', status: 'text-[0.7rem]', dot: 'h-2 w-2', pad: 'px-2 py-1.5', accent: 'w-1.5' },
 }
 
-function getLessonDisplayStatus(lesson) {
+function getLessonDisplayStatus(lesson, removingEventId = null) {
+  const eventID = String(lesson?.eventID || '')
+  if (removingEventId && eventID && eventID === removingEventId) return 'deleting'
+
   const transientStatus = String(lesson?.transientStatus || '').toLowerCase()
-  /** GAS/Calendar often sends `reserved`; in this app it means a normal booked lesson (same as scheduled). */
-  let rawStatus = String(lesson?.status || '').toLowerCase()
-  if (rawStatus === 'reserved') rawStatus = 'scheduled'
+  const rawStatus = String(lesson?.status || '').toLowerCase()
   const syncStatus = String(lesson?.calendarSyncStatus || 'synced').toLowerCase()
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
@@ -60,9 +69,39 @@ function getLessonDisplayStatus(lesson) {
   if (rawStatus === 'rescheduled') return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
   if (syncStatus === 'failed') return 'sync_failed'
-  if (syncStatus === 'pending' && rawStatus === 'scheduled') return 'calendar_pending'
+  if (syncStatus === 'pending' && (rawStatus === 'scheduled' || rawStatus === 'reserved')) return 'calendar_pending'
   if (isDemoLesson) return 'demo'
+  if (rawStatus === 'reserved') return 'reserved'
   return rawStatus || 'scheduled'
+}
+
+function stripMonthlyEventIdBase(eventId) {
+  return String(eventId || '')
+    .trim()
+    .replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '')
+}
+
+/** Same reserved recurring hold as anchor (matches server confirm-reserved batch). */
+function listReservedBatchEventIds(monthData, monthKey, anchorLesson) {
+  const anchorId = String(anchorLesson?.eventID || '').trim()
+  if (!anchorId || !monthKey || !monthData?.[monthKey]) return anchorId ? [anchorId] : []
+  const idBase = stripMonthlyEventIdBase(anchorId)
+  const byEvent = new Map()
+  for (const lesson of monthData[monthKey].lessons || []) {
+    if (String(lesson?.status || '').toLowerCase() !== 'reserved') continue
+    const eid = String(lesson?.eventID || '').trim()
+    if (!eid || stripMonthlyEventIdBase(eid) !== idBase) continue
+    if (!byEvent.has(eid)) byEvent.set(eid, lesson)
+  }
+  return [...byEvent.values()]
+    .sort((a, b) => {
+      const aDay = parseInt(a?.day, 10) || 999
+      const bDay = parseInt(b?.day, 10) || 999
+      if (aDay !== bDay) return aDay - bDay
+      return String(a?.time || '99:99').localeCompare(String(b?.time || '99:99'))
+    })
+    .map((l) => String(l.eventID || '').trim())
+    .filter(Boolean)
 }
 
 function sortLessonsForDisplay(lessons) {
@@ -364,7 +403,8 @@ function isOptimisticMutationResolved(serverData, mutation) {
       const serverLesson = monthKey
         ? (serverData[monthKey]?.lessons || []).find((l) => l.eventID === mutation.eventID)
         : null
-      if (mutation.patch?.transientStatus === 'deleting') return !serverLesson
+      // Keep "Deleting…" visible until remove flow finishes (do not clear when server row is already gone).
+      if (mutation.patch?.transientStatus === 'deleting') return false
       if (!serverLesson) return mutation.patch?.status === 'unscheduled'
       return Object.entries(mutation.patch || {}).every(([key, value]) => {
         if (key === 'transientStatus' || key === 'optimisticRescheduledTo' || key === 'transientError') return true
@@ -379,8 +419,8 @@ function isOptimisticMutationResolved(serverData, mutation) {
 }
 
 
-function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
-  const displayStatus = getLessonDisplayStatus(lesson)
+function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal', removingEventId = null }) {
+  const displayStatus = getLessonDisplayStatus(lesson, removingEventId)
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -552,7 +592,7 @@ export default function LessonsThisMonth({
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
-
+  const [removingEventId, setRemovingEventId] = useState(null)
   const applyOptimisticMutation = useCallback((mutation) => {
     setActiveOptimisticMutations((prev) => [...prev, mutation])
   }, [])
@@ -887,42 +927,171 @@ export default function LessonsThisMonth({
     }
   }
 
+  const handleConfirmSchedule = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
+    setActionError(null)
+    const monthKey = findLessonMonthKey(serverData, lesson?.eventID) || activeMonth
+    if (!monthKey) {
+      setActionError('Could not determine month for confirm')
+      return false
+    }
+    const batchEventIds = listReservedBatchEventIds(serverData, monthKey, lesson)
+    if (batchEventIds.length === 0) {
+      setActionError('Could not determine reserved lessons for this month')
+      return false
+    }
+    const monthEntry = serverData?.[monthKey]
+    const paidPack = parseInt(monthEntry?.paidLessonsCount, 10)
+    const confirmBodyBase = {
+      confirm_month: monthKey,
+      ...(Number.isFinite(paidPack) && paidPack > 0 ? { pack_total: paidPack } : {}),
+    }
+    let confirmedCount = 0
+    for (const eventID of batchEventIds) {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID,
+        patch: {
+          status: 'reserved',
+          calendarSyncStatus: 'pending',
+          calendarSyncError: null,
+          transientError: null,
+        },
+      })
+      try {
+        await api.confirmReservedSchedule({ event_id: eventID, ...confirmBodyBase })
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'scheduled',
+            calendarSyncStatus: 'synced',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: undefined,
+          },
+        })
+        confirmedCount += 1
+      } catch (e) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'failed',
+            transientStatus: 'sync_failed',
+            calendarSyncError: e.message,
+            transientError: e.message,
+          },
+        })
+        setActionError(e.message)
+        break
+      }
+    }
+    try {
+      await refetchSilent()
+    } catch (refreshErr) {
+      if (confirmedCount > 0) {
+        setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+      }
+    }
+    setActiveOptimisticMutations((prev) =>
+      prev.filter((m) => !(m.type === 'patch_lesson' && batchEventIds.includes(m.eventID)))
+    )
+    if (confirmedCount === batchEventIds.length) {
+      success('Schedule confirmed')
+      return true
+    }
+    return false
+  }
+
   const confirmRemoveLesson = async () => {
     if (!pendingRemoveLesson?.eventID) return
     const lessonToRemove = pendingRemoveLesson
+    const eventId = lessonToRemove.eventID
+    const isReservedRemove = String(lessonToRemove.status || '').toLowerCase() === 'reserved'
     setRemoving(true)
+    setRemovingEventId(eventId)
     setPendingRemoveLesson(null)
     setSelectedLesson(null)
     applyOptimisticMutation({
       type: 'patch_lesson',
-      eventID: lessonToRemove.eventID,
+      eventID: eventId,
       patch: {
         transientStatus: 'deleting',
         calendarSyncError: null,
       },
     })
     try {
-      const rmSync = String(lessonToRemove.calendarSyncStatus || '').trim().toLowerCase()
-      const removeLocalOnly = rmSync === 'failed'
-      await api.removeScheduleEvent(lessonToRemove.eventID, { localOnly: removeLocalOnly })
-      applyOptimisticMutation({
-        type: 'replace_with_unscheduled',
-        eventID: lessonToRemove.eventID,
-      })
-      success('Lesson removed')
+      const tryRemove = async (localOnly) => api.removeScheduleEvent(eventId, { localOnly })
+      let removeResult = null
+      try {
+        removeResult = await tryRemove(false)
+      } catch (firstErr) {
+        const msg = String(firstErr?.message || '')
+        const calendarUnreachable = /etimedout|timed out|timeout|econnrefused|did not respond|fetch failed/i.test(
+          msg
+        )
+        if (calendarUnreachable) {
+          try {
+            removeResult = await tryRemove(true)
+          } catch {
+            throw firstErr
+          }
+        } else {
+          throw firstErr
+        }
+      }
       await refetchSilent()
+      const calendarWarning = String(removeResult?.calendar_warning || '').trim()
+      if (!isReservedRemove) {
+        applyOptimisticMutation({
+          type: 'replace_with_unscheduled',
+          eventID: eventId,
+        })
+        success(
+          calendarWarning
+            ? 'Lesson removed from schedule (Google Calendar may still need cleanup)'
+            : 'Lesson removed'
+        )
+      } else {
+        success(
+          calendarWarning
+            ? '予約済みレッスンを削除しました（カレンダーは未反映の可能性があります）'
+            : '予約済みレッスンを削除しました'
+        )
+      }
+      if (
+        calendarWarning &&
+        !/not found|calendar\.events\.delete|calendar api remove failed/i.test(calendarWarning)
+      ) {
+        setActionError(calendarWarning)
+      }
     } catch (e) {
-      applyOptimisticMutation({
-        type: 'patch_lesson',
-        eventID: lessonToRemove.eventID,
-        patch: {
-          transientStatus: 'sync_failed',
-          calendarSyncStatus: 'failed',
-          calendarSyncError: e.message,
-        },
-      })
+      if (!isReservedRemove) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID: eventId,
+          patch: {
+            transientStatus: 'sync_failed',
+            calendarSyncStatus: 'failed',
+            calendarSyncError: e.message,
+          },
+        })
+      }
       setActionError(e.message)
     } finally {
+      setRemovingEventId(null)
+      setActiveOptimisticMutations((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              m.type === 'patch_lesson' &&
+              m.eventID === eventId &&
+              m.patch?.transientStatus === 'deleting'
+            )
+        )
+      )
       setRemoving(false)
     }
   }
@@ -1078,6 +1247,7 @@ export default function LessonsThisMonth({
     .trim()
     .toLowerCase()
   const pendingRemoveIsLocalOnly = pendingRemoveSync === 'failed'
+  const pendingRemoveIsReserved = String(pendingRemoveLesson?.status || '').toLowerCase() === 'reserved'
 
   const content = (
     <div className="flex flex-1 flex-col min-h-0">
@@ -1109,6 +1279,7 @@ export default function LessonsThisMonth({
                         monthIndex={monthIndex}
                         onClick={setSelectedLesson}
                         size={cardSize}
+                        removingEventId={removingEventId}
                       />
                     ))}
                   </div>
@@ -1132,6 +1303,10 @@ export default function LessonsThisMonth({
           onOpenRescheduleChoice={handleOpenRescheduleChoice}
           onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
+          onConfirmSchedule={handleConfirmSchedule}
+          confirmScheduleMonthKey={
+            findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
+          }
           onRemove={handleRemove}
           onLessonNotesChanged={handleLessonNotesChanged}
         />
@@ -1190,15 +1365,27 @@ export default function LessonsThisMonth({
       )}
       {pendingRemoveLesson && (
         <ConfirmActionModal
-          title={pendingRemoveIsLocalOnly ? 'Remove from schedule only' : 'Remove Lesson'}
-          message={
-            pendingRemoveIsLocalOnly
-              ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
-              : 'Remove this lesson from the schedule?'
+          title={
+            pendingRemoveIsReserved
+              ? '予約済みレッスンの削除'
+              : pendingRemoveIsLocalOnly
+                ? 'Remove from schedule only'
+                : 'Remove Lesson'
           }
-          confirmLabel={pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'}
+          message={
+            pendingRemoveIsReserved
+              ? 'この操作を行うと、予約済みのレッスンがすべて削除されます。よろしいですか？'
+              : pendingRemoveIsLocalOnly
+                ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
+                : 'Remove this lesson from the schedule?'
+          }
+          confirmLabel={
+            pendingRemoveIsReserved ? '削除' : pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'
+          }
+          cancelLabel={pendingRemoveIsReserved ? 'キャンセル' : 'Cancel'}
           destructive
           confirming={removing}
+          busyConfirmLabel={pendingRemoveIsReserved ? '削除中…' : undefined}
           onConfirm={confirmRemoveLesson}
           onClose={() => setPendingRemoveLesson(null)}
         />

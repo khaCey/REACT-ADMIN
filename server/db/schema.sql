@@ -211,6 +211,17 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_group_id
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_lesson_uuid
   ON monthly_schedule(lesson_uuid);
 
+-- Staff removed a lesson slot locally while Calendar no longer has the event; poll must not re-insert.
+CREATE TABLE IF NOT EXISTS schedule_slot_dismissals (
+  student_name TEXT NOT NULL,
+  lesson_date DATE NOT NULL,
+  start_time_utc TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (student_name, lesson_date, start_time_utc)
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_slot_dismissals_date
+  ON schedule_slot_dismissals (lesson_date);
+
 -- Optional manual migration after app no longer reads monthly_schedule.group_id:
 -- DROP INDEX IF EXISTS idx_monthly_schedule_group_id;
 -- ALTER TABLE monthly_schedule DROP COLUMN IF EXISTS group_id;

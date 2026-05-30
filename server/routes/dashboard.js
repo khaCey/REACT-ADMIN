@@ -122,9 +122,17 @@ router.get('/metrics', async (req, res) => {
     const fromStart = from + '-01';
     const months = monthRange(from, to);
 
-    const [regularResult, demoResult, joinedResult] = await Promise.all([
+    const [regularStudentsResult, regularLessonsResult, demoResult, joinedResult] = await Promise.all([
       query(
         `SELECT to_char(date, 'YYYY-MM') as month, COUNT(DISTINCT student_name)::int as count
+         FROM monthly_schedule
+         WHERE lesson_kind = 'regular' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
+         AND date >= $1::date AND date < $2::date
+         GROUP BY to_char(date, 'YYYY-MM')`,
+        [fromStart, toEnd]
+      ),
+      query(
+        `SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)::int as count
          FROM monthly_schedule
          WHERE lesson_kind = 'regular' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
          AND date >= $1::date AND date < $2::date
@@ -161,7 +169,8 @@ router.get('/metrics', async (req, res) => {
     };
 
     res.json({
-      regularStudentsPerMonth: byMonth(regularResult.rows, 'count'),
+      regularStudentsPerMonth: byMonth(regularStudentsResult.rows, 'count'),
+      regularLessonsPerMonth: byMonth(regularLessonsResult.rows, 'count'),
       demoLessonsPerMonth: byMonth(demoResult.rows, 'count'),
       studentsJoinedPerMonth: byMonth(joinedResult.rows, 'count'),
     });

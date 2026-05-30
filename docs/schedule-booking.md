@@ -64,6 +64,40 @@ Additional rules enforced on submit:
 
 `GET /api/schedule/booking-warning` is currently a stub (`warn: false`); it does not block booking.
 
+## Confirm Schedule — reserved → scheduled (weekly)
+
+For **reserved** (`monthly_schedule.status = 'reserved'`) lessons that are already **calendar-synced**, staff can **confirm the schedule** for a full **calendar month** from the lesson details modal (**Confirm schedule**). The UI calls the API **once per week** (oldest first); each card moves **Pending** → **Scheduled** as its request completes. **No** next-month recurring reserved hold is created.
+
+### `POST /api/schedule/confirm-reserved`
+
+Each request confirms **one** reserved week (`event_id` = that occurrence’s row id; group lessons share one `event_id` per slot).
+
+| Field | Detail |
+|--------|--------|
+| Body | `event_id` (that week’s reserved row), optional `confirm_month` (`YYYY-MM`; default from the row’s date), optional `pack_total` (override for `n/total` titles) |
+| Title `n/total` | Optional `pack_total`, else payments / `lessons` pack for the month if set; otherwise **`total = max(that pack, other lessons in month + reserved weeks in the batch)`** |
+| Preconditions | Row is `reserved`, `student_id` set, `calendar_sync_status = synced`, not a `local-booking-` row; GAS booking URL + API key configured |
+| Batch scope | All **reserved** rows in `confirm_month` sharing the same recurring series (`calendar_source_event_id` or stripped `event_id` base) as the anchor — used for overlap exclusion and lesson numbering |
+
+**Per-request order:**
+
+1. **Create** one normal Calendar lesson for that week via GAS `lesson_book_create` (same overlap / capacity / break checks as `POST /book`; all batch `event_id`s still excluded from overlap counts).
+2. **Delete** that week’s yellow placeholder via `lesson_book_delete` (instance lookup + reserved-hold slot sweep; **`excludeEventIds`** includes the new lesson; **`strictDelete`** so “not found” does not count as success). Deploy GAS revision `2026-05-21-confirm-week-placeholder` or newer.
+3. **Update DB** for that week: `reserved` → `scheduled`, new `event_id` / `calendar_source_event_id`, title; rewrite `reschedules` FKs for that old `event_id`.
+4. When **no** reserved rows remain in the month for that series, **once**: `lesson_book_delete_series` on the empty recurring shell.
+
+**Response (example):** `ok`, `event_id`, `new_event_id`, `week_index`, `weeks_total`, `series_cleaned_up`.
+
+**UI:** Client loops sorted weeks; only the current week shows **Pending**; earlier weeks are already **Scheduled**; later weeks stay **Reserved** until their turn.
+
+**Failure modes:**
+
+- **`lesson_book_create`** or placeholder **delete** fails → rollback **that week’s** new GAS event only; **502**; DB unchanged for that week. Earlier weeks already confirmed stay scheduled.
+- **DB** fails after Calendar steps → rollback that week’s GAS create; **500**.
+- **Series cleanup** fails after DB commit for the last week → **502** (week is scheduled; series may need manual cleanup).
+
+**Related code:** `server/routes/schedule.js` (`assertBookableSlotForConfirm`, `POST /confirm-reserved`, `deleteReservedPlaceholderForWeek`, `persistConfirmReservedWeek`), `server/lib/bookingCalendarSync.js` (`deleteReservedCalendarSeriesInGas`), GAS `calendarAPI/Code.js` (`lesson_book_create`, `lesson_book_delete`, `lesson_book_delete_series`), UI `client/src/components/LessonDetailsModal.jsx` / `LessonsThisMonth.jsx`, `client/src/api.js` (`confirmReservedSchedule`).
+
 ## Related code
 
 - Week data: `server/routes/schedule.js` → `GET /week`

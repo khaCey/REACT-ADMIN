@@ -229,6 +229,9 @@ export const api = {
   },
   bookLesson: (body) =>
     fetchApi('/schedule/book', { method: 'POST', body: JSON.stringify(body) }),
+  /** Confirm one reserved week (client loops oldest-first for a full month batch). */
+  confirmReservedSchedule: (body) =>
+    fetchApi('/schedule/confirm-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
   renumberMonthLessonTitles: (body) =>
     fetchApi('/schedule/renumber-month-titles', { method: 'POST', body: JSON.stringify(body) }),

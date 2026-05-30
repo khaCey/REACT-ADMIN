@@ -22,15 +22,17 @@ function formatMonthLabel(yyyyMm) {
   return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
 }
 
-/** Merge three per-month series into one array: { month, label, regularStudents, demoLessons, studentsJoined } */
+/** Merge per-month series into one array for the metrics chart. */
 function mergeMetrics(metrics) {
   if (!metrics) return []
   const regular = new Map((metrics.regularStudentsPerMonth || []).map((d) => [d.month, d.count]))
+  const lessons = new Map((metrics.regularLessonsPerMonth || []).map((d) => [d.month, d.count]))
   const demo = new Map((metrics.demoLessonsPerMonth || []).map((d) => [d.month, d.count]))
   const joined = new Map((metrics.studentsJoinedPerMonth || []).map((d) => [d.month, d.count]))
   const months = [
     ...new Set([
       ...regular.keys(),
+      ...lessons.keys(),
       ...demo.keys(),
       ...joined.keys(),
     ]),
@@ -39,6 +41,7 @@ function mergeMetrics(metrics) {
     month,
     label: formatMonthLabel(month),
     regularStudents: regular.get(month) ?? 0,
+    regularLessons: lessons.get(month) ?? 0,
     demoLessons: demo.get(month) ?? 0,
     studentsJoined: joined.get(month) ?? 0,
   }))
@@ -395,7 +398,7 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-sm text-gray-500 mb-5">
-              Students (with at least one regular lesson), demo lessons, and students who made their first payment in that month.
+              Regular students and lessons, demo lessons, and students who made their first payment in that month.
             </p>
             {mergeMetrics(metrics).length === 0 ? (
               <p className="text-sm text-gray-500 py-8">No data for this period.</p>
@@ -416,6 +419,14 @@ export default function Dashboard() {
                       dataKey="regularStudents"
                       name="Students"
                       stroke="#16a34a"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="regularLessons"
+                      name="Lessons"
+                      stroke="#9333ea"
                       strokeWidth={2}
                       dot={{ r: 3 }}
                     />

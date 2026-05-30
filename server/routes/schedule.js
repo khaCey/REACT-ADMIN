@@ -7,6 +7,7 @@ import {
   getTodayJstDateStr,
   getJstMinutesOfDay,
   roundTeacherShiftStartEnd,
+  utcToJstDateAndTime,
 } from '../lib/timezone.js';
 import {
   BOOKING_DISABLED_STUDENT_IDS,
@@ -23,9 +24,16 @@ import {
   createBookedLessonEventInGas,
   deleteBookedLessonEventInGas,
   updateBookedLessonEventInGas,
+  deleteReservedCalendarSeriesInGas,
   isBookingGasEnabled,
+  shouldProceedWithDbOnlyCalendarDelete,
+  isGasCalendarEventMissingError,
+  isGasCalendarDeleteUnreachableError,
+  interpretGasDeleteResultForDbRemove,
+  gasDeleteConfirmedInCalendar,
   isAmbiguousRecurringSeriesMaster,
 } from '../lib/bookingCalendarSync.js';
+import { recordScheduleSlotDismissals } from '../lib/calendarSync.js';
 import {
   occurrenceStartIsoFromScheduleRows,
   stripOurMonthlyDisambiguationSuffix,
@@ -38,11 +46,75 @@ function calendarGasOptions(rows) {
   const calendarSourceEventId = row?.calendar_source_event_id
     ? String(row.calendar_source_event_id).trim()
     : null;
+  const monthlyEventId = row?.event_id ? String(row.event_id).trim() : '';
+  const lessonKind = row?.lesson_kind ? String(row.lesson_kind).trim().toLowerCase() : 'regular';
   return {
     scheduleRows: rows,
     ...(occurrenceStartIso ? { occurrenceStartIso } : {}),
     ...(calendarSourceEventId ? { calendarSourceEventId } : {}),
+    ...(monthlyEventId ? { rawMonthlyEventId: monthlyEventId } : {}),
+    lessonKind,
   };
+}
+
+/** Non-local rows that may still exist in Google Calendar — attempt GAS delete on remove. */
+function rowsShouldAttemptGasCalendarDelete(rows) {
+  return (rows || []).some(
+    (r) => !String(r?.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)
+  );
+}
+
+/**
+ * Delete in Calendar via GAS; for recurring holds also try series master remove.
+ * @returns {Promise<{ del: object, outcome: ReturnType<typeof interpretGasDeleteResultForDbRemove> }>}
+ */
+async function attemptGasCalendarDeleteForLesson(monthlyEventId, rows, options = {}) {
+  const row = rows?.[0];
+  const status = String(row?.status || '').toLowerCase().trim();
+  const seriesMasterId = row ? bareSeriesMasterFromScheduleRow(row) : '';
+  if (
+    seriesMasterId &&
+    isBookingGasEnabled() &&
+    (status === 'reserved' || options.allowSeriesDelete === true)
+  ) {
+    const seriesDel = await deleteReservedCalendarSeriesInGas({
+      seriesMasterId,
+      lessonKind: String(row?.lesson_kind || 'regular').trim().toLowerCase(),
+    });
+    const seriesOutcome = interpretGasDeleteResultForDbRemove(seriesDel);
+    if (!seriesOutcome.proceed) return { del: seriesDel, outcome: seriesOutcome };
+  }
+
+  const del = await deleteBookedLessonEventInGas(monthlyEventId, {
+    ...calendarGasOptions(rows),
+    ...(options.excludeEventIds?.length ? { excludeEventIds: options.excludeEventIds } : {}),
+    ...(options.skipSlotSweep ? { skipSlotSweep: true } : {}),
+    ...(options.skipSeriesMasterIdInDirectRemove
+      ? { skipSeriesMasterIdInDirectRemove: true }
+      : {}),
+  });
+  const outcome = interpretGasDeleteResultForDbRemove(del);
+  return { del, outcome };
+}
+
+/** Calendar event ids that must not be removed (e.g. lessons just created during confirm). */
+function collectExcludeCalendarEventIds(createdGasIds, planned = []) {
+  const set = new Set();
+  for (const id of createdGasIds || []) {
+    const s = String(id || '').trim();
+    if (s) set.add(s);
+  }
+  for (const p of planned || []) {
+    const raw = String(p.calendarSourceRaw || '').trim();
+    if (raw) set.add(raw);
+    const monthlyId = String(p.newEventId || '').trim();
+    if (monthlyId) {
+      set.add(monthlyId);
+      const bare = stripOurMonthlyDisambiguationSuffix(monthlyId);
+      if (bare) set.add(bare);
+    }
+  }
+  return [...set];
 }
 
 /** Skip GAS styling when we only have a recurring series master and multiple DB occurrences exist. */
@@ -150,6 +222,8 @@ function preserveRescheduleTitleMarker(existingTitle, nextBaseTitle) {
 
 /** Exclude break placeholder rows from capacity / overlap / mix (PostgreSQL). */
 const SQL_NOT_STAFF_BREAK = `(m.lesson_kind IS NULL OR m.lesson_kind <> 'staff_break')`;
+/** Reserved holds are placeholders; they must not block confirm/book at the same time for the same student. */
+const SQL_BLOCKS_STUDENT_SLOT_OVERLAP = `(m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled', 'reserved'))`;
 const LOCAL_BOOKING_EVENT_ID_PREFIX = 'local-booking-';
 const CALENDAR_SYNC_STATUS_PENDING = 'pending';
 const CALENDAR_SYNC_STATUS_SYNCED = 'synced';
@@ -326,6 +400,602 @@ async function getBookedCountForMonth(studentId, monthKey, db = query) {
   return parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
 }
 
+const SHORT_JST_TO_ISODOW = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+
+function jstIsoDowFromUtcMs(utcMs) {
+  const short = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(
+    new Date(utcMs)
+  );
+  return SHORT_JST_TO_ISODOW[short] || 1;
+}
+
+function addOneMonthYyyyMmKey(ym) {
+  const [ys, ms] = String(ym).split('-');
+  const y = parseInt(ys, 10);
+  const mo = parseInt(ms, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null;
+  let ny = y;
+  let nm = mo + 1;
+  if (nm > 12) {
+    nm = 1;
+    ny += 1;
+  }
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
+function lastDayOfYyyyMm(ym) {
+  const [ys, ms] = String(ym).split('-');
+  const y = parseInt(ys, 10);
+  const mo = parseInt(ms, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null;
+  const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return `${y}-${String(mo).padStart(2, '0')}-${String(dim).padStart(2, '0')}`;
+}
+
+function firstJstIsoDowDateInMonth(yyyyMm, isodow1to7) {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  for (let day = 1; day <= dim; day++) {
+    const ds = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const inst = new Date(`${ds}T12:00:00+09:00`);
+    const short = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(inst);
+    if (SHORT_JST_TO_ISODOW[short] === isodow1to7) return ds;
+  }
+  return null;
+}
+
+function rruleUntilUtcFromJstEndOfDay(yyyyMmDd) {
+  const u = parseJstToUtc(yyyyMmDd, 23, 59);
+  if (!u) return '';
+  const end = new Date(u.getTime() + 59 * 1000);
+  return end.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function bydayFromJstIsoDow(isodow1to7) {
+  const names = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+  const i = Number(isodow1to7);
+  if (!Number.isFinite(i) || i < 1 || i > 7) return 'MO';
+  return names[i - 1];
+}
+
+function bareSeriesMasterFromScheduleRow(row) {
+  const src = String(row.calendar_source_event_id || '').trim();
+  const fromEvent = stripOurMonthlyDisambiguationSuffix(String(row.event_id || ''));
+  let base = src || fromEvent;
+  base = base.replace(/_\d{8}T\d{6}Z$/i, '');
+  return base;
+}
+
+/** Reserved rows in one month that share the same recurring hold as the anchor (same scope as confirm-reserved). */
+async function queryReservedBatchRows(anchorRow, confirmMonth) {
+  const pollSeries = String(anchorRow.calendar_source_event_id || '').trim();
+  const idBase = stripOurMonthlyDisambiguationSuffix(String(anchorRow.event_id || ''));
+  const batchResult = pollSeries
+    ? await query(
+        `SELECT m.*
+           FROM monthly_schedule m
+          WHERE to_char(m.date, 'YYYY-MM') = $1
+            AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+            AND (
+              TRIM(COALESCE(m.calendar_source_event_id,'')) = $2
+              OR REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $3
+            )
+          ORDER BY m.date ASC, m.start ASC, m.event_id ASC`,
+        [confirmMonth, pollSeries, idBase]
+      )
+    : await query(
+        `SELECT m.*
+           FROM monthly_schedule m
+          WHERE to_char(m.date, 'YYYY-MM') = $1
+            AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+            AND REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $2
+          ORDER BY m.date ASC, m.start ASC, m.event_id ASC`,
+        [confirmMonth, idBase]
+      );
+  return batchResult.rows || [];
+}
+
+/**
+ * Delete old reserved placeholder events in Google Calendar (each occurrence, then series master).
+ * Uses pre-confirm batch rows so GAS gets occurrence start / poll source ids.
+ */
+async function deleteReservedHoldFromCalendar(batchRows, anchorRow, options = {}) {
+  const seriesMasterId = bareSeriesMasterFromScheduleRow(anchorRow);
+  const lessonKind = String(anchorRow.lesson_kind || 'regular').trim().toLowerCase();
+  const excludeEventIds = Array.isArray(options.excludeEventIds) ? options.excludeEventIds : [];
+  const byEventId = new Map();
+  for (const row of batchRows || []) {
+    const eid = String(row.event_id || '').trim();
+    if (!eid) continue;
+    if (!byEventId.has(eid)) byEventId.set(eid, []);
+    byEventId.get(eid).push(row);
+  }
+
+  if (seriesMasterId && isBookingGasEnabled()) {
+    const delSeries = await deleteReservedCalendarSeriesInGas({ seriesMasterId, lessonKind });
+    const seriesOutcome = interpretGasDeleteResultForDbRemove(delSeries);
+    if (!seriesOutcome.proceed) {
+      return {
+        ok: false,
+        error: seriesOutcome.blockingError || 'Failed to delete old reserved calendar series',
+        seriesMasterId,
+        event_id: String(anchorRow.event_id || '').trim(),
+      };
+    }
+  }
+
+  for (const [eid, rowsForEvent] of byEventId) {
+    const del = await deleteBookedLessonEventInGas(eid, {
+      ...calendarGasOptions(rowsForEvent),
+      excludeEventIds,
+      skipSlotSweep: true,
+      skipSeriesMasterIdInDirectRemove: true,
+    });
+    const outcome = interpretGasDeleteResultForDbRemove(del);
+    if (!outcome.proceed) {
+      return {
+        ok: false,
+        error: outcome.blockingError || `Failed to delete old reserved calendar event ${eid}`,
+        seriesMasterId,
+        event_id: eid,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    seriesMasterId: seriesMasterId || null,
+    instances_deleted: byEventId.size,
+    series_deleted: Boolean(seriesMasterId),
+  };
+}
+
+async function rollbackConfirmCreatedLessons(createdGasIds) {
+  for (const id of createdGasIds || []) {
+    try {
+      await deleteBookedLessonEventInGas(id);
+    } catch (cleanupErr) {
+      console.error('[confirm-reserved] rollback create failed', id, cleanupErr?.message || cleanupErr);
+    }
+  }
+}
+
+function groupReservedBatchRows(batchRows) {
+  const byEvent = new Map();
+  for (const row of batchRows || []) {
+    const eid = String(row.event_id || '');
+    if (!eid) continue;
+    if (!byEvent.has(eid)) byEvent.set(eid, []);
+    byEvent.get(eid).push(row);
+  }
+  return [...byEvent.values()].sort((a, b) => {
+    const da = new Date(a[0].date) - new Date(b[0].date);
+    if (da !== 0) return da;
+    return new Date(a[0].start) - new Date(b[0].start);
+  });
+}
+
+/** Delete one week's reserved placeholder occurrence (not the series master). */
+async function deleteReservedPlaceholderForWeek(groupRows, options = {}) {
+  const eid = String(groupRows[0]?.event_id || '').trim();
+  if (!eid) return { ok: false, error: 'No event_id on reserved week' };
+  const excludeEventIds = Array.isArray(options.excludeEventIds) ? options.excludeEventIds : [];
+  const seriesMasterId = bareSeriesMasterFromScheduleRow(groupRows[0]);
+  const del = await deleteBookedLessonEventInGas(eid, {
+    ...calendarGasOptions(groupRows),
+    ...(seriesMasterId ? { seriesMasterId } : {}),
+    excludeEventIds,
+    skipSlotSweep: false,
+    skipSeriesMasterIdInDirectRemove: true,
+    strictDelete: true,
+    confirmReservedPlaceholder: true,
+  });
+  const outcome = interpretGasDeleteResultForDbRemove(del);
+  if (!outcome.proceed) {
+    return {
+      ok: false,
+      error: outcome.blockingError || `Failed to delete old reserved calendar event ${eid}`,
+      event_id: eid,
+      gas_action: del?.actionTaken || null,
+      gas_calendar_id: del?.calendarId || null,
+      gas_event_id: del?.eventId || null,
+      gas_deleted_count: del?.deletedCount ?? null,
+      gas_revision: del?.gasScriptRevision || null,
+    };
+  }
+  return {
+    ok: true,
+    event_id: eid,
+    gas_calendar_id: del?.calendarId || null,
+    gas_event_id: del?.eventId || null,
+    gas_deleted_count: del?.deletedCount ?? null,
+  };
+}
+
+async function countReservedWeeksInBatch(anchorRow, confirmMonth) {
+  const rows = await queryReservedBatchRows(anchorRow, confirmMonth);
+  const byEvent = new Set();
+  for (const row of rows) {
+    const eid = String(row.event_id || '').trim();
+    if (eid) byEvent.add(eid);
+  }
+  return byEvent.size;
+}
+
+/** Apply reserved → scheduled in DB for one week after Calendar steps succeed. */
+async function persistConfirmReservedWeek(plannedItem) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const p = plannedItem;
+    const upd = await client.query(
+      `UPDATE monthly_schedule
+          SET event_id = $1,
+              title = $2,
+              status = 'scheduled',
+              calendar_source_event_id = $3,
+              calendar_sync_status = $4,
+              calendar_sync_error = NULL,
+              calendar_sync_attempted_at = NOW(),
+              calendar_synced_at = NOW(),
+              calendar_sync_key = COALESCE(calendar_sync_key, $5)
+        WHERE event_id = $6
+          AND LOWER(TRIM(COALESCE(status, 'reserved'))) = 'reserved'`,
+      [p.newEventId, p.title, p.calendarSourceRaw, CALENDAR_SYNC_STATUS_SYNCED, p.bookingKey, p.oldEventId]
+    );
+    if ((upd.rowCount || 0) === 0) {
+      throw new Error('Lesson changed mid-transaction; aborting confirm');
+    }
+    await client.query(`UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2`, [
+      p.newEventId,
+      p.oldEventId,
+    ]);
+    await client.query(`UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`, [
+      p.newEventId,
+      p.oldEventId,
+    ]);
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (dbErr) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return { ok: false, error: dbErr.message || 'Database update failed' };
+  } finally {
+    client.release();
+  }
+}
+
+/** Apply reserved → scheduled in DB only after all Calendar steps succeed. */
+async function persistConfirmReservedToDatabase(planned) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const p of planned) {
+      const upd = await client.query(
+        `UPDATE monthly_schedule
+            SET event_id = $1,
+                title = $2,
+                status = 'scheduled',
+                calendar_source_event_id = $3,
+                calendar_sync_status = $4,
+                calendar_sync_error = NULL,
+                calendar_sync_attempted_at = NOW(),
+                calendar_synced_at = NOW(),
+                calendar_sync_key = COALESCE(calendar_sync_key, $5)
+          WHERE event_id = $6
+            AND LOWER(TRIM(COALESCE(status, 'reserved'))) = 'reserved'`,
+        [p.newEventId, p.title, p.calendarSourceRaw, CALENDAR_SYNC_STATUS_SYNCED, p.bookingKey, p.oldEventId]
+      );
+      if ((upd.rowCount || 0) === 0) {
+        throw new Error('Lesson changed mid-transaction; aborting confirm');
+      }
+      await client.query(`UPDATE reschedules SET from_event_id = $1 WHERE from_event_id = $2`, [
+        p.newEventId,
+        p.oldEventId,
+      ]);
+      await client.query(`UPDATE reschedules SET to_event_id = $1 WHERE to_event_id = $2`, [
+        p.newEventId,
+        p.oldEventId,
+      ]);
+    }
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (dbErr) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return { ok: false, error: dbErr.message || 'Database update failed' };
+  } finally {
+    client.release();
+  }
+}
+
+/** Remove any reserved DB rows left in the batch (e.g. re-poll duplicates) after confirm. */
+async function deleteOrphanReservedRowsAfterConfirm(anchorRow, confirmMonth, pollSeries, idBase) {
+  const anchorStudentId = anchorRow.student_id;
+  if (anchorStudentId == null) return 0;
+  const pollSeriesTrim = String(pollSeries || '').trim();
+  const result = pollSeriesTrim
+    ? await query(
+        `DELETE FROM monthly_schedule m
+          WHERE to_char(m.date, 'YYYY-MM') = $1
+            AND m.student_id = $2
+            AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+            AND (
+              TRIM(COALESCE(m.calendar_source_event_id,'')) = $3
+              OR REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $4
+            )`,
+        [confirmMonth, anchorStudentId, pollSeriesTrim, idBase]
+      )
+    : await query(
+        `DELETE FROM monthly_schedule m
+          WHERE to_char(m.date, 'YYYY-MM') = $1
+            AND m.student_id = $2
+            AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+            AND REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $3`,
+        [confirmMonth, anchorStudentId, idBase]
+      );
+  return result.rowCount || 0;
+}
+
+function scheduleRowDateToYyyyMmDd(rowDate) {
+  if (!rowDate) return '';
+  if (rowDate instanceof Date && !Number.isNaN(rowDate.getTime())) {
+    return rowDate.toISOString().slice(0, 10);
+  }
+  const s = String(rowDate).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : '';
+}
+
+function batchRowsToOrderedStudents(rows) {
+  const sorted = [...(rows || [])].sort((a, b) => {
+    const g = (parseInt(a.group_sort_order, 10) || 9999) - (parseInt(b.group_sort_order, 10) || 9999);
+    if (g !== 0) return g;
+    return String(a.canonical_student_name || a.student_name || '').localeCompare(
+      String(b.canonical_student_name || b.student_name || '')
+    );
+  });
+  return sorted.map((row, index) => ({
+    id: row.student_id != null ? Number(row.student_id) : null,
+    name: normalizePersonName(row.canonical_student_name || row.student_name),
+    status: row.student_status,
+    payment: row.student_payment,
+    is_child: !!row.student_is_child,
+    sort_order: parseInt(row.group_sort_order, 10) || index + 1,
+  }));
+}
+
+/**
+ * Same overlap/capacity rules as POST /book, excluding rows whose event_id is in excludedEventIds
+ * (reserved slots being converted in the same confirm run).
+ */
+async function assertBookableSlotForConfirm({
+  startDate,
+  endDate,
+  dateStr,
+  orderedStudents,
+  excludedEventIds,
+  db = query,
+}) {
+  const excludedStudentIds = bookingDisabledStudentIdsArray();
+  const rep = Array.isArray(excludedEventIds) ? excludedEventIds.filter(Boolean) : [];
+  if (rep.length === 0) {
+    return { ok: false, status: 500, error: 'Internal: excludedEventIds required for confirm validation' };
+  }
+
+  const existingResult = await db(
+    `SELECT is_kids_lesson FROM monthly_schedule m
+     WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+       AND ${SQL_NOT_STAFF_BREAK}
+       AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+       AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))
+       AND NOT (m.event_id = ANY($4::text[]))`,
+    [startDate.toISOString(), endDate.toISOString(), excludedStudentIds, rep]
+  );
+  const isChild = orderedStudents.some((s) => s.is_child);
+  for (const row of existingResult.rows) {
+    const existingIsKids = !!row.is_kids_lesson;
+    if (isChild && !existingIsKids) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          'Cannot book a kids lesson in a time slot that contains adult lessons. Kids and adults must be kept separate.',
+      };
+    }
+    if (!isChild && existingIsKids) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          'Cannot book an adult lesson in a time slot that contains kids lessons. Kids and adults must be kept separate.',
+      };
+    }
+  }
+
+  if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
+    const ownerOverlap = await db(
+      `SELECT 1 FROM monthly_schedule m
+       LEFT JOIN students s ON s.id = m.student_id
+       WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+         AND ${SQL_NOT_STAFF_BREAK}
+         AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+         AND (
+           LOWER(TRIM(COALESCE(m.lesson_kind, ''))) = 'owner'
+           OR LOWER(TRIM(COALESCE(s.payment, ''))) LIKE '%owner%'
+         )
+         AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))
+         AND NOT (m.event_id = ANY($4::text[]))
+       LIMIT 1`,
+      [startDate.toISOString(), endDate.toISOString(), excludedStudentIds, rep]
+    );
+    if (ownerOverlap.rows.length > 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "An owner's course lesson is already scheduled for this time. Choose another slot.",
+      };
+    }
+  }
+
+  const orderedStudentIds = orderedStudents.map((student) => Number(student.id)).filter(Number.isFinite);
+  const dupResult = await db(
+    `SELECT COALESCE(s.name, m.student_name) AS student_name
+       FROM monthly_schedule m
+       LEFT JOIN students s ON s.id = m.student_id
+     WHERE ${SQL_BLOCKS_STUDENT_SLOT_OVERLAP}
+       AND ${SQL_NOT_STAFF_BREAK}
+       AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+       AND m.student_id = ANY($3::int[])
+       AND NOT (m.event_id = ANY($4::text[]))
+     LIMIT 1`,
+    [startDate.toISOString(), endDate.toISOString(), orderedStudentIds, rep]
+  );
+  if (dupResult.rows.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: `${normalizePersonName(dupResult.rows[0]?.student_name) || 'A selected student'} already has a lesson overlapping this time. Cancel or reschedule the existing lesson first.`,
+    };
+  }
+
+  const slotMinutes = getJstMinutesOfDay(startDate);
+  const [teacherRows, breakPresetsResult] = await Promise.all([
+    db(
+      `SELECT t.teacher_name, t.start_time, t.end_time,
+              COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
+              COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
+       FROM teacher_schedules t
+       LEFT JOIN teacher_shift_extensions e ON e.date = t.date AND e.teacher_name = t.teacher_name
+       WHERE t.date = $1::date`,
+      [dateStr]
+    ),
+    db(
+      `SELECT teacher_name, start_time, end_time
+       FROM teacher_break_presets
+       WHERE active = TRUE AND weekday = $1`,
+      [dateWeekday(dateStr)]
+    ),
+  ]);
+  const teachersOnBookingDate = new Set(
+    (teacherRows.rows || []).map((r) => normalizeTeacherNameKey(r.teacher_name)).filter(Boolean)
+  );
+  const presetBreakTeacherSet = new Set();
+  const jstForSlot = utcToJstDateAndTime(startDate);
+  const hhSlot = jstForSlot ? parseInt(jstForSlot.time.slice(0, 2), 10) : 0;
+  const slotHourLabel = `${String(hhSlot).padStart(2, '0')}:00`;
+  for (const r of breakPresetsResult.rows || []) {
+    const teacherName = String(r.teacher_name || '').trim();
+    const start = parseClock5(r.start_time);
+    const end = parseClock5(r.end_time);
+    if (!teacherName || !start || !end) continue;
+    if (!teachersOnBookingDate.has(normalizeTeacherNameKey(teacherName))) continue;
+    if (hourInHalfOpenRange(slotHourLabel, start, end)) presetBreakTeacherSet.add(teacherName);
+  }
+  const teacherSet = new Set();
+  for (const r of teacherRows.rows || []) {
+    const st0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+    const et0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+    if (!st0 || !et0) continue;
+    const { start_time: stR, end_time: etR } = roundTeacherShiftStartEnd(st0, et0);
+    const s = new Date(`1970-01-01T${stR}`);
+    const e = new Date(`1970-01-01T${etR}`);
+    const startMin = s.getHours() * 60 + s.getMinutes();
+    const endMin = e.getHours() * 60 + e.getMinutes();
+    const before = Math.min(120, parseInt(r.extend_before_minutes, 10) || 0);
+    const after = Math.min(120, parseInt(r.extend_after_minutes, 10) || 0);
+    const effectiveStart = startMin - before;
+    const effectiveEnd = endMin + after;
+    if (slotMinutes >= effectiveStart && slotMinutes < effectiveEnd) {
+      const tn = String(r.teacher_name || '').trim();
+      if (tn && !presetBreakTeacherSet.has(tn)) teacherSet.add(tn);
+    }
+  }
+
+  if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
+    const shamTeacherName = await resolveOwnerCourseTeacherName();
+    if (shamTeacherName) {
+      const shamNorm = normalizeTeacherNameForOwner(shamTeacherName);
+      const hasSham = [...teacherSet].some((t) => normalizeTeacherNameForOwner(t) === shamNorm);
+      if (!hasSham) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Owner's course bookings require ${shamTeacherName} to be on shift for this hour. Choose another time.`,
+        };
+      }
+    }
+  }
+
+  let teacherCount = teacherSet.size;
+  if (teacherCount === 0) teacherCount = 1;
+  const lessonCountResult = await db(
+    `SELECT COUNT(DISTINCT m.event_id) AS cnt FROM monthly_schedule m
+     WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+       AND ${SQL_NOT_STAFF_BREAK}
+       AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
+       AND (m.student_id IS NULL OR NOT (m.student_id = ANY($3::int[])))
+       AND NOT (m.event_id = ANY($4::text[]))`,
+    [startDate.toISOString(), endDate.toISOString(), excludedStudentIds, rep]
+  );
+  const currentLessonCount = parseInt(lessonCountResult.rows[0]?.cnt, 10) || 0;
+  if (currentLessonCount >= teacherCount) {
+    return {
+      ok: false,
+      status: 400,
+      error: `No availability: this slot has ${teacherCount} teacher(s) and ${currentLessonCount} lesson(s) already booked.`,
+    };
+  }
+
+  if (teacherSet.size > 0) {
+    const [distinctTeachersResult, dayBreakRows] = await Promise.all([
+      db(`SELECT DISTINCT teacher_name FROM teacher_schedules WHERE date = $1::date ORDER BY teacher_name`, [dateStr]),
+      db(
+        `SELECT
+           to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
+           m.teacher_name,
+           m.lesson_kind
+         FROM monthly_schedule m
+         WHERE m.date = $1::date
+         AND (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+         AND (m.student_id IS NULL OR NOT (m.student_id = ANY($2::int[])))
+         AND NOT (m.event_id = ANY($3::text[]))`,
+        [dateStr, excludedStudentIds, rep]
+      ),
+    ]);
+    const distinctTeachersOnDay = distinctTeachersResult.rows
+      .map((r) => r.teacher_name)
+      .filter((n) => n != null && String(n).trim() !== '');
+    const teachingMap = buildTeachingHoursByTeacher(dayBreakRows.rows, distinctTeachersOnDay);
+    const hourLabel = jstHourLabelFromUtc(startDate);
+    const teachersOnSlot = [...teacherSet];
+    const teachersOnBreakAtHour = new Set(
+      (dayBreakRows.rows || [])
+        .filter((r) => String(r.lesson_kind || '').trim() === 'staff_break')
+        .filter((r) => String(r.time_jst || '').trim().slice(0, 5) === hourLabel)
+        .map((r) => String(r.teacher_name || '').trim())
+        .filter((name) => name && teachersOnSlot.includes(name))
+    );
+    for (const t of presetBreakTeacherSet) {
+      if (teachersOnSlot.includes(t)) teachersOnBreakAtHour.add(t);
+    }
+    const effectiveTeachersOnSlot = teachersOnSlot.filter((name) => !teachersOnBreakAtHour.has(name));
+    const assignable = findAssignableTeachers(effectiveTeachersOnSlot, teachingMap, hourLabel);
+    if (assignable.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          'No teacher can take this slot without exceeding 5 teaching hours in a row; add a break hour or choose another time.',
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 function shouldSyncCalendarForRows(rows) {
   return (rows || []).some(
     (r) =>
@@ -346,9 +1016,14 @@ function rowsIndicateExplicitCalendarSyncedForGasDelete(rows) {
   if (nonLocal.length === 0) return false;
   const active = nonLocal.filter((r) => !['cancelled', 'rescheduled'].includes(String(r?.status || '').toLowerCase()));
   const toCheck = active.length > 0 ? active : nonLocal;
-  return toCheck.every(
-    (r) => String(r?.calendar_sync_status || '').trim().toLowerCase() === CALENDAR_SYNC_STATUS_SYNCED
-  );
+  return toCheck.every((r) => {
+    const st = String(r?.calendar_sync_status || '').trim().toLowerCase();
+    return (
+      st === CALENDAR_SYNC_STATUS_SYNCED ||
+      st === 'failed' ||
+      st === 'pending'
+    );
+  });
 }
 
 async function syncBookedLessonEventToCalendar(localEventId) {
@@ -1248,7 +1923,7 @@ router.post('/book', async (req, res) => {
       `SELECT COALESCE(s.name, m.student_name) AS student_name
          FROM monthly_schedule m
          LEFT JOIN students s ON s.id = m.student_id
-       WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+       WHERE ${SQL_BLOCKS_STUDENT_SLOT_OVERLAP}
          AND ${SQL_NOT_STAFF_BREAK}
          AND m.start < $2::timestamptz AND m."end" > $1::timestamptz
          AND m.student_id = ANY($3::int[])
@@ -1498,6 +2173,317 @@ router.post('/book', async (req, res) => {
     queueBookedLessonEventSync(localEventId);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Confirm one reserved week: create a real Calendar lesson, delete that week's placeholder,
+ * persist DB, optionally remove the empty recurring series when no reserved rows remain.
+ */
+router.post('/confirm-reserved', async (req, res) => {
+  try {
+    if (!isBookingGasEnabled()) {
+      return res.status(503).json({ error: 'Calendar booking sync is not configured' });
+    }
+    const eventIdRaw = String(req.body?.event_id || '').trim();
+    const confirmMonthRaw = String(req.body?.confirm_month || '').trim();
+    const pack_total = req.body?.pack_total;
+    if (!eventIdRaw) return res.status(400).json({ error: 'event_id is required' });
+
+    const anchorResult = await query(
+      `SELECT m.*, s.name AS canonical_student_name, s.status AS student_status,
+              s.payment AS student_payment, s.is_child AS student_is_child
+         FROM monthly_schedule m
+         LEFT JOIN students s ON s.id = m.student_id
+        WHERE m.event_id = $1`,
+      [eventIdRaw]
+    );
+    const anchorRow = anchorResult.rows[0];
+    if (!anchorRow) return res.status(404).json({ error: 'Event not found', event_id: eventIdRaw });
+
+    if (String(anchorRow.status || '').toLowerCase().trim() !== 'reserved') {
+      return res.status(400).json({ error: 'Only reserved lessons can be confirmed this way' });
+    }
+    if (normalizeCalendarSyncStatus(anchorRow.calendar_sync_status) !== CALENDAR_SYNC_STATUS_SYNCED) {
+      return res.status(400).json({ error: 'Lesson must be synced with Google Calendar before confirming' });
+    }
+    if (String(anchorRow.event_id || '').startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)) {
+      return res.status(400).json({ error: 'Cannot confirm a local-only booking row' });
+    }
+    if (anchorRow.student_id == null) {
+      return res.status(400).json({ error: 'Reserved row must have student_id set' });
+    }
+
+    const confirmMonth = /^\d{4}-\d{2}$/.test(confirmMonthRaw)
+      ? confirmMonthRaw
+      : scheduleRowDateToYyyyMmDd(anchorRow.date).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(confirmMonth)) {
+      return res.status(400).json({ error: 'Could not determine confirm_month' });
+    }
+
+    const pollSeries = String(anchorRow.calendar_source_event_id || '').trim();
+    const idBase = stripOurMonthlyDisambiguationSuffix(String(anchorRow.event_id || ''));
+
+    const batchResult = pollSeries
+      ? await query(
+          `SELECT m.*, s.name AS canonical_student_name, s.status AS student_status,
+                  s.payment AS student_payment, s.is_child AS student_is_child
+             FROM monthly_schedule m
+             LEFT JOIN students s ON s.id = m.student_id
+            WHERE to_char(m.date, 'YYYY-MM') = $1
+              AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+              AND (
+                TRIM(COALESCE(m.calendar_source_event_id,'')) = $2
+                OR REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $3
+              )
+            ORDER BY m.date ASC, m.start ASC, m.event_id ASC, COALESCE(m.group_sort_order, 2147483647) ASC,
+                     LOWER(COALESCE(s.name, m.student_name)) ASC`,
+          [confirmMonth, pollSeries, idBase]
+        )
+      : await query(
+          `SELECT m.*, s.name AS canonical_student_name, s.status AS student_status,
+                  s.payment AS student_payment, s.is_child AS student_is_child
+             FROM monthly_schedule m
+             LEFT JOIN students s ON s.id = m.student_id
+            WHERE to_char(m.date, 'YYYY-MM') = $1
+              AND LOWER(TRIM(COALESCE(m.status,''))) = 'reserved'
+              AND REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '') = $2
+            ORDER BY m.date ASC, m.start ASC, m.event_id ASC, COALESCE(m.group_sort_order, 2147483647) ASC,
+                     LOWER(COALESCE(s.name, m.student_name)) ASC`,
+          [confirmMonth, idBase]
+        );
+
+    const batchRows = batchResult.rows || [];
+    if (batchRows.length === 0) {
+      return res.status(404).json({ error: 'No matching reserved rows for this month' });
+    }
+
+    const replacingEventIds = [
+      ...new Set(batchRows.map((r) => String(r.event_id || '').trim()).filter(Boolean)),
+    ];
+    const anchorStudentId = Number(anchorRow.student_id);
+    const groups = groupReservedBatchRows(batchRows);
+    const weeksTotal = groups.length;
+
+    const targetGroup = groups.find((g) => String(g[0].event_id || '').trim() === eventIdRaw);
+    if (!targetGroup) {
+      return res.status(404).json({
+        error: 'Reserved week not found in this month batch',
+        event_id: eventIdRaw,
+      });
+    }
+    const weekIndex = groups.indexOf(targetGroup) + 1;
+    const groupRows = targetGroup;
+    const gi = weekIndex - 1;
+
+    const baseCountRes = await query(
+      `SELECT COUNT(DISTINCT m.event_id) AS cnt
+         FROM monthly_schedule m
+        WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+          AND m.student_id = $1
+          AND to_char(m.date, 'YYYY-MM') = $2
+          AND NOT (m.event_id = ANY($3::text[]))`,
+      [anchorStudentId, confirmMonth, replacingEventIds]
+    );
+    const baseLessonCount = parseInt(baseCountRes.rows[0]?.cnt, 10) || 0;
+
+    let totalLessons = await getPackTotalForBooking(anchorStudentId, confirmMonth, pack_total);
+    const monthLessonTotal = baseLessonCount + weeksTotal;
+    if (!totalLessons) {
+      totalLessons = monthLessonTotal;
+    } else {
+      totalLessons = Math.max(totalLessons, monthLessonTotal);
+    }
+    if (!totalLessons) {
+      return res.status(400).json({ error: 'No reserved lessons to confirm for this month.' });
+    }
+
+    const seriesMasterId = bareSeriesMasterFromScheduleRow(anchorRow);
+
+    const dateStr = scheduleRowDateToYyyyMmDd(groupRows[0].date);
+    if (!dateStr) {
+      return res.status(400).json({ error: 'Invalid date on reserved row' });
+    }
+    const startDate = new Date(groupRows[0].start);
+    const endDate = new Date(groupRows[0].end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid start/end on reserved row' });
+    }
+    const orderedStudents = batchRowsToOrderedStudents(groupRows);
+    if (orderedStudents.some((s) => !normalizePersonName(s.name))) {
+      return res.status(400).json({ error: 'One or more students have no name' });
+    }
+
+    const val = await assertBookableSlotForConfirm({
+      startDate,
+      endDate,
+      dateStr,
+      orderedStudents,
+      excludedEventIds: replacingEventIds,
+    });
+    if (!val.ok) return res.status(val.status).json({ error: val.error });
+
+    const lessonKindForBooking = String(groupRows[0].lesson_kind || 'regular').trim().toLowerCase();
+    const locationLabel =
+      lessonKindForBooking === 'demo' ? 'Cafe' : lessonModeToLocationLabel(groupRows[0].lesson_mode);
+
+    let title;
+    if (lessonKindForBooking === 'demo') {
+      title = buildLessonTitleForOrderedStudents({
+        students: orderedStudents,
+        lessonKind: 'demo',
+        locationLabel,
+      });
+    } else {
+      const lessonNumber = baseLessonCount + gi + 1;
+      title = buildLessonTitleForOrderedStudents({
+        students: orderedStudents,
+        lessonKind: lessonKindForBooking,
+        locationLabel,
+        lessonNumber,
+        totalLessons,
+      });
+    }
+
+    const bookingKey =
+      String(groupRows[0].calendar_sync_key || '').trim() || buildCalendarSyncKey();
+
+    const firstS = orderedStudents[0];
+    const studentPayload = {
+      id: firstS.id,
+      name: firstS.name || '',
+      status: firstS.status,
+      payment: firstS.payment,
+      is_child: !!firstS.is_child,
+    };
+
+    const gasRes = await createBookedLessonEventInGas({
+      students: orderedStudents,
+      student: studentPayload,
+      startIso: startDate.toISOString(),
+      endIso: endDate.toISOString(),
+      assignedTeacherName: groupRows[0].teacher_name,
+      title,
+      location: lessonKindForBooking === 'demo' ? '' : lessonModeToLocationLabel(groupRows[0].lesson_mode),
+      lessonKind: lessonKindForBooking,
+      bookingKey,
+    });
+    if (!gasRes.ok || !gasRes.eventId) {
+      return res.status(502).json({
+        error: gasRes.error || 'Failed to create lesson in Google Calendar',
+        event_id: eventIdRaw,
+        gas_action: gasRes?.actionTaken || null,
+        gas_event_id: gasRes?.eventId || null,
+        ...(gasRes?.gasScriptRevision ? { gas_revision: gasRes.gasScriptRevision } : {}),
+      });
+    }
+
+    const syncedMonthlyEventId = buildMonthlyEventId(gasRes.eventId, dateStr, groupRows[0].start);
+    const plannedItem = {
+      oldEventId: groupRows[0].event_id,
+      newEventId: syncedMonthlyEventId,
+      title,
+      calendarSourceRaw: gasRes.eventId,
+      bookingKey,
+      groupRows,
+    };
+
+    const calendarDel = await deleteReservedPlaceholderForWeek(groupRows, {
+      excludeEventIds: collectExcludeCalendarEventIds([gasRes.eventId], [plannedItem]),
+    });
+    if (!calendarDel.ok) {
+      await rollbackConfirmCreatedLessons([gasRes.eventId]);
+      return res.status(502).json({
+        error:
+          calendarDel.error ||
+          'Failed to delete old reserved calendar placeholder. Database was not changed.',
+        event_id: calendarDel.event_id,
+        series_master_id: seriesMasterId || null,
+        ...(calendarDel.gas_revision ? { gas_revision: calendarDel.gas_revision } : {}),
+        ...(calendarDel.gas_deleted_count != null
+          ? { gas_deleted_count: calendarDel.gas_deleted_count }
+          : {}),
+        ...(gasRes?.calendarId ? { created_calendar_id: gasRes.calendarId } : {}),
+        ...(gasRes?.eventId ? { created_calendar_event_id: gasRes.eventId } : {}),
+      });
+    }
+
+    const dbPersist = await persistConfirmReservedWeek(plannedItem);
+    if (!dbPersist.ok) {
+      await rollbackConfirmCreatedLessons([gasRes.eventId]);
+      return res.status(500).json({
+        error: `${dbPersist.error}. Database was not changed; Calendar may need manual cleanup.`,
+        event_id: eventIdRaw,
+      });
+    }
+
+    let seriesCleanedUp = false;
+    const remainingReservedWeeks = await countReservedWeeksInBatch(anchorRow, confirmMonth);
+    if (remainingReservedWeeks === 0 && seriesMasterId && isBookingGasEnabled()) {
+      const lessonKind = String(anchorRow.lesson_kind || 'regular').trim().toLowerCase();
+      const delSeries = await deleteReservedCalendarSeriesInGas({ seriesMasterId, lessonKind });
+      const seriesOutcome = interpretGasDeleteResultForDbRemove(delSeries);
+      if (!seriesOutcome.proceed) {
+        return res.status(502).json({
+          error:
+            seriesOutcome.blockingError ||
+            'Week confirmed in DB but failed to delete empty reserved calendar series',
+          event_id: eventIdRaw,
+          new_event_id: syncedMonthlyEventId,
+          series_master_id: seriesMasterId,
+        });
+      }
+      seriesCleanedUp = true;
+    }
+
+    let orphanReservedRemoved = 0;
+    if (remainingReservedWeeks === 0) {
+      orphanReservedRemoved = await deleteOrphanReservedRowsAfterConfirm(
+        anchorRow,
+        confirmMonth,
+        pollSeries,
+        idBase
+      );
+    }
+
+    for (const oldSnapshot of groupRows) {
+      const newRowsSnap = await query(
+        `SELECT * FROM monthly_schedule WHERE event_id = $1 AND student_name = $2`,
+        [plannedItem.newEventId, oldSnapshot.student_name]
+      );
+      const newRow = newRowsSnap.rows[0];
+      if (newRow) {
+        await logChange(
+          {
+            entityType: 'monthly_schedule',
+            entityKey: `${plannedItem.newEventId}_${oldSnapshot.student_name}`,
+            action: 'update',
+            oldData: oldSnapshot,
+            newData: newRow,
+          },
+          req
+        );
+      }
+    }
+
+    return res.json({
+      ok: true,
+      confirm_month: confirmMonth,
+      event_id: eventIdRaw,
+      new_event_id: syncedMonthlyEventId,
+      week_index: weekIndex,
+      weeks_total: weeksTotal,
+      series_cleaned_up: seriesCleanedUp,
+      ...(gasRes?.calendarId ? { created_calendar_id: gasRes.calendarId } : {}),
+      ...(gasRes?.eventId ? { created_calendar_event_id: gasRes.eventId } : {}),
+      ...(calendarDel?.gas_calendar_id ? { deleted_calendar_id: calendarDel.gas_calendar_id } : {}),
+      ...(calendarDel?.gas_event_id ? { deleted_calendar_event_id: calendarDel.gas_event_id } : {}),
+      ...(calendarDel?.gas_deleted_count != null ? { deleted_count: calendarDel.gas_deleted_count } : {}),
+      ...(seriesMasterId ? { series_master_id: seriesMasterId } : {}),
+      ...(orphanReservedRemoved > 0 ? { orphan_reserved_rows_removed: orphanReservedRemoved } : {}),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -2418,6 +3404,70 @@ router.post('/unreschedule-linked', async (req, res) => {
   }
 });
 
+/**
+ * Delete every monthly_schedule row for the same student + lesson instant (duplicate event_id variants).
+ * @param {Array<Record<string, unknown>>} seedRows
+ */
+async function deleteAllMonthlyScheduleRowsAtLessonSlot(seedRows) {
+  const seen = new Set();
+  let deleted = 0;
+  for (const seed of seedRows || []) {
+    const studentId = seed.student_id != null ? Number(seed.student_id) : null;
+    const studentName = normalizePersonName(seed.student_name);
+    const dateStr = scheduleRowDateToYyyyMmDd(seed.date);
+    const startIso = seed.start ? new Date(seed.start).toISOString() : null;
+    if (!dateStr || !startIso) continue;
+    const dedupe = `${studentId || ''}\t${studentName}\t${dateStr}\t${startIso}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+
+    const matchResult =
+      studentId != null && Number.isFinite(studentId)
+        ? await query(
+            `SELECT event_id, student_name FROM monthly_schedule
+              WHERE student_id = $1
+                AND date = $2::date
+                AND start = $3::timestamptz`,
+            [studentId, dateStr, startIso]
+          )
+        : await query(
+            `SELECT event_id, student_name FROM monthly_schedule
+              WHERE REGEXP_REPLACE(TRIM(student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM($1::text), '\\s+', ' ', 'g')
+                AND date = $2::date
+                AND start = $3::timestamptz`,
+            [studentName, dateStr, startIso]
+          );
+
+    for (const row of matchResult.rows || []) {
+      await query('DELETE FROM monthly_schedule WHERE event_id = $1 AND student_name = $2', [
+        row.event_id,
+        row.student_name,
+      ]);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
+async function finalizeLessonRemoveFromDb(oldRows, eventId, req) {
+  await recordScheduleSlotDismissals(oldRows);
+  const slotDeleted = await deleteAllMonthlyScheduleRowsAtLessonSlot(oldRows);
+  const primaryDeleted = await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eventId]);
+  for (const oldRow of oldRows) {
+    await logChange(
+      {
+        entityType: 'monthly_schedule',
+        entityKey: `${eventId}_${oldRow.student_name}`,
+        action: 'delete',
+        oldData: oldRow,
+        newData: null,
+      },
+      req
+    );
+  }
+  return { slotDeleted, primaryRowCount: primaryDeleted.rowCount || 0 };
+}
+
 /** Remove a lesson (delete from monthly_schedule). eventId can contain @ and dots. */
 router.delete(/^\/(.+)\/?$/, async (req, res) => {
   try {
@@ -2430,29 +3480,79 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     }
     const localOnlyRemove =
       req.query?.localOnly === '1' || String(req.query?.localOnly || '').toLowerCase() === 'true';
-    if (!localOnlyRemove && isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(oldRows)) {
-      const del = await deleteBookedLessonEventInGas(eventId, calendarGasOptions(oldRows));
-      if (!del.ok) {
+    const anchorRow = oldRows[0];
+    const anchorStatus = String(anchorRow.status || '').toLowerCase().trim();
+
+    if (anchorStatus === 'reserved') {
+      const confirmMonth = scheduleRowDateToYyyyMmDd(anchorRow.date).slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(confirmMonth)) {
+        return res.status(400).json({ error: 'Could not determine month for reserved remove' });
+      }
+      const batchRows = await queryReservedBatchRows(anchorRow, confirmMonth);
+      if (batchRows.length === 0) {
+        return res.status(404).json({ error: 'No matching reserved rows for this month' });
+      }
+      const eventIds = [
+        ...new Set(batchRows.map((r) => String(r.event_id || '').trim()).filter(Boolean)),
+      ];
+
+      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(batchRows)) {
+        const holdDel = await deleteReservedHoldFromCalendar(batchRows, anchorRow);
+        if (!holdDel.ok) {
+          return res.status(502).json({
+            error: holdDel.error || 'Failed to delete reserved calendar events',
+            event_id: eventId,
+            series_master_id: holdDel.seriesMasterId,
+          });
+        }
+      }
+
+      let removedRowCount = 0;
+      for (const eid of eventIds) {
+        const rowsForEvent = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eid])).rows;
+        if (rowsForEvent.length === 0) continue;
+        await recordScheduleSlotDismissals(rowsForEvent);
+        await deleteAllMonthlyScheduleRowsAtLessonSlot(rowsForEvent);
+        await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eid]);
+        for (const oldRow of rowsForEvent) {
+          await logChange(
+            {
+              entityType: 'monthly_schedule',
+              entityKey: `${eid}_${oldRow.student_name}`,
+              action: 'delete',
+              oldData: oldRow,
+              newData: null,
+            },
+            req
+          );
+          removedRowCount += 1;
+        }
+      }
+      return res.json({
+        ok: true,
+        event_id: eventId,
+        reserved_batch: true,
+        removed_event_count: eventIds.length,
+        removed_row_count: removedRowCount,
+      });
+    }
+
+    if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(oldRows)) {
+      const { del, outcome: delOutcome } = await attemptGasCalendarDeleteForLesson(eventId, oldRows);
+      if (!delOutcome.proceed) {
         return res.status(502).json({
-          error: del.error || 'Failed to remove lesson from Google Calendar',
+          error: delOutcome.blockingError || 'Failed to remove lesson from Google Calendar',
           event_id: eventId,
+          ...(del.gasScriptRevision ? { gas_script_revision: del.gasScriptRevision } : {}),
         });
       }
     }
-    await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eventId]);
-    for (const oldRow of oldRows) {
-      await logChange(
-        {
-          entityType: 'monthly_schedule',
-          entityKey: `${eventId}_${oldRow.student_name}`,
-          action: 'delete',
-          oldData: oldRow,
-          newData: null,
-        },
-        req
-      );
-    }
-    res.json({ ok: true, event_id: eventId });
+    const { slotDeleted } = await finalizeLessonRemoveFromDb(oldRows, eventId, req);
+    res.json({
+      ok: true,
+      event_id: eventId,
+      ...(slotDeleted > (oldRows.length || 0) ? { duplicate_slot_rows_removed: slotDeleted } : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,6 +1,20 @@
 /** Asia/Tokyo calendar month helpers (match server `latest-by-month` and GAS backfill). */
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/** Japan-facing calendar date (YYYY-MM-DD) for a UTC instant — matches server `utcToJstDateAndTime`. */
+export function utcInstantToJstYyyyMmDd(isoOrDate) {
+  const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate)
+  if (Number.isNaN(d.getTime())) return ''
+  const jstMs = d.getTime() + JST_OFFSET_MS
+  const jstDay = Math.floor(jstMs / MS_PER_DAY)
+  const jd = new Date(jstDay * MS_PER_DAY)
+  const y = jd.getUTCFullYear()
+  const mo = jd.getUTCMonth() + 1
+  const day = jd.getUTCDate()
+  return `${y}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
 
 export function getCurrentYyyyMmJst() {
   const jst = new Date(Date.now() + JST_OFFSET_MS)

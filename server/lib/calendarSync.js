@@ -16,18 +16,31 @@ function isPrecisePollEventKey(eventId) {
 
 /**
  * Delete rows for a calendar event removed at source. Never prefix-delete on a bare series master id
- * (that removed every recurring occurrence for the student).
+ * (that removed every recurring occurrence for the student) unless lessonDate scopes to one calendar day.
  * @param {string} studentName
  * @param {string} rawEventId
+ * @param {string|null} [lessonDate] - YYYY-MM-DD from poll removed key (optional)
  */
-export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
+export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId, lessonDate = null) {
   const sn = (studentName || '').trim();
   const rid = (rawEventId || '').trim();
+  const ld =
+    lessonDate && /^\d{4}-\d{2}-\d{2}$/.test(String(lessonDate).trim()) ? String(lessonDate).trim() : null;
   if (!sn || !rid) return 0;
 
-  const matchSql = isPrecisePollEventKey(rid)
-    ? `(ms.event_id = $2 OR TRIM(ms.calendar_source_event_id) = $2)`
-    : `(
+  let matchSql;
+  /** @type {unknown[]} */
+  const params = [sn, rid];
+  if (isPrecisePollEventKey(rid)) {
+    matchSql = `(ms.event_id = $2 OR TRIM(ms.calendar_source_event_id) = $2)`;
+  } else if (ld) {
+    matchSql = `(
+      (TRIM(ms.calendar_source_event_id) = $2 AND to_char(ms.date, 'YYYY-MM-DD') = $3)
+      OR (ms.event_id = $2 AND to_char(ms.date, 'YYYY-MM-DD') = $3)
+    )`;
+    params.push(ld);
+  } else {
+    matchSql = `(
          ms.event_id = $2
          OR (
            TRIM(ms.calendar_source_event_id) = $2
@@ -40,19 +53,26 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId) {
            )
          )
        )`;
+  }
+
+  let dateExtra = '';
+  if (ld && isPrecisePollEventKey(rid)) {
+    params.push(ld);
+    dateExtra = ` AND to_char(ms.date, 'YYYY-MM-DD') = $${params.length}`;
+  }
 
   const result = await query(
     `DELETE FROM monthly_schedule ms
      WHERE ms.student_name = $1
        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
-       AND ${matchSql}
+       AND ${matchSql}${dateExtra}
        AND NOT EXISTS (
          SELECT 1 FROM reschedules rs
          WHERE TRIM(rs.from_event_id) = TRIM(ms.event_id)
            AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
              = REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g')
        )`,
-    [sn, rid]
+    params
   );
   return result.rowCount ?? 0;
 }
@@ -130,7 +150,7 @@ function normalizeName(s) {
 }
 
 /** Match reconcile candidates when event_id string changed but lesson instant did not (recurring id churn). */
-function lessonSlotKey(studentName, startIso) {
+export function lessonSlotKey(studentName, startIso) {
   if (!studentName || !startIso) return null;
   const d = new Date(startIso);
   if (Number.isNaN(d.getTime())) return null;
@@ -179,6 +199,73 @@ async function buildStudentNameToIdMap() {
  * @param {Array<Record<string, unknown>>} data
  * @returns {Promise<{ rows: Array<Record<string, unknown>>, months: Set<string>, incomingKeys: Set<string>, incomingSlotKeys: Set<string> }>}
  */
+/**
+ * Slots staff dismissed in-app (Calendar already empty); poll upserts must not recreate them.
+ * @param {Set<string>} months - YYYY-MM
+ * @returns {Promise<Set<string>>} keys from lessonSlotKey
+ */
+async function loadDismissedSlotKeysForMonths(months) {
+  const ymList = [...(months || [])].filter((m) => /^\d{4}-\d{2}$/.test(String(m)));
+  if (ymList.length === 0) return new Set();
+  try {
+    const result = await query(
+      `SELECT student_name, lesson_date, start_time_utc
+         FROM schedule_slot_dismissals
+        WHERE to_char(lesson_date, 'YYYY-MM') = ANY($1::text[])`,
+      [ymList]
+    );
+    const keys = new Set();
+    for (const row of result.rows || []) {
+      const startIso =
+        row.start_time_utc instanceof Date
+          ? row.start_time_utc.toISOString()
+          : new Date(row.start_time_utc).toISOString();
+      const k = lessonSlotKey(row.student_name, startIso);
+      if (k) keys.add(k);
+    }
+    return keys;
+  } catch (err) {
+    // Table may not exist until migration runs; do not block poll sync.
+    if (String(err?.message || '').includes('schedule_slot_dismissals')) {
+      return new Set();
+    }
+    throw err;
+  }
+}
+
+/**
+ * Record that a lesson slot was removed in-app and must not be recreated by calendar poll.
+ * @param {Array<{ student_name?: string, date?: Date|string, start?: Date|string }>} rows
+ */
+export async function recordScheduleSlotDismissals(rows) {
+  for (const row of rows || []) {
+    const studentName = normalizeName(row.student_name);
+    const dateVal = row.date;
+    const startVal = row.start;
+    if (!studentName || !dateVal || !startVal) continue;
+    const dateStr =
+      dateVal instanceof Date
+        ? dateVal.toISOString().slice(0, 10)
+        : String(dateVal).trim().slice(0, 10);
+    const startDate = startVal instanceof Date ? startVal : new Date(startVal);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || Number.isNaN(startDate.getTime())) continue;
+    try {
+      await query(
+        `INSERT INTO schedule_slot_dismissals (student_name, lesson_date, start_time_utc)
+         VALUES ($1, $2::date, $3::timestamptz)
+         ON CONFLICT (student_name, lesson_date, start_time_utc) DO NOTHING`,
+        [studentName, dateStr, startDate.toISOString()]
+      );
+    } catch (err) {
+      if (String(err?.message || '').includes('schedule_slot_dismissals')) {
+        console.warn('[calendarSync] schedule_slot_dismissals missing; run server/db/add_schedule_slot_dismissals.sql');
+        return;
+      }
+      throw err;
+    }
+  }
+}
+
 async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
   const months = new Set();
@@ -353,24 +440,37 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys)
 
 /**
  * Normalize one removal from calendar-poll/sync (string key or object).
+ * String keys: `eventID|studentName` (legacy) or `eventID|studentName|YYYY-MM-DD` (recurring-safe).
  * @param {unknown} item
- * @returns {{ eventID: string, studentName: string } | null}
+ * @returns {{ eventID: string, studentName: string, lessonDate?: string|null } | null}
  */
 function normalizeRemovedPollItem(item) {
   if (item == null) return null;
   if (typeof item === 'string') {
-    const i = item.indexOf('|');
-    if (i <= 0) return null;
-    const eventID = item.slice(0, i).trim();
-    const studentName = item.slice(i + 1).trim();
-    if (!eventID || !studentName) return null;
-    return { eventID, studentName };
+    const parts = item.split('|');
+    if (parts.length < 2) return null;
+    const eventID = parts[0].trim();
+    if (!eventID) return null;
+    let studentParts = parts.slice(1);
+    let lessonDate = null;
+    const last = studentParts[studentParts.length - 1]?.trim() || '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(last)) {
+      lessonDate = last;
+      studentParts = studentParts.slice(0, -1);
+    }
+    const studentName = studentParts.join('|').trim();
+    if (!studentName) return null;
+    return { eventID, studentName, lessonDate };
   }
   if (typeof item === 'object') {
     const raw = (item.eventID ?? item.event_id ?? '').toString().trim();
     const sn = (item.studentName ?? item.student_name ?? '').toString().trim();
+    const ldRaw = String(item.date ?? item.lesson_date ?? '')
+      .trim()
+      .slice(0, 10);
+    const lessonDate = /^\d{4}-\d{2}-\d{2}$/.test(ldRaw) ? ldRaw : null;
     if (!raw || !sn) return null;
-    return { eventID: raw, studentName: sn };
+    return { eventID: raw, studentName: sn, lessonDate };
   }
   return null;
 }
@@ -384,7 +484,7 @@ async function applyRemovedFromPoll(removed) {
   let removedSkippedInvalid = 0;
   let removedParsedAttempts = 0;
   const seen = new Set();
-  /** @type {Array<{ eventID: string, studentName: string }>} */
+  /** @type {Array<{ eventID: string, studentName: string, lessonDate?: string|null }>} */
   const pairs = [];
 
   for (const item of Array.isArray(removed) ? removed : []) {
@@ -394,7 +494,7 @@ async function applyRemovedFromPoll(removed) {
       continue;
     }
     removedParsedAttempts++;
-    const dedupeKey = `${p.eventID}\t${p.studentName}`;
+    const dedupeKey = `${p.eventID}\t${p.studentName}\t${p.lessonDate || ''}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     pairs.push(p);
@@ -402,7 +502,7 @@ async function applyRemovedFromPoll(removed) {
 
   let removedDeleted = 0;
   for (const p of pairs) {
-    removedDeleted += await deleteMonthlyScheduleByRawEvent(p.studentName, p.eventID);
+    removedDeleted += await deleteMonthlyScheduleByRawEvent(p.studentName, p.eventID, p.lessonDate || null);
   }
 
   return {
@@ -453,10 +553,12 @@ export async function upsertMonthlySchedule(data, options = {}) {
   const { rows, months, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
     Array.isArray(data) ? data : []
   );
+  const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(months);
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
-  const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '1').trim() !== '0';
+  const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '0').trim() === '1';
 
   let upserted = 0;
+  let skippedDismissed = 0;
   for (const {
     eventId,
     calendarSourceEventId,
@@ -473,6 +575,11 @@ export async function upsertMonthlySchedule(data, options = {}) {
     studentId,
     awaitingReschedulePollMerge,
   } of rows) {
+    const slotKey = lessonSlotKey(studentName, startTs);
+    if (slotKey && dismissedSlotKeys.has(slotKey)) {
+      skippedDismissed++;
+      continue;
+    }
     // When using new-format id (with time), remove legacy row with same rawEventId+date but no time
     if (date && /_\d{2}-\d{2}-\d{2}$/.test(eventId)) {
       const oldFormatId = eventId.replace(/_\d{2}-\d{2}-\d{2}$/, '');
@@ -534,6 +641,7 @@ export async function upsertMonthlySchedule(data, options = {}) {
 
   return {
     upserted,
+    skippedDismissed,
     months: Array.from(months),
     monthsReconciled: Array.from(monthsToReconcile),
     deletedOrphans,
