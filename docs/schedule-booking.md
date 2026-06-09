@@ -98,6 +98,8 @@ Each request confirms **one** reserved week (`event_id` = that occurrence’s ro
 
 **Related code:** `server/routes/schedule.js` (`assertBookableSlotForConfirm`, `POST /confirm-reserved`, `deleteReservedPlaceholderForWeek`, `persistConfirmReservedWeek`), `server/lib/bookingCalendarSync.js` (`deleteReservedCalendarSeriesInGas`), GAS `calendarAPI/Code.js` (`lesson_book_create`, `lesson_book_delete`, `lesson_book_delete_series`), UI `client/src/components/LessonDetailsModal.jsx` / `LessonsThisMonth.jsx`, `client/src/api.js` (`confirmReservedSchedule`).
 
+**Implementation reference (do not regress):** [weekly-confirm-schedule-reference.md](./weekly-confirm-schedule-reference.md) — full algorithm, invariants, GAS flags, and “what not to revert” checklist.
+
 ## Related code
 
 - Week data: `server/routes/schedule.js` → `GET /week`
