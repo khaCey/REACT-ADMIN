@@ -8,7 +8,8 @@ import ConfirmActionModal from './ConfirmActionModal'
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
   reserved: { color: 'bg-cyan-600', text: 'Reserved' },
-  calendar_pending: { color: 'bg-sky-600', text: 'Calendar pending' },
+  calendar_pending: { color: 'bg-sky-600', text: 'Pending' },
+  confirm_processing: { color: 'bg-violet-600', text: 'Processing' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
   reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },
   rescheduled: { color: 'bg-amber-600', text: 'Rescheduled' },
@@ -142,6 +143,8 @@ export default function LessonDetailsModal({
           ? 'rescheduled'
           : transientStatus === 'sync_pending'
             ? 'sync_pending'
+            : transientStatus === 'confirm_processing'
+              ? 'confirm_processing'
     : status === 'unscheduled'
       ? 'unscheduled'
       : isAwaitingRescheduleDate
@@ -165,7 +168,10 @@ export default function LessonDetailsModal({
   const isCancelled = status === 'cancelled'
   const isRescheduled = status === 'rescheduled'
   const hasRescheduledTo = !!(lesson?.optimisticRescheduledTo || lesson?.rescheduledTo)
-  const isTransientBusy = transientStatus === 'sync_pending' || transientStatus === 'deleting'
+  const isTransientBusy =
+    transientStatus === 'sync_pending' ||
+    transientStatus === 'confirm_processing' ||
+    transientStatus === 'deleting'
   const canSyncWithCalendar =
     !isReservedLesson &&
     !isTransientBusy &&

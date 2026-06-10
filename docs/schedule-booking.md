@@ -66,7 +66,7 @@ Additional rules enforced on submit:
 
 ## Confirm Schedule — reserved → scheduled (weekly)
 
-For **reserved** (`monthly_schedule.status = 'reserved'`) lessons that are already **calendar-synced**, staff can **confirm the schedule** for a full **calendar month** from the lesson details modal (**Confirm schedule**). The UI calls the API **once per week** (oldest first); each card moves **Pending** → **Scheduled** as its request completes. **No** next-month recurring reserved hold is created.
+For **reserved** (`monthly_schedule.status = 'reserved'`) lessons that are already **calendar-synced**, staff can **confirm the schedule** for a full **calendar month** from the lesson details modal (**Confirm schedule**). The UI calls the API **once per week** (oldest first); each card moves **Pending** → **Processing** → **Scheduled** as its request completes. After the **last** week removes the empty recurring series, the server creates a **bounded weekly reserved hold for the following month** (replacement for the deleted series).
 
 ### `POST /api/schedule/confirm-reserved`
 
@@ -84,7 +84,7 @@ Each request confirms **one** reserved week (`event_id` = that occurrence’s ro
 1. **Create** one normal Calendar lesson for that week via GAS `lesson_book_create` (same overlap / capacity / break checks as `POST /book`; all batch `event_id`s still excluded from overlap counts).
 2. **Delete** that week’s yellow placeholder via `lesson_book_delete` (instance lookup + reserved-hold slot sweep; **`excludeEventIds`** includes the new lesson; **`strictDelete`** so “not found” does not count as success). Deploy GAS revision `2026-05-21-confirm-week-placeholder` or newer.
 3. **Update DB** for that week: `reserved` → `scheduled`, new `event_id` / `calendar_source_event_id`, title; rewrite `reschedules` FKs for that old `event_id`.
-4. When **no** reserved rows remain in the month for that series, **once**: `lesson_book_delete_series` on the empty recurring shell.
+4. When **no** reserved rows remain in the month for that series, **once**: `lesson_book_delete_series` on the empty recurring shell, then `reserved_hold_recurring_create` for the **next** calendar month (same weekday/time as the old hold).
 
 **Response (example):** `ok`, `event_id`, `new_event_id`, `week_index`, `weeks_total`, `series_cleaned_up`.
 

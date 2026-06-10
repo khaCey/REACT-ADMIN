@@ -25,6 +25,7 @@ import {
   deleteBookedLessonEventInGas,
   updateBookedLessonEventInGas,
   deleteReservedCalendarSeriesInGas,
+  createReservedRecurringHoldInGas,
   isBookingGasEnabled,
   shouldProceedWithDbOnlyCalendarDelete,
   isGasCalendarEventMissingError,
@@ -464,6 +465,70 @@ function bareSeriesMasterFromScheduleRow(row) {
   let base = src || fromEvent;
   base = base.replace(/_\d{8}T\d{6}Z$/i, '');
   return base;
+}
+
+/** After the old recurring reserved series is removed, create a bounded hold for the following month. */
+async function createNextMonthReservedHoldForSeries(anchorRow, confirmMonth) {
+  const nextYm = addOneMonthYyyyMmKey(confirmMonth);
+  if (!nextYm) {
+    return {
+      ok: true,
+      eventId: null,
+      warning: 'Could not compute next month; skipped next-month reserved hold.',
+    };
+  }
+  const lastNext = lastDayOfYyyyMm(nextYm);
+  const templateStart = new Date(anchorRow.start);
+  const isodow = jstIsoDowFromUtcMs(templateStart.getTime());
+  const firstOcc = firstJstIsoDowDateInMonth(nextYm, isodow);
+  const jstTemplate = utcToJstDateAndTime(templateStart);
+  if (!firstOcc || !lastNext || !jstTemplate) {
+    return { ok: true, eventId: null, warning: 'Could not build next-month hold; skipped.' };
+  }
+  const [th, tm] = jstTemplate.time.split(':').map((x) => parseInt(x, 10));
+  const occStart = parseJstToUtc(firstOcc, th, tm);
+  if (!occStart) {
+    return { ok: true, eventId: null, warning: 'Could not compute next-month hold start; skipped.' };
+  }
+  const durMs = new Date(anchorRow.end).getTime() - templateStart.getTime();
+  const occEnd = new Date(occStart.getTime() + durMs);
+  const startLocal = `${firstOcc}T${String(th).padStart(2, '0')}:${String(tm || 0).padStart(2, '0')}:00`;
+  const endJstParts = utcToJstDateAndTime(occEnd);
+  const endLocal = endJstParts
+    ? `${endJstParts.date}T${endJstParts.time.slice(0, 2)}:${endJstParts.time.slice(3, 5)}:00`
+    : startLocal;
+
+  const untilZ = rruleUntilUtcFromJstEndOfDay(lastNext);
+  const byday = bydayFromJstIsoDow(isodow);
+  const recurrence = untilZ
+    ? [`RRULE:FREQ=WEEKLY;BYDAY=${byday};UNTIL=${untilZ}`]
+    : [`RRULE:FREQ=WEEKLY;COUNT=1;BYDAY=${byday}`];
+
+  const holdTitle = String(anchorRow.title || '').trim() || 'Reserved (placeholder)';
+  const teacher = String(anchorRow.teacher_name || '').trim();
+  const descLines = [
+    'Source: Student Admin confirm schedule (reserved hold)',
+    anchorRow.student_id != null ? `StudentId: ${anchorRow.student_id}` : null,
+    teacher ? `#teacher${teacher}` : null,
+  ].filter(Boolean);
+
+  const holdRes = await createReservedRecurringHoldInGas({
+    lessonKind: String(anchorRow.lesson_kind || 'regular').trim().toLowerCase(),
+    title: holdTitle,
+    description: descLines.join('\n'),
+    startLocal,
+    endLocal,
+    timeZone: 'Asia/Tokyo',
+    recurrence,
+  });
+  if (!holdRes.ok || !holdRes.eventId) {
+    return {
+      ok: false,
+      eventId: null,
+      error: holdRes.error || 'Failed to create next-month reserved hold',
+    };
+  }
+  return { ok: true, eventId: holdRes.eventId, warning: null };
 }
 
 /** Reserved rows in one month that share the same recurring hold as the anchor (same scope as confirm-reserved). */
@@ -2436,6 +2501,17 @@ router.post('/confirm-reserved', async (req, res) => {
       seriesCleanedUp = true;
     }
 
+    let nextMonthHoldEventId = null;
+    let holdWarning = null;
+    if (seriesCleanedUp) {
+      const holdResult = await createNextMonthReservedHoldForSeries(anchorRow, confirmMonth);
+      if (holdResult.eventId) nextMonthHoldEventId = holdResult.eventId;
+      if (holdResult.warning) holdWarning = holdResult.warning;
+      if (!holdResult.ok) {
+        holdWarning = holdResult.error || 'Failed to create next-month reserved hold';
+      }
+    }
+
     let orphanReservedRemoved = 0;
     if (remainingReservedWeeks === 0) {
       orphanReservedRemoved = await deleteOrphanReservedRowsAfterConfirm(
@@ -2474,6 +2550,8 @@ router.post('/confirm-reserved', async (req, res) => {
       week_index: weekIndex,
       weeks_total: weeksTotal,
       series_cleaned_up: seriesCleanedUp,
+      next_month_hold_event_id: nextMonthHoldEventId,
+      ...(holdWarning ? { warning: holdWarning } : {}),
       ...(gasRes?.calendarId ? { created_calendar_id: gasRes.calendarId } : {}),
       ...(gasRes?.eventId ? { created_calendar_event_id: gasRes.eventId } : {}),
       ...(calendarDel?.gas_calendar_id ? { deleted_calendar_id: calendarDel.gas_calendar_id } : {}),

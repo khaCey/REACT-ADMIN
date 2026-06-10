@@ -28,6 +28,13 @@ const CARD_STYLES = {
     hoverRing: 'hover:ring-sky-500/60',
     label: 'Pending',
   },
+  confirm_processing: {
+    accent: 'bg-violet-600',
+    bg: 'bg-violet-50',
+    dot: 'bg-violet-600',
+    hoverRing: 'hover:ring-violet-500/60',
+    label: 'Processing',
+  },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60', label: 'Cancelled' },
   reschedule_date_tbd: {
     accent: 'bg-orange-500',
@@ -62,6 +69,7 @@ function getLessonDisplayStatus(lesson, removingEventId = null) {
   if (transientStatus === 'deleting') return 'deleting'
   if (transientStatus === 'sync_failed') return 'sync_failed'
   if (transientStatus === 'rescheduled') return 'rescheduled'
+  if (transientStatus === 'confirm_processing') return 'confirm_processing'
   if (transientStatus === 'sync_pending') return 'sync_pending'
   if (rawStatus === 'unscheduled') return 'unscheduled'
   if ((rawStatus === 'rescheduled' || rawStatus === 'cancelled') && lesson?.awaitingRescheduleDate) return 'reschedule_date_tbd'
@@ -403,8 +411,9 @@ function isOptimisticMutationResolved(serverData, mutation) {
       const serverLesson = monthKey
         ? (serverData[monthKey]?.lessons || []).find((l) => l.eventID === mutation.eventID)
         : null
-      // Keep "Deleting…" visible until remove flow finishes (do not clear when server row is already gone).
+      // Keep transient labels visible until remove / confirm flow finishes.
       if (mutation.patch?.transientStatus === 'deleting') return false
+      if (mutation.patch?.transientStatus === 'confirm_processing') return false
       if (!serverLesson) return mutation.patch?.status === 'unscheduled'
       return Object.entries(mutation.patch || {}).every(([key, value]) => {
         if (key === 'transientStatus' || key === 'optimisticRescheduledTo' || key === 'transientError') return true
@@ -593,6 +602,7 @@ export default function LessonsThisMonth({
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
   const [removingEventId, setRemovingEventId] = useState(null)
+  const [confirmingSchedule, setConfirmingSchedule] = useState(false)
   const applyOptimisticMutation = useCallback((mutation) => {
     setActiveOptimisticMutations((prev) => [...prev, mutation])
   }, [])
@@ -929,6 +939,7 @@ export default function LessonsThisMonth({
 
   const handleConfirmSchedule = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
+    if (confirmingSchedule) return false
     setActionError(null)
     const monthKey = findLessonMonthKey(serverData, lesson?.eventID) || activeMonth
     if (!monthKey) {
@@ -946,63 +957,82 @@ export default function LessonsThisMonth({
       confirm_month: monthKey,
       ...(Number.isFinite(paidPack) && paidPack > 0 ? { pack_total: paidPack } : {}),
     }
+    setConfirmingSchedule(true)
     let confirmedCount = 0
-    for (const eventID of batchEventIds) {
-      applyOptimisticMutation({
-        type: 'patch_lesson',
-        eventID,
-        patch: {
-          status: 'reserved',
-          calendarSyncStatus: 'pending',
-          calendarSyncError: null,
-          transientError: null,
-        },
-      })
-      try {
-        await api.confirmReservedSchedule({ event_id: eventID, ...confirmBodyBase })
-        applyOptimisticMutation({
-          type: 'patch_lesson',
-          eventID,
-          patch: {
-            status: 'scheduled',
-            calendarSyncStatus: 'synced',
-            calendarSyncError: null,
-            transientError: null,
-            transientStatus: undefined,
-          },
-        })
-        confirmedCount += 1
-      } catch (e) {
+    try {
+      for (const eventID of batchEventIds) {
         applyOptimisticMutation({
           type: 'patch_lesson',
           eventID,
           patch: {
             status: 'reserved',
-            calendarSyncStatus: 'failed',
-            transientStatus: 'sync_failed',
-            calendarSyncError: e.message,
-            transientError: e.message,
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: undefined,
           },
         })
-        setActionError(e.message)
-        break
       }
-    }
-    try {
-      await refetchSilent()
-    } catch (refreshErr) {
-      if (confirmedCount > 0) {
-        setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+      for (const eventID of batchEventIds) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: 'confirm_processing',
+          },
+        })
+        try {
+          await api.confirmReservedSchedule({ event_id: eventID, ...confirmBodyBase })
+          applyOptimisticMutation({
+            type: 'patch_lesson',
+            eventID,
+            patch: {
+              status: 'scheduled',
+              calendarSyncStatus: 'synced',
+              calendarSyncError: null,
+              transientError: null,
+              transientStatus: undefined,
+            },
+          })
+          confirmedCount += 1
+        } catch (e) {
+          applyOptimisticMutation({
+            type: 'patch_lesson',
+            eventID,
+            patch: {
+              status: 'reserved',
+              calendarSyncStatus: 'failed',
+              transientStatus: 'sync_failed',
+              calendarSyncError: e.message,
+              transientError: e.message,
+            },
+          })
+          setActionError(e.message)
+          break
+        }
       }
+      try {
+        await refetchSilent()
+      } catch (refreshErr) {
+        if (confirmedCount > 0) {
+          setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+        }
+      }
+      setActiveOptimisticMutations((prev) =>
+        prev.filter((m) => !(m.type === 'patch_lesson' && batchEventIds.includes(m.eventID)))
+      )
+      if (confirmedCount === batchEventIds.length) {
+        success('Schedule confirmed')
+        return true
+      }
+      return false
+    } finally {
+      setConfirmingSchedule(false)
     }
-    setActiveOptimisticMutations((prev) =>
-      prev.filter((m) => !(m.type === 'patch_lesson' && batchEventIds.includes(m.eventID)))
-    )
-    if (confirmedCount === batchEventIds.length) {
-      success('Schedule confirmed')
-      return true
-    }
-    return false
   }
 
   const confirmRemoveLesson = async () => {
@@ -1277,7 +1307,7 @@ export default function LessonsThisMonth({
                         lesson={lesson}
                         year={year}
                         monthIndex={monthIndex}
-                        onClick={setSelectedLesson}
+                        onClick={confirmingSchedule ? undefined : setSelectedLesson}
                         size={cardSize}
                         removingEventId={removingEventId}
                       />

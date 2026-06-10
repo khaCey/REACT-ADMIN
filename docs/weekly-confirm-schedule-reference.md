@@ -14,7 +14,7 @@ Staff confirm a **full month** of **reserved** (yellow placeholder) lessons from
 3. Update DB: `reserved` → `scheduled` with new `event_id`.
 4. After the **last** week in the month, delete the empty recurring series shell once (`lesson_book_delete_series`).
 
-**No** next-month recurring reserved hold is created (removed from the old bulk design).
+After the **last** week deletes the empty recurring series (`series_cleaned_up`), the server creates a **replacement** bounded weekly reserved hold for the **following month** via `reserved_hold_recurring_create` (same as the old bulk confirm’s step 3, but only on the final API call — not during each week).
 
 ---
 
@@ -26,7 +26,7 @@ The previous bulk flow caused real bugs:
 |-------------------|---------|
 | Create **all** weeks, then delete **all** placeholders | Green lesson 1/4 and yellow placeholder share the same slot; slot sweep / series delete could remove the new lesson |
 | Delete series master mid-month | Wiped remaining weeks’ placeholders before their turn |
-| Create next-month recurring hold on confirm | Unwanted yellow series in the following month |
+| Create next-month hold **during each week** or **before** series delete | Wrong timing; duplicates or deletes the new hold |
 | One DB transaction at the end | All-or-nothing; hard to show per-week progress |
 
 Weekly confirm fixes this by scoping Calendar mutations to **one occurrence** and protecting the just-created event with `excludeEventIds`.
@@ -51,7 +51,7 @@ sequenceDiagram
     API-->>UI: ok + new_event_id
     UI->>UI: patch card scheduled
   end
-  Note over API,GAS: Last week only: lesson_book_delete_series
+  Note over API,GAS: Last week only: delete series then create next-month hold
 ```
 
 ---
@@ -187,7 +187,7 @@ Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete 
 1. **Bulk create-all → delete-all** in one confirm request.
 2. **Delete placeholder before create** (leaves slot empty or blocks create; was a regression).
 3. **`deleteReservedCalendarSeriesInGas` during each week** (kills other weeks’ placeholders).
-4. **Next-month `createReservedRecurringHoldInGas`** on confirm.
+4. **Next-month hold before series delete** or on every week (hold runs only after `series_cleaned_up` on the last week).
 5. **Treating GAS “not found” as success** for confirm placeholder deletes (`strictDelete: true`).
 6. **Slot sweep without `excludeEventIds`** after create (removed lesson 1/4 in old bulk flow).
 7. **Removing `confirmReservedPlaceholder` / id normalization in GAS** (placeholders stop deleting when Calendar id formats differ).
