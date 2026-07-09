@@ -6,6 +6,7 @@ import ConfirmActionModal from '../components/ConfirmActionModal'
 import { api } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
+import { getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 function formatBackupDate(iso) {
   if (!iso) return '—'
@@ -14,6 +15,7 @@ function formatBackupDate(iso) {
 }
 
 const MONTHLY_SCHEDULE_PAGE_SIZE = 100
+const purgeReservedMonth = getCurrentYyyyMmJst()
 
 function formatMonthlyScheduleDateTime(date, start) {
   const dateStr = date ? String(date).slice(0, 10) : '—'
@@ -125,7 +127,12 @@ export default function Admin() {
   const loadReservedPlaceholderCount = useCallback(async () => {
     setReservedCountLoading(true)
     try {
-      const res = await api.getAdminMonthlyScheduleEntries({ status: 'reserved', limit: 1, offset: 0 })
+      const res = await api.getAdminMonthlyScheduleEntries({
+        status: 'reserved',
+        month: purgeReservedMonth,
+        limit: 1,
+        offset: 0,
+      })
       setReservedPlaceholderCount(Number(res?.total) || 0)
     } catch {
       setReservedPlaceholderCount(null)
@@ -174,7 +181,10 @@ export default function Admin() {
     setPurgingReserved(true)
     setPurgeReservedError('')
     try {
-      const result = await api.purgeReservedPlaceholders()
+      const result = await api.purgeReservedPlaceholders({
+        month: purgeReservedMonth,
+        localOnly: true,
+      })
       const purged = result?.batches_purged ?? 0
       const rows = result?.removed_row_count ?? 0
       const failed = Array.isArray(result?.errors) ? result.errors.length : 0
@@ -792,9 +802,9 @@ export default function Admin() {
             Purge reserved placeholders
           </h3>
           <p className="text-sm text-gray-600 mb-4">
-            Remove all yellow <code className="bg-gray-100 px-1 rounded">reserved</code> holds from Google
-            Calendar and <code className="bg-gray-100 px-1 rounded">monthly_schedule</code>. Each recurring
-            batch is deleted as a unit (same as removing a reserved lesson from the schedule UI).
+            Remove <code className="bg-gray-100 px-1 rounded">reserved</code> rows from{' '}
+            <code className="bg-gray-100 px-1 rounded">monthly_schedule</code> for{' '}
+            <strong>{purgeReservedMonth}</strong> (Japan time) only. Google Calendar is not changed.
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-2">
             <span className="text-sm text-gray-700">
@@ -802,7 +812,7 @@ export default function Admin() {
                 ? 'Counting reserved rows…'
                 : reservedPlaceholderCount == null
                   ? 'Could not load reserved count'
-                  : `${reservedPlaceholderCount} reserved row(s) in database`}
+                  : `${reservedPlaceholderCount} reserved row(s) in ${purgeReservedMonth}`}
             </span>
             <button
               type="button"
@@ -823,7 +833,7 @@ export default function Admin() {
               className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {purgingReserved ? <LoadingSpinner size="xs" /> : <Trash2 className="w-4 h-4" />}
-              {purgingReserved ? 'Purging…' : 'Purge all reserved'}
+              {purgingReserved ? 'Purging…' : `Purge reserved (${purgeReservedMonth})`}
             </button>
           </div>
           {purgeReservedError && <p className="text-sm text-red-600">{purgeReservedError}</p>}
@@ -901,8 +911,8 @@ export default function Admin() {
       {purgeReservedConfirmOpen && (
         <ConfirmActionModal
           title="Purge reserved placeholders"
-          message={`This will delete all reserved placeholder batches from Google Calendar and the database (${reservedPlaceholderCount ?? 'unknown'} row(s) currently). This cannot be undone. Continue?`}
-          confirmLabel="Purge all reserved"
+          message={`This will delete reserved rows from monthly_schedule for ${purgeReservedMonth} only (database only — Google Calendar is not changed). ${reservedPlaceholderCount ?? 'Unknown'} row(s) currently. Continue?`}
+          confirmLabel={`Purge reserved (${purgeReservedMonth})`}
           destructive
           confirming={purgingReserved}
           onConfirm={handlePurgeReservedConfirm}

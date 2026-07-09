@@ -592,11 +592,15 @@ app.get('/api/admin/monthly-schedule', requireAuth, requireAdmin, async (req, re
     const rawSyncStatus = String(req.query?.syncStatus ?? '').trim().toLowerCase();
     const rawStatus = String(req.query?.status ?? '').trim().toLowerCase();
     const rawQ = String(req.query?.q ?? '').trim();
+    const rawMonth = String(req.query?.month ?? '').trim();
     const limit = Math.max(1, Math.min(500, parseInt(String(req.query?.limit ?? '100'), 10) || 100));
     const offset = Math.max(0, parseInt(String(req.query?.offset ?? '0'), 10) || 0);
     const studentId = rawStudentId === '' ? null : Number(rawStudentId);
     if (rawStudentId !== '' && !Number.isFinite(studentId)) {
       return res.status(400).json({ error: 'studentId must be a number when provided' });
+    }
+    if (rawMonth && !/^\d{4}-\d{2}$/.test(rawMonth)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM when provided' });
     }
 
     const filterSql = `
@@ -610,16 +614,17 @@ app.get('/api/admin/monthly-schedule', requireAuth, requireAdmin, async (req, re
           OR COALESCE(ms.student_name, '') ILIKE '%' || $4::text || '%'
           OR COALESCE(ms.title, '') ILIKE '%' || $4::text || '%'
         )
+        AND ($5::text = '' OR to_char(ms.date, 'YYYY-MM') = $5::text)
     `;
 
-    const params = [studentId, rawSyncStatus, rawStatus, rawQ];
+    const params = [studentId, rawSyncStatus, rawStatus, rawQ, rawMonth];
     const totalResult = await query(`SELECT COUNT(*)::integer AS total ${filterSql}`, params);
     const rowsResult = await query(
       `SELECT ms.event_id, ms.student_name, ms.student_id, ms.title, ms.date, ms.start, ms.status,
               ms.calendar_sync_status, ms.calendar_sync_error, ms.awaiting_reschedule_date
        ${filterSql}
        ORDER BY ms.date DESC NULLS LAST, ms.start DESC NULLS LAST, ms.student_name ASC, ms.event_id ASC
-       LIMIT $5 OFFSET $6`,
+       LIMIT $6 OFFSET $7`,
       [...params, limit, offset]
     );
 
@@ -671,7 +676,7 @@ app.delete('/api/admin/monthly-schedule/:eventId', requireAuth, requireAdmin, as
   }
 });
 
-/** Admin: purge all reserved placeholder lessons (Calendar + DB). */
+/** Admin: purge reserved placeholder rows for one month (DB only by default from Admin UI). */
 app.post('/api/admin/purge-reserved-placeholders', requireAuth, requireAdmin, async (req, res) => {
   try {
     const localOnly =

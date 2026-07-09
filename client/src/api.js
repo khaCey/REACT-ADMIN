@@ -100,11 +100,12 @@ export const api = {
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
   purgeReservedPlaceholders: (body = {}) =>
     fetchApi('/admin/purge-reserved-placeholders', { method: 'POST', body: JSON.stringify(body) }),
-  getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', q = '', limit = 100, offset = 0 } = {}) => {
+  getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', month = '', q = '', limit = 100, offset = 0 } = {}) => {
     const params = new URLSearchParams()
     if (studentId !== '' && studentId != null) params.set('studentId', String(studentId))
     if (syncStatus) params.set('syncStatus', String(syncStatus))
     if (status) params.set('status', String(status))
+    if (month) params.set('month', String(month))
     if (q) params.set('q', String(q))
     params.set('limit', String(limit))
     params.set('offset', String(offset))
