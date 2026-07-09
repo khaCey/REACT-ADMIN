@@ -27,7 +27,7 @@ import notesRouter from './routes/notes.js';
 import lessonsRouter from './routes/lessons.js';
 import dashboardRouter from './routes/dashboard.js';
 import configRouter from './routes/config.js';
-import scheduleRouter from './routes/schedule.js';
+import scheduleRouter, { purgeAllReservedPlaceholders } from './routes/schedule.js';
 import changeLogRouter from './routes/changeLog.js';
 import calendarRouter, { registerWatch } from './routes/calendar.js';
 import authRouter from './routes/auth.js';
@@ -668,6 +668,25 @@ app.delete('/api/admin/monthly-schedule/:eventId', requireAuth, requireAdmin, as
   } catch (err) {
     console.error('[admin/monthly-schedule:delete]', err.message);
     res.status(500).json({ error: err.message || 'Failed to delete monthly schedule row' });
+  }
+});
+
+/** Admin: purge all reserved placeholder lessons (Calendar + DB). */
+app.post('/api/admin/purge-reserved-placeholders', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const localOnly =
+      req.body?.localOnly === true || String(req.body?.localOnly || '').toLowerCase() === 'true';
+    const month = String(req.body?.month || '').trim();
+    if (month && !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM when provided' });
+    }
+
+    const result = await purgeAllReservedPlaceholders(req, { localOnly, month: month || undefined });
+    const status = result.ok ? 200 : result.batches_purged > 0 ? 207 : 502;
+    res.status(status).json(result);
+  } catch (err) {
+    console.error('[admin/purge-reserved-placeholders]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to purge reserved placeholders' });
   }
 });
 

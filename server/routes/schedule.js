@@ -3636,4 +3636,121 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
   }
 });
 
+/**
+ * Admin bulk purge: remove all reserved placeholder batches from Calendar (when enabled) and DB.
+ * @param {import('express').Request} req
+ * @param {{ localOnly?: boolean, month?: string }} [options]
+ */
+export async function purgeAllReservedPlaceholders(req, options = {}) {
+  const localOnly = options.localOnly === true;
+  const monthFilter = String(options.month || '').trim();
+
+  let sql = `SELECT * FROM monthly_schedule
+              WHERE LOWER(TRIM(COALESCE(status,''))) = 'reserved'`;
+  const params = [];
+  if (/^\d{4}-\d{2}$/.test(monthFilter)) {
+    params.push(monthFilter);
+    sql += ` AND to_char(date, 'YYYY-MM') = $1`;
+  }
+  sql += ` ORDER BY student_id NULLS LAST, date ASC, start ASC, event_id ASC`;
+
+  const allRows = (await query(sql, params)).rows || [];
+  if (allRows.length === 0) {
+    return {
+      ok: true,
+      batches_total: 0,
+      batches_purged: 0,
+      removed_row_count: 0,
+      removed_event_count: 0,
+      errors: [],
+    };
+  }
+
+  const processedRowKeys = new Set();
+  const batches = [];
+
+  for (const row of allRows) {
+    const rowKey = `${row.event_id}|${row.student_name}`;
+    if (processedRowKeys.has(rowKey)) continue;
+
+    const confirmMonth = scheduleRowDateToYyyyMmDd(row.date).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(confirmMonth)) continue;
+
+    const batchRows = await queryReservedBatchRows(row, confirmMonth);
+    if (batchRows.length === 0) continue;
+
+    for (const br of batchRows) {
+      processedRowKeys.add(`${br.event_id}|${br.student_name}`);
+    }
+    batches.push({ anchorRow: row, batchRows });
+  }
+
+  let removedRowCount = 0;
+  let removedEventCount = 0;
+  let batchesPurged = 0;
+  const errors = [];
+
+  for (const { anchorRow, batchRows } of batches) {
+    const batchLabel = {
+      event_id: String(anchorRow.event_id || '').trim(),
+      student_id: anchorRow.student_id ?? null,
+      student_name: anchorRow.student_name || null,
+    };
+
+    try {
+      if (!localOnly && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(batchRows)) {
+        const holdDel = await deleteReservedHoldFromCalendar(batchRows, anchorRow);
+        if (!holdDel.ok) {
+          errors.push({
+            ...batchLabel,
+            error: holdDel.error || 'Failed to delete reserved calendar events',
+          });
+          continue;
+        }
+      }
+
+      const eventIds = [
+        ...new Set(batchRows.map((r) => String(r.event_id || '').trim()).filter(Boolean)),
+      ];
+
+      for (const eid of eventIds) {
+        const rowsForEvent = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eid])).rows;
+        if (rowsForEvent.length === 0) continue;
+        await recordScheduleSlotDismissals(rowsForEvent);
+        await deleteAllMonthlyScheduleRowsAtLessonSlot(rowsForEvent);
+        await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eid]);
+        for (const oldRow of rowsForEvent) {
+          await logChange(
+            {
+              entityType: 'monthly_schedule',
+              entityKey: `${eid}_${oldRow.student_name}`,
+              action: 'delete',
+              oldData: oldRow,
+              newData: null,
+            },
+            req
+          );
+          removedRowCount += 1;
+        }
+        removedEventCount += 1;
+      }
+      batchesPurged += 1;
+    } catch (err) {
+      errors.push({
+        ...batchLabel,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    batches_total: batches.length,
+    batches_purged: batchesPurged,
+    removed_row_count: removedRowCount,
+    removed_event_count: removedEventCount,
+    errors,
+  };
+}
+
 export default router;

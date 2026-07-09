@@ -65,6 +65,11 @@ export default function Admin() {
   const [monthlyTotal, setMonthlyTotal] = useState(0)
   const [pendingMonthlyDelete, setPendingMonthlyDelete] = useState(null)
   const [deletingMonthlyRow, setDeletingMonthlyRow] = useState(false)
+  const [reservedPlaceholderCount, setReservedPlaceholderCount] = useState(null)
+  const [reservedCountLoading, setReservedCountLoading] = useState(true)
+  const [purgeReservedConfirmOpen, setPurgeReservedConfirmOpen] = useState(false)
+  const [purgingReserved, setPurgingReserved] = useState(false)
+  const [purgeReservedError, setPurgeReservedError] = useState('')
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -117,6 +122,22 @@ export default function Admin() {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
   }, [])
 
+  const loadReservedPlaceholderCount = useCallback(async () => {
+    setReservedCountLoading(true)
+    try {
+      const res = await api.getAdminMonthlyScheduleEntries({ status: 'reserved', limit: 1, offset: 0 })
+      setReservedPlaceholderCount(Number(res?.total) || 0)
+    } catch {
+      setReservedPlaceholderCount(null)
+    } finally {
+      setReservedCountLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadReservedPlaceholderCount()
+  }, [loadReservedPlaceholderCount])
+
   const loadMonthlyRows = useCallback(async (nextOffset = 0, { silent = false } = {}) => {
     if (silent) setMonthlyRefreshing(true)
     else setMonthlyLoading(true)
@@ -148,6 +169,36 @@ export default function Admin() {
   useEffect(() => {
     loadMonthlyRows(0)
   }, [loadMonthlyRows])
+
+  const handlePurgeReservedConfirm = async () => {
+    setPurgingReserved(true)
+    setPurgeReservedError('')
+    try {
+      const result = await api.purgeReservedPlaceholders()
+      const purged = result?.batches_purged ?? 0
+      const rows = result?.removed_row_count ?? 0
+      const failed = Array.isArray(result?.errors) ? result.errors.length : 0
+      if (failed > 0) {
+        setPurgeReservedError(
+          `Purged ${purged} batch(es), ${rows} row(s). ${failed} batch(es) failed — check server logs or retry.`
+        )
+        success(`Partial purge: ${purged} batch(es), ${rows} row(s) removed.`)
+      } else {
+        success(
+          rows > 0
+            ? `Purged ${purged} reserved batch(es), ${rows} row(s) removed.`
+            : 'No reserved placeholders to purge.'
+        )
+        setPurgeReservedConfirmOpen(false)
+      }
+      await loadReservedPlaceholderCount()
+      await loadMonthlyRows(monthlyOffset, { silent: true })
+    } catch (err) {
+      setPurgeReservedError(err.message || 'Failed to purge reserved placeholders')
+    } finally {
+      setPurgingReserved(false)
+    }
+  }
 
   const handleCreateBackup = async () => {
     setBackupError('')
@@ -735,6 +786,49 @@ export default function Admin() {
           </div>
         </section>
 
+        <section className="rounded-lg border border-cyan-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
+            <Trash2 className="w-5 h-5 text-cyan-700" />
+            Purge reserved placeholders
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Remove all yellow <code className="bg-gray-100 px-1 rounded">reserved</code> holds from Google
+            Calendar and <code className="bg-gray-100 px-1 rounded">monthly_schedule</code>. Each recurring
+            batch is deleted as a unit (same as removing a reserved lesson from the schedule UI).
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <span className="text-sm text-gray-700">
+              {reservedCountLoading
+                ? 'Counting reserved rows…'
+                : reservedPlaceholderCount == null
+                  ? 'Could not load reserved count'
+                  : `${reservedPlaceholderCount} reserved row(s) in database`}
+            </span>
+            <button
+              type="button"
+              onClick={loadReservedPlaceholderCount}
+              disabled={reservedCountLoading}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              {reservedCountLoading ? <LoadingSpinner size="xs" /> : <RefreshCw className="w-4 h-4" />}
+              Refresh count
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPurgeReservedError('')
+                setPurgeReservedConfirmOpen(true)
+              }}
+              disabled={purgingReserved || reservedCountLoading || reservedPlaceholderCount === 0}
+              className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {purgingReserved ? <LoadingSpinner size="xs" /> : <Trash2 className="w-4 h-4" />}
+              {purgingReserved ? 'Purging…' : 'Purge all reserved'}
+            </button>
+          </div>
+          {purgeReservedError && <p className="text-sm text-red-600">{purgeReservedError}</p>}
+        </section>
+
         <section className="rounded-lg border border-rose-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
             <Trash2 className="w-5 h-5 text-rose-600" />
@@ -802,6 +896,17 @@ export default function Admin() {
           confirming={deletingMonthlyRow}
           onConfirm={handleMonthlyDeleteConfirm}
           onClose={() => !deletingMonthlyRow && setPendingMonthlyDelete(null)}
+        />
+      )}
+      {purgeReservedConfirmOpen && (
+        <ConfirmActionModal
+          title="Purge reserved placeholders"
+          message={`This will delete all reserved placeholder batches from Google Calendar and the database (${reservedPlaceholderCount ?? 'unknown'} row(s) currently). This cannot be undone. Continue?`}
+          confirmLabel="Purge all reserved"
+          destructive
+          confirming={purgingReserved}
+          onConfirm={handlePurgeReservedConfirm}
+          onClose={() => !purgingReserved && setPurgeReservedConfirmOpen(false)}
         />
       )}
     </div>

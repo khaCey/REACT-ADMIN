@@ -98,6 +98,8 @@ export const api = {
   },
   clearTable: (table) =>
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
+  purgeReservedPlaceholders: (body = {}) =>
+    fetchApi('/admin/purge-reserved-placeholders', { method: 'POST', body: JSON.stringify(body) }),
   getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', q = '', limit = 100, offset = 0 } = {}) => {
     const params = new URLSearchParams()
     if (studentId !== '' && studentId != null) params.set('studentId', String(studentId))
