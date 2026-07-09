@@ -136,7 +136,7 @@ export default function PaymentModal({ studentId, student, mode = 'add', payment
   const handleLessonsChange = (val) => {
     const n = Number(val) || 0
     if (n > 0 && student) {
-      const ratePerLesson = calculatePrice(n, student.Payment || 'NEO', student.Group || 'Single', student.人数 || 2, '4x')
+      const ratePerLesson = calculatePrice(n, student.Payment || 'NEO', student.Group || 'Single', student.人数 || 2)
       const totalPrice = n * ratePerLesson
       setForm((f) => ({ ...f, lessons: val, price: String(totalPrice) }))
     } else {

@@ -41,8 +41,16 @@ export const feeTable = {
   },
 };
 
-export function calculatePrice(lessonsCount, paymentType = 'Neo', groupType = 'Single', groupSize = 2, frequency = '4x') {
-  const freq = lessonsCount <= 2 ? '2x' : lessonsCount <= 4 ? '4x' : '8x';
+/** 2 / 4 / 8 lessons per month are minimum thresholds for each discounted per-lesson rate. */
+export function frequencyTierFromLessonCount(lessonsCount) {
+  const n = Number(lessonsCount) || 0;
+  if (n >= 8) return '8x';
+  if (n >= 4) return '4x';
+  return '2x';
+}
+
+export function calculatePrice(lessonsCount, paymentType = 'Neo', groupType = 'Single', groupSize = 2) {
+  const freq = frequencyTierFromLessonCount(lessonsCount);
   const payNorm = String(paymentType || '').trim();
   const ownerPayment = /owner'?s?\s*(lesson|course)/i.test(payNorm);
   if (ownerPayment) {
