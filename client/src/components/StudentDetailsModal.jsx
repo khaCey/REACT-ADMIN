@@ -360,7 +360,11 @@ export default function StudentDetailsModal({
         {!loading && !error && student && (
           <ModalErrorBoundary>
           <>
-            <div className="flex items-start justify-between bg-green-600 text-white px-4 py-2 flex-shrink-0">
+            <div
+              className={`flex items-start justify-between text-white px-4 py-2 flex-shrink-0 ${
+                student.Status === HIATUS_STATUS ? 'bg-amber-600' : 'bg-green-600'
+              }`}
+            >
               <div className="min-w-0 pr-4">
                 <h2 className="text-lg sm:text-xl font-semibold truncate">
                   {student.Name}
@@ -378,26 +382,6 @@ export default function StudentDetailsModal({
                     )}
                   </span>
                 </p>
-                {student.Status === HIATUS_STATUS && (
-                  <p className="text-white/90 text-xs mt-1">
-                    再開予定:{' '}
-                    {(() => {
-                      const iso = student.HiatusExpectedReturn
-                      if (!iso) return '未定'
-                      const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
-                      if (m) return `${m[2]}/${m[1]}`
-                      return '未定'
-                    })()}
-                    {student.HiatusContacted ? ' · 連絡済' : ''}
-                    <button
-                      type="button"
-                      className="ml-2 underline hover:text-white cursor-pointer"
-                      onClick={() => window.dispatchEvent(new CustomEvent('student-admin:open-hiatus-list'))}
-                    >
-                      Open 休会中 list
-                    </button>
-                  </p>
-                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {student.Group === 'Group' && <span className="badge bg-purple-600 text-white">Group</span>}
