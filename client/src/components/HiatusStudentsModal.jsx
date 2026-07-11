@@ -142,7 +142,7 @@ export default function HiatusStudentsModal({ onClose }) {
                     <th className="px-3 py-2 text-left font-semibold">Student</th>
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
                     <th className="px-3 py-2 text-left font-semibold">再開予定</th>
-                    <th className="px-3 py-2 text-center font-semibold">Contacted</th>
+                    <th className="px-3 py-2 text-center font-semibold">連絡</th>
                     <th className="px-3 py-2 text-center font-semibold">再会</th>
                     <th className="px-3 py-2 text-right font-semibold">Action</th>
                   </tr>
@@ -180,7 +180,7 @@ export default function HiatusStudentsModal({ onClose }) {
                             checked={!!s.HiatusContacted}
                             disabled={rowBusy}
                             onChange={(e) => handleContactedChange(s, e.target.checked)}
-                            aria-label={`Contacted ${s.Name}`}
+                            aria-label={`連絡 ${s.Name}`}
                           />
                         </td>
                         <td className="px-3 py-2 text-center">

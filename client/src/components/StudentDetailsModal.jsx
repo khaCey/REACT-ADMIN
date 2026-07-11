@@ -388,7 +388,7 @@ export default function StudentDetailsModal({
                       if (m) return `${m[2]}/${m[1]}`
                       return '未定'
                     })()}
-                    {student.HiatusContacted ? ' · Contacted' : ''}
+                    {student.HiatusContacted ? ' · 連絡済' : ''}
                     <button
                       type="button"
                       className="ml-2 underline hover:text-white cursor-pointer"
