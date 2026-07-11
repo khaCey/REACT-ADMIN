@@ -487,7 +487,7 @@ export default function Admin() {
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
             >
               <option value="">— Select staff —</option>
-              {staffList.filter((s) => s.calendar_id).map((s) => (
+              {staffList.filter((s) => s.calendar_id && s.active !== false).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>

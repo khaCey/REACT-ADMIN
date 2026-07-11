@@ -1166,7 +1166,7 @@ export default function Staff() {
                 >
                   <option value="">Teacher</option>
                   {staffList
-                    .filter((s) => s?.staff_type === 'english_teacher')
+                    .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
                     .map((s) => (
                       <option key={s.id} value={s.name}>{s.name}</option>
                     ))}

@@ -163,6 +163,7 @@ router.get('/staff', async (req, res) => {
     const result = await query(
       `SELECT id, name
        FROM staff
+       WHERE active = TRUE
        ORDER BY name ASC`
     );
 
