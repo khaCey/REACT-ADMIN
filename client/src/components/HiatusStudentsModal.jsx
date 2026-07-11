@@ -202,7 +202,7 @@ export default function HiatusStudentsModal({ onClose }) {
             <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
               <div className="flex items-center space-x-3">
                 <div className="flex-shrink-0 w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                  <PauseCircle className="w-5 h-5 text-green-600" />
+                  <Coffee className="w-5 h-5 text-green-600" />
                 </div>
                 <div>
                   <h4 className="text-lg font-medium text-gray-900">Temporary break from lessons</h4>
