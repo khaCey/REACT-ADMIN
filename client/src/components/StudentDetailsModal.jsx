@@ -13,7 +13,7 @@ import BookLessonModal from './BookLessonModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import GroupLinkModal from './GroupLinkModal'
-import StudentStatusBadge, { HIATUS_STATUS } from './StudentStatusBadge'
+import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
 
 class ModalErrorBoundary extends Component {
@@ -360,11 +360,7 @@ export default function StudentDetailsModal({
         {!loading && !error && student && (
           <ModalErrorBoundary>
           <>
-            <div
-              className={`flex items-start justify-between text-white px-4 py-2 flex-shrink-0 ${
-                student.Status === HIATUS_STATUS ? 'bg-amber-600' : 'bg-green-600'
-              }`}
-            >
+            <div className="flex items-start justify-between bg-green-600 text-white px-4 py-2 flex-shrink-0">
               <div className="min-w-0 pr-4">
                 <h2 className="text-lg sm:text-xl font-semibold truncate">
                   {student.Name}
