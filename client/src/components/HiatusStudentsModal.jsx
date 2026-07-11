@@ -98,7 +98,7 @@ export default function HiatusStudentsModal({ onClose }) {
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto">
         <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh]">
           {loading && <ModalLoadingOverlay className="rounded-2xl" />}
-          <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-amber-600 text-white rounded-t-2xl">
+          <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-green-600 text-white rounded-t-2xl">
             <h3 id="hiatusModalTitle" className="text-lg font-semibold">休会中 — Students on break</h3>
             <button
               type="button"
@@ -111,8 +111,8 @@ export default function HiatusStudentsModal({ onClose }) {
           <div className="p-6 flex flex-col flex-1 min-h-0">
             <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
               <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                  <PauseCircle className="w-5 h-5 text-amber-700" />
+                <div className="flex-shrink-0 w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <PauseCircle className="w-5 h-5 text-green-600" />
                 </div>
                 <div>
                   <h4 className="text-lg font-medium text-gray-900">Temporary break from lessons</h4>
@@ -134,7 +134,7 @@ export default function HiatusStudentsModal({ onClose }) {
 
             <div className="relative overflow-auto max-h-[50vh] w-full rounded-xl border border-black/5 bg-white shadow-sm flex-1 min-h-0">
               <table className="min-w-full border-separate border-spacing-0">
-                <thead className="sticky top-0 bg-amber-600 text-white shadow z-10">
+                <thead className="sticky top-0 bg-green-600 text-white shadow z-10">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Student</th>
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
@@ -210,7 +210,7 @@ export default function HiatusStudentsModal({ onClose }) {
             {!loading && (
               <div className="mt-4 text-sm text-gray-600">
                 <span className="font-medium">Total on break: </span>
-                <span className="font-semibold text-amber-700">{list.length}</span>
+                <span className="font-semibold text-green-700">{list.length}</span>
               </div>
             )}
           </div>

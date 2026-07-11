@@ -55,7 +55,7 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
             type="button"
             disabled={submitting}
             onClick={() => onConfirm(expectedReturn.trim() || null)}
-            className="rounded-md bg-amber-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
+            className="rounded-md bg-green-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-green-700 cursor-pointer disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Mark on break'}
           </button>

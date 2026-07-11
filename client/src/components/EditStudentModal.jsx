@@ -231,7 +231,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
                   <span>Status</span>
                 </label>
                 {onHiatus ? (
-                  <div className="w-full rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+                  <div className="w-full rounded-md border border-green-200 bg-green-50 px-3 py-2 text-green-900 text-sm">
                     休会中 — use the 休会中 list or student details to change break status.
                   </div>
                 ) : (

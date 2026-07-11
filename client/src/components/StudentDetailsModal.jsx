@@ -379,7 +379,7 @@ export default function StudentDetailsModal({
                   </span>
                 </p>
                 {student.Status === HIATUS_STATUS && (
-                  <p className="text-amber-100 text-xs mt-1">
+                  <p className="text-white/90 text-xs mt-1">
                     再開予定:{' '}
                     {(() => {
                       const iso = student.HiatusExpectedReturn
@@ -614,7 +614,7 @@ export default function StudentDetailsModal({
                   <button
                     type="button"
                     onClick={() => setMarkHiatusOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-green-600 bg-white px-3 py-1.5 text-sm font-semibold text-green-700 hover:bg-green-50 cursor-pointer"
                   >
                     Mark on break (休会中)
                   </button>

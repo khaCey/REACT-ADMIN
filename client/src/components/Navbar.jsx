@@ -209,7 +209,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             <button
               type="button"
               onClick={onOpenHiatus}
-              className="px-4 py-2 border border-white text-white rounded-lg hover:bg-white hover:text-amber-700 transition-colors flex items-center space-x-2 cursor-pointer"
+              className="px-4 py-2 border border-white text-white rounded-lg hover:bg-white hover:text-green-600 transition-colors flex items-center space-x-2 cursor-pointer"
             >
               <PauseCircle className="w-4 h-4" />
               <span>休会中</span>
