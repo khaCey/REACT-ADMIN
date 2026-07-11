@@ -163,14 +163,13 @@ export default function HiatusStudentsModal({ onClose }) {
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
                     <th className="px-3 py-2 text-left font-semibold">再開予定</th>
                     <th className="px-3 py-2 text-center font-semibold">連絡</th>
-                    <th className="px-3 py-2 text-center font-semibold">再会</th>
                     <th className="px-3 py-2 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && list.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
+                      <td colSpan={5} className="px-3 py-8 text-center text-gray-500">
                         No students on break ({HIATUS_STATUS}).
                       </td>
                     </tr>
@@ -226,26 +225,25 @@ export default function HiatusStudentsModal({ onClose }) {
                             aria-label={`連絡 ${s.Name}`}
                           />
                         </td>
-                        <td className="px-3 py-2 text-center">
-                          <button
-                            type="button"
-                            disabled={rowBusy}
-                            onClick={() => handleReturned(s)}
-                            className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 cursor-pointer disabled:opacity-50"
-                            title="Set Active"
-                          >
-                            再会
-                          </button>
-                        </td>
                         <td className="px-3 py-2 text-right">
-                          <button
-                            type="button"
-                            disabled={rowBusy}
-                            onClick={() => setDormantTarget(s)}
-                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
-                          >
-                            Set Dormant
-                          </button>
+                          <div className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={rowBusy}
+                              onClick={() => handleReturned(s)}
+                              className="rounded-md border border-green-600 bg-white px-2.5 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-50"
+                            >
+                              Set Active
+                            </button>
+                            <button
+                              type="button"
+                              disabled={rowBusy}
+                              onClick={() => setDormantTarget(s)}
+                              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                            >
+                              Set Dormant
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
