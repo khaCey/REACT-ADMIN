@@ -43,6 +43,7 @@ const FIELD_LABELS = {
   status: 'Status',
   hiatus_contacted: 'Hiatus contacted',
   hiatus_expected_return: 'Hiatus expected return',
+  hiatus_otsukisha: 'お月謝',
   payment: 'Payment',
   group_type: 'Group',
   group_size: '人数',

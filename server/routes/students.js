@@ -48,6 +48,7 @@ function mapStudentRow(r) {
     google_contact_linked: Boolean(r.google_contact_resource_name),
     HiatusContacted: !!r.hiatus_contacted,
     HiatusExpectedReturn: formatDateColumn(r.hiatus_expected_return),
+    HiatusOtsukisha: !!r.hiatus_otsukisha,
   };
 }
 
@@ -437,6 +438,7 @@ router.put('/:id', async (req, res) => {
         is_child = COALESCE($12, is_child),
         hiatus_contacted = CASE WHEN $13 THEN FALSE ELSE hiatus_contacted END,
         hiatus_expected_return = CASE WHEN $13 THEN NULL ELSE hiatus_expected_return END,
+        hiatus_otsukisha = CASE WHEN $13 THEN FALSE ELSE hiatus_otsukisha END,
         updated_at = NOW()
        WHERE id = $1`,
       [
@@ -500,6 +502,7 @@ router.patch('/:id/hiatus', async (req, res) => {
         `UPDATE students SET
           status = $2,
           hiatus_contacted = FALSE,
+          hiatus_otsukisha = FALSE,
           hiatus_expected_return = $3,
           updated_at = NOW()
          WHERE id = $1`,
@@ -515,6 +518,12 @@ router.patch('/:id/hiatus', async (req, res) => {
       if (body.contacted !== undefined) {
         updates.push(`hiatus_contacted = $${idx}`);
         params.push(!!body.contacted);
+        idx += 1;
+      }
+      if (body.otsukisha !== undefined || body.お月謝 !== undefined) {
+        const raw = body.otsukisha !== undefined ? body.otsukisha : body.お月謝;
+        updates.push(`hiatus_otsukisha = $${idx}`);
+        params.push(!!raw);
         idx += 1;
       }
       if (body.expected_return !== undefined || body.expectedReturn !== undefined) {
@@ -538,6 +547,7 @@ router.patch('/:id/hiatus', async (req, res) => {
         `UPDATE students SET
           status = 'Active',
           hiatus_contacted = FALSE,
+          hiatus_otsukisha = FALSE,
           hiatus_expected_return = NULL,
           updated_at = NOW()
          WHERE id = $1`,
@@ -551,6 +561,7 @@ router.patch('/:id/hiatus', async (req, res) => {
         `UPDATE students SET
           status = 'Dormant',
           hiatus_contacted = FALSE,
+          hiatus_otsukisha = FALSE,
           hiatus_expected_return = NULL,
           updated_at = NOW()
          WHERE id = $1`,

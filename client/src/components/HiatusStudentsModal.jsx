@@ -142,6 +142,10 @@ export default function HiatusStudentsModal({ onClose }) {
     runHiatusAction(student.ID, { action: 'update', contacted: checked })
   }
 
+  const handleOtsukishaChange = (student, checked) => {
+    runHiatusAction(student.ID, { action: 'update', otsukisha: checked })
+  }
+
   const handleExpectedReturnChange = (student, monthValue) => {
     const next = monthValue ? `${monthValue}-01` : null
     const prev = student.HiatusExpectedReturn
@@ -226,13 +230,14 @@ export default function HiatusStudentsModal({ onClose }) {
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
                     <th className="px-3 py-2 text-left font-semibold">再開予定</th>
                     <th className="px-3 py-2 text-center font-semibold">連絡</th>
+                    <th className="px-3 py-2 text-center font-semibold">お月謝</th>
                     <th className="px-3 py-2 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && list.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-gray-500">
+                      <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
                         No students on break ({HIATUS_STATUS}).
                       </td>
                     </tr>
@@ -267,6 +272,16 @@ export default function HiatusStudentsModal({ onClose }) {
                             disabled={rowBusy}
                             onChange={(e) => handleContactedChange(s, e.target.checked)}
                             aria-label={`連絡 ${s.Name}`}
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 cursor-pointer disabled:opacity-50"
+                            checked={!!s.HiatusOtsukisha}
+                            disabled={rowBusy}
+                            onChange={(e) => handleOtsukishaChange(s, e.target.checked)}
+                            aria-label={`お月謝 ${s.Name}`}
                           />
                         </td>
                         <td className="px-3 py-2 text-right">
