@@ -72,9 +72,12 @@ export default function HiatusStudentsModal({ onClose }) {
     runHiatusAction(student.ID, { action: 'update', contacted: checked })
   }
 
-  const handleReturnedChange = async (student, checked) => {
-    if (!checked) return
-    await runHiatusAction(student.ID, { action: 'returned' }, `${student.Name || 'Student'} marked as returned (Active)`)
+  const handleReturned = async (student) => {
+    await runHiatusAction(
+      student.ID,
+      { action: 'returned' },
+      `${student.Name || 'Student'} set to Active (再会)`
+    )
   }
 
   const handleDormantConfirm = async () => {
@@ -140,7 +143,7 @@ export default function HiatusStudentsModal({ onClose }) {
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
                     <th className="px-3 py-2 text-left font-semibold">再開予定</th>
                     <th className="px-3 py-2 text-center font-semibold">Contacted</th>
-                    <th className="px-3 py-2 text-center font-semibold">Came back</th>
+                    <th className="px-3 py-2 text-center font-semibold">再会</th>
                     <th className="px-3 py-2 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
@@ -181,14 +184,15 @@ export default function HiatusStudentsModal({ onClose }) {
                           />
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300 cursor-pointer disabled:opacity-50"
-                            checked={false}
+                          <button
+                            type="button"
                             disabled={rowBusy}
-                            onChange={(e) => handleReturnedChange(s, e.target.checked)}
-                            aria-label={`Came back ${s.Name}`}
-                          />
+                            onClick={() => handleReturned(s)}
+                            className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 cursor-pointer disabled:opacity-50"
+                            title="Set Active"
+                          >
+                            再会
+                          </button>
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
