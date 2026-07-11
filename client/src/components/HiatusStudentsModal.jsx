@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { PauseCircle, RefreshCw } from 'lucide-react'
+import { Coffee, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { HIATUS_STATUS } from './StudentStatusBadge'
 import StudentDetailsModal from './StudentDetailsModal'

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, AlertCircle, Calendar, LogOut, Bell, PauseCircle } from 'lucide-react'
+import { Menu, AlertCircle, Calendar, LogOut, Bell, Coffee } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
