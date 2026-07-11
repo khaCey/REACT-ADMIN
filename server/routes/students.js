@@ -5,6 +5,31 @@ import { isStudentGasSyncEnabled, syncStudentToGas } from '../lib/studentContact
 
 const router = Router();
 
+export const HIATUS_STATUS = '休会中';
+
+function formatDateColumn(val) {
+  if (val == null || val === '') return null;
+  if (val instanceof Date && !Number.isNaN(val.getTime())) {
+    return val.toISOString().slice(0, 10);
+  }
+  const s = String(val).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+function parseOptionalDateInput(val) {
+  if (val === null || val === undefined || val === '') return { date: null };
+  const s = String(val).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return { error: 'expected_return must be YYYY-MM-DD' };
+  }
+  return { date: s };
+}
+
+function isOnHiatus(row) {
+  return String(row?.status || '').trim() === HIATUS_STATUS;
+}
+
 function mapStudentRow(r) {
   return {
     ID: r.id,
@@ -21,6 +46,8 @@ function mapStudentRow(r) {
     子: r.is_child ? '子' : '',
     is_child: !!r.is_child,
     google_contact_linked: Boolean(r.google_contact_resource_name),
+    HiatusContacted: !!r.hiatus_contacted,
+    HiatusExpectedReturn: formatDateColumn(r.hiatus_expected_return),
   };
 }
 
@@ -88,6 +115,21 @@ router.get('/', async (req, res) => {
     );
     const students = result.rows.map(mapStudentRow);
     res.json(students);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Students currently on break (休会中). */
+router.get('/hiatus', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT * FROM students
+        WHERE TRIM(COALESCE(status, '')) = $1
+        ORDER BY hiatus_expected_return NULLS LAST, name ASC NULLS LAST, id ASC`,
+      [HIATUS_STATUS]
+    );
+    res.json((result.rows || []).map(mapStudentRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -368,10 +410,18 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Student not found' });
     }
     const oldRow = oldResult.rows[0];
+    const nextStatus = body.Status ?? body.status;
+    if (nextStatus != null && String(nextStatus).trim() === HIATUS_STATUS) {
+      return res.status(400).json({
+        error: 'Use PATCH /students/:id/hiatus to mark a student on break (休会中).',
+      });
+    }
     let isChildParam = undefined;
     if (typeof body.is_child === 'boolean') isChildParam = body.is_child;
     else if (body.子 === '子') isChildParam = true;
     else if (body.子 === '') isChildParam = false;
+    const resolvedStatus = body.Status ?? body.status ?? oldRow.status;
+    const clearHiatus = String(resolvedStatus).trim() !== HIATUS_STATUS;
     await query(
       `UPDATE students SET
         name = COALESCE($2, name),
@@ -385,6 +435,8 @@ router.put('/:id', async (req, res) => {
         group_type = COALESCE($10, group_type),
         group_size = COALESCE($11, group_size),
         is_child = COALESCE($12, is_child),
+        hiatus_contacted = CASE WHEN $13 THEN FALSE ELSE hiatus_contacted END,
+        hiatus_expected_return = CASE WHEN $13 THEN NULL ELSE hiatus_expected_return END,
         updated_at = NOW()
        WHERE id = $1`,
       [
@@ -400,6 +452,7 @@ router.put('/:id', async (req, res) => {
         body.Group ?? body.group_type,
         body.人数 ?? body.group_size,
         isChildParam,
+        clearHiatus,
       ]
     );
     const newRow = (await query('SELECT * FROM students WHERE id = $1', [id])).rows[0] || oldRow;
@@ -416,6 +469,107 @@ router.put('/:id', async (req, res) => {
       req
     );
     res.json({ ok: true, googleContactSync });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Hiatus (休会中) lifecycle: start, update flags, return to Active, or move to Dormant. */
+router.patch('/:id/hiatus', async (req, res) => {
+  try {
+    const studentId = Number(req.params.id);
+    if (!Number.isFinite(studentId) || !Number.isInteger(studentId) || studentId < 0) {
+      return res.status(400).json({ error: 'Invalid student id' });
+    }
+    const body = req.body || {};
+    const action = String(body.action || '').trim().toLowerCase();
+    if (!['start', 'update', 'returned', 'dormant'].includes(action)) {
+      return res.status(400).json({ error: 'action must be start, update, returned, or dormant' });
+    }
+
+    const oldResult = await query('SELECT * FROM students WHERE id = $1', [studentId]);
+    if (oldResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    const oldRow = oldResult.rows[0];
+
+    if (action === 'start') {
+      const parsed = parseOptionalDateInput(body.expected_return ?? body.expectedReturn);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      await query(
+        `UPDATE students SET
+          status = $2,
+          hiatus_contacted = FALSE,
+          hiatus_expected_return = $3,
+          updated_at = NOW()
+         WHERE id = $1`,
+        [studentId, HIATUS_STATUS, parsed.date]
+      );
+    } else if (action === 'update') {
+      if (!isOnHiatus(oldRow)) {
+        return res.status(400).json({ error: 'Student is not on break (休会中)' });
+      }
+      const updates = [];
+      const params = [studentId];
+      let idx = 2;
+      if (body.contacted !== undefined) {
+        updates.push(`hiatus_contacted = $${idx}`);
+        params.push(!!body.contacted);
+        idx += 1;
+      }
+      if (body.expected_return !== undefined || body.expectedReturn !== undefined) {
+        const raw = body.expected_return !== undefined ? body.expected_return : body.expectedReturn;
+        const parsed = parseOptionalDateInput(raw);
+        if (parsed.error) return res.status(400).json({ error: parsed.error });
+        updates.push(`hiatus_expected_return = $${idx}`);
+        params.push(parsed.date);
+        idx += 1;
+      }
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'No hiatus fields to update' });
+      }
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE students SET ${updates.join(', ')} WHERE id = $1`, params);
+    } else if (action === 'returned') {
+      if (!isOnHiatus(oldRow)) {
+        return res.status(400).json({ error: 'Student is not on break (休会中)' });
+      }
+      await query(
+        `UPDATE students SET
+          status = 'Active',
+          hiatus_contacted = FALSE,
+          hiatus_expected_return = NULL,
+          updated_at = NOW()
+         WHERE id = $1`,
+        [studentId]
+      );
+    } else if (action === 'dormant') {
+      if (!isOnHiatus(oldRow)) {
+        return res.status(400).json({ error: 'Student is not on break (休会中)' });
+      }
+      await query(
+        `UPDATE students SET
+          status = 'Dormant',
+          hiatus_contacted = FALSE,
+          hiatus_expected_return = NULL,
+          updated_at = NOW()
+         WHERE id = $1`,
+        [studentId]
+      );
+    }
+
+    const newRow = (await query('SELECT * FROM students WHERE id = $1', [studentId])).rows[0];
+    await logChange(
+      {
+        entityType: 'students',
+        entityKey: String(studentId),
+        action: 'update',
+        oldData: oldRow,
+        newData: newRow,
+      },
+      req
+    );
+    res.json({ ok: true, student: mapStudentRow(newRow) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

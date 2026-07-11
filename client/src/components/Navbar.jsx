@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, AlertCircle, Calendar, LogOut, Bell } from 'lucide-react'
+import { Menu, AlertCircle, Calendar, LogOut, Bell, PauseCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
@@ -12,7 +12,7 @@ import { resolveGuideSlug } from '../guides/resolveGuideSlug'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
-export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
+export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled, onOpenHiatus }) {
   const { staff, logout } = useAuth()
   const { success } = useToast()
   const { startGuideBySlug } = useGuideTour()
@@ -203,6 +203,16 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
             >
               <Calendar className="w-4 h-4" />
               <span>未定</span>
+            </button>
+          )}
+          {onOpenHiatus && (
+            <button
+              type="button"
+              onClick={onOpenHiatus}
+              className="px-4 py-2 border border-white text-white rounded-lg hover:bg-white hover:text-amber-700 transition-colors flex items-center space-x-2 cursor-pointer"
+            >
+              <PauseCircle className="w-4 h-4" />
+              <span>休会中</span>
             </button>
           )}
           {staff && (

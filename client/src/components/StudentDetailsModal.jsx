@@ -13,16 +13,8 @@ import BookLessonModal from './BookLessonModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import GroupLinkModal from './GroupLinkModal'
-
-function StatusBadge({ status }) {
-  const cls =
-    status === 'Active'
-      ? 'badge-status-active'
-      : status === 'Dormant'
-        ? 'badge-status-dormant'
-        : 'badge-status-demo'
-  return <span className={`badge ${cls}`}>{status || 'Active'}</span>
-}
+import StudentStatusBadge, { HIATUS_STATUS } from './StudentStatusBadge'
+import MarkHiatusModal from './MarkHiatusModal'
 
 class ModalErrorBoundary extends Component {
   state = { hasError: false, error: null }
@@ -77,6 +69,8 @@ export default function StudentDetailsModal({
   const [optimisticScheduleMutations, setOptimisticScheduleMutations] = useState([])
   const [noteSearch, setNoteSearch] = useState('')
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
+  const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
+  const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -306,6 +300,24 @@ export default function StudentDetailsModal({
     await fetchData({ silent: true })
   }, [fetchData, studentId, success])
 
+  const handleMarkHiatusConfirm = useCallback(async (expectedReturn) => {
+    setMarkHiatusSubmitting(true)
+    try {
+      await api.patchStudentHiatus(studentId, {
+        action: 'start',
+        ...(expectedReturn ? { expected_return: expectedReturn } : {}),
+      })
+      success('Student marked on break (休会中)')
+      setMarkHiatusOpen(false)
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to mark on break')
+    } finally {
+      setMarkHiatusSubmitting(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
+
   useEffect(() => {
     if (studentId == null) return
     const onKey = (e) => e.key === 'Escape' && onClose()
@@ -366,11 +378,24 @@ export default function StudentDetailsModal({
                     )}
                   </span>
                 </p>
+                {student.Status === HIATUS_STATUS && (
+                  <p className="text-amber-100 text-xs mt-1">
+                    Expected return: {student.HiatusExpectedReturn || '—'}
+                    {student.HiatusContacted ? ' · Contacted' : ''}
+                    <button
+                      type="button"
+                      className="ml-2 underline hover:text-white cursor-pointer"
+                      onClick={() => window.dispatchEvent(new CustomEvent('student-admin:open-hiatus-list'))}
+                    >
+                      Open 休会中 list
+                    </button>
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {student.Group === 'Group' && <span className="badge bg-purple-600 text-white">Group</span>}
                 {(student.Payment || '').toLowerCase().includes('owner') && <span className="badge bg-black text-white">Owner</span>}
-                <StatusBadge status={student.Status} />
+                <StudentStatusBadge status={student.Status} />
                 <button
                   onClick={onClose}
                   className="p-1 rounded hover:bg-white/20 cursor-pointer"
@@ -578,6 +603,15 @@ export default function StudentDetailsModal({
                     Manage Group Members
                   </button>
                 )}
+                {(student?.Status === 'Active' || student?.Status === 'Dormant') && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkHiatusOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-50 cursor-pointer"
+                  >
+                    Mark on break (休会中)
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
@@ -695,6 +729,14 @@ export default function StudentDetailsModal({
         }}
         onSave={handleSaveGroupLesson}
         onUnlink={handleUnlinkGroupLesson}
+      />
+    )}
+    {markHiatusOpen && student && (
+      <MarkHiatusModal
+        studentName={student.Name}
+        submitting={markHiatusSubmitting}
+        onClose={() => !markHiatusSubmitting && setMarkHiatusOpen(false)}
+        onConfirm={handleMarkHiatusConfirm}
       />
     )}
     </>,

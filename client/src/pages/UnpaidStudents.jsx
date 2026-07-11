@@ -4,15 +4,7 @@ import { api } from '../api'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import FullPageLoading from '../components/FullPageLoading'
 
-function StatusBadge({ status }) {
-  const cls =
-    status === 'Active'
-      ? 'badge-status-active'
-      : status === 'Dormant'
-        ? 'badge-status-dormant'
-        : 'badge-status-demo'
-  return <span className={`badge ${cls}`}>{status || 'Active'}</span>
-}
+import StudentStatusBadge from '../components/StudentStatusBadge'
 
 export default function UnpaidStudents() {
   const [students, setStudents] = useState([])
@@ -86,7 +78,7 @@ export default function UnpaidStudents() {
                     <td className="text-left px-3 py-2">{s.Email}</td>
                     <td className="text-left px-3 py-2">{s.Phone}</td>
                     <td className="text-center px-3 py-2">
-                      <StatusBadge status={s.Status} />
+                      <StudentStatusBadge status={s.Status} />
                     </td>
                   </tr>
                 ))}

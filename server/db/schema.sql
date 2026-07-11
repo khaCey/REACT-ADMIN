@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS students (
 
 -- Existing DBs (before this column existed)
 ALTER TABLE students ADD COLUMN IF NOT EXISTS google_contact_resource_name VARCHAR(512);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_contacted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_expected_return DATE NULL;
 
 -- Payments
 CREATE TABLE IF NOT EXISTS payments (

@@ -5,15 +5,7 @@ import { api } from '../api'
 import FullPageLoading from '../components/FullPageLoading'
 import { formatMonth, formatDate, formatDateUTC } from '../utils/format'
 
-function StatusBadge({ status }) {
-  const cls =
-    status === 'Active'
-      ? 'badge-status-active'
-      : status === 'Dormant'
-        ? 'badge-status-dormant'
-        : 'badge-status-demo'
-  return <span className={`badge ${cls}`}>{status || 'Active'}</span>
-}
+import StudentStatusBadge from '../components/StudentStatusBadge'
 
 export default function StudentDetail() {
   const { id } = useParams()
@@ -73,7 +65,7 @@ export default function StudentDetail() {
             <p className="text-slate-600">{student.漢字}</p>
           </div>
           <div className="flex gap-2">
-            <StatusBadge status={student.Status} />
+            <StudentStatusBadge status={student.Status} />
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">

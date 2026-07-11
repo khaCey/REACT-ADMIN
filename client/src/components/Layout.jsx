@@ -5,6 +5,7 @@ import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import FeatureListModal from './FeatureListModal'
+import HiatusStudentsModal from './HiatusStudentsModal'
 import PostLoginUnreadModal from './PostLoginUnreadModal'
 
 export default function Layout() {
@@ -43,12 +44,19 @@ export default function Layout() {
     setShowPostLoginUnread(false)
   }, [])
 
+  useEffect(() => {
+    const openHiatus = () => setFeatureModalMode('hiatus')
+    window.addEventListener('student-admin:open-hiatus-list', openHiatus)
+    return () => window.removeEventListener('student-admin:open-hiatus-list', openHiatus)
+  }, [])
+
   return (
     <>
       <Navbar
         onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
         onOpenUnpaid={() => setFeatureModalMode('unpaid')}
         onOpenUnscheduled={() => setFeatureModalMode('unscheduled')}
+        onOpenHiatus={() => setFeatureModalMode('hiatus')}
       />
       <Sidebar collapsed={sidebarCollapsed} />
       <main
@@ -63,11 +71,14 @@ export default function Layout() {
           </div>
         </div>
       </main>
-      {featureModalMode && (
+      {featureModalMode && featureModalMode !== 'hiatus' && (
         <FeatureListModal
           mode={featureModalMode}
           onClose={() => setFeatureModalMode(null)}
         />
+      )}
+      {featureModalMode === 'hiatus' && (
+        <HiatusStudentsModal onClose={() => setFeatureModalMode(null)} />
       )}
       {showPostLoginUnread && staff && !NOTIFICATIONS_WIP_DISABLED && (
         <PostLoginUnreadModal open onClose={closePostLoginUnread} />

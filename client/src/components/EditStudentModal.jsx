@@ -5,6 +5,7 @@ import { api } from '../api'
 import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
+import { HIATUS_STATUS } from './StudentStatusBadge'
 
 function splitPhone(str) {
   const d = (str || '').replace(/[^0-9]/g, '').slice(0, 11)
@@ -39,6 +40,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const onHiatus = (student?.Status || student?.status) === HIATUS_STATUS
 
   useEffect(() => {
     if (student) {
@@ -67,20 +69,21 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
     setSubmitting(true)
     setError(null)
     try {
-      await api.updateStudent(studentId, {
+      const payload = {
         Name: form.Name.trim(),
         漢字: form.漢字.trim() || undefined,
         // Send '' when cleared so server COALESCE($n, column) updates instead of skipping.
         Phone: phone,
         Email: form.Email.trim(),
-        Status: form.Status,
         Payment: form.Payment,
         当日: form.当日,
         子: form.子 ? '子' : '',
         is_child: form.子,
         Group: form.Group,
         人数: form.Group === 'Group' ? form.人数 : undefined,
-      })
+      }
+      if (!onHiatus) payload.Status = form.Status
+      await api.updateStudent(studentId, payload)
       success('Student updated')
       onSave?.()
       onClose()
@@ -227,6 +230,11 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
                   <BadgeCheck className="h-4 w-4 text-gray-500" />
                   <span>Status</span>
                 </label>
+                {onHiatus ? (
+                  <div className="w-full rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+                    休会中 — use the 休会中 list or student details to change break status.
+                  </div>
+                ) : (
                 <select
                   className="w-full rounded-md border border-gray-300 px-3 py-2"
                   value={form.Status}
@@ -236,6 +244,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
                   <option>Dormant</option>
                   <option>DEMO</option>
                 </select>
+                )}
               </div>
               <div className="sm:col-span-1">
                 <label className="block font-semibold text-gray-800 mb-1 flex items-center gap-2">

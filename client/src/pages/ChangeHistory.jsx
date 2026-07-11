@@ -41,6 +41,8 @@ const FIELD_LABELS = {
   phone_secondary: 'Phone (secondary)',
   same_day_cancel: '当日',
   status: 'Status',
+  hiatus_contacted: 'Hiatus contacted',
+  hiatus_expected_return: 'Hiatus expected return',
   payment: 'Payment',
   group_type: 'Group',
   group_size: '人数',
