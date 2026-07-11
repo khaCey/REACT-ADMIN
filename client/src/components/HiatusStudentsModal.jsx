@@ -8,11 +8,15 @@ import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import { useToast } from '../context/ToastContext'
 
+/** Display 再開予定 as mm/yyyy, or 未定 when unset. */
 function formatReturnDate(iso) {
-  if (!iso) return '—'
+  if (!iso) return '未定'
+  const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
+  if (m) return `${m[2]}/${m[1]}`
   const d = new Date(`${iso}T12:00:00`)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  if (Number.isNaN(d.getTime())) return '未定'
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${mm}/${d.getFullYear()}`
 }
 
 export default function HiatusStudentsModal({ onClose }) {
@@ -134,7 +138,7 @@ export default function HiatusStudentsModal({ onClose }) {
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Student</th>
                     <th className="px-3 py-2 text-left font-semibold">ID</th>
-                    <th className="px-3 py-2 text-left font-semibold">Expected return</th>
+                    <th className="px-3 py-2 text-left font-semibold">再開予定</th>
                     <th className="px-3 py-2 text-center font-semibold">Contacted</th>
                     <th className="px-3 py-2 text-center font-semibold">Came back</th>
                     <th className="px-3 py-2 text-right font-semibold">Action</th>

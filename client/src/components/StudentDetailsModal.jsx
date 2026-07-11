@@ -380,7 +380,14 @@ export default function StudentDetailsModal({
                 </p>
                 {student.Status === HIATUS_STATUS && (
                   <p className="text-amber-100 text-xs mt-1">
-                    Expected return: {student.HiatusExpectedReturn || '—'}
+                    再開予定:{' '}
+                    {(() => {
+                      const iso = student.HiatusExpectedReturn
+                      if (!iso) return '未定'
+                      const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
+                      if (m) return `${m[2]}/${m[1]}`
+                      return '未定'
+                    })()}
                     {student.HiatusContacted ? ' · Contacted' : ''}
                     <button
                       type="button"

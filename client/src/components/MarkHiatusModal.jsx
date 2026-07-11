@@ -32,7 +32,7 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
         </header>
         <div className="p-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Expected return date <span className="text-gray-400 font-normal">(optional)</span>
+            再開予定 <span className="text-gray-400 font-normal">(optional)</span>
           </label>
           <input
             type="date"
