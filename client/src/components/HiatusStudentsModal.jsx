@@ -13,17 +13,80 @@ function formatReturnDate(iso) {
   if (!iso) return '未定'
   const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
   if (m) return `${m[2]}/${m[1]}`
-  const d = new Date(`${iso}T12:00:00`)
-  if (Number.isNaN(d.getTime())) return '未定'
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  return `${mm}/${d.getFullYear()}`
+  return '未定'
 }
 
-/** YYYY-MM for <input type="month"> from stored DATE / ISO. */
-function toMonthInputValue(iso) {
-  if (!iso) return ''
-  const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
-  return m ? `${m[1]}-${m[2]}` : ''
+function parseYearMonth(iso) {
+  const m = String(iso || '').trim().match(/^(\d{4})-(\d{2})/)
+  if (!m) return { year: '', month: '' }
+  return { year: m[1], month: m[2] }
+}
+
+function buildYearOptions() {
+  const now = new Date()
+  const y = now.getFullYear()
+  const years = []
+  for (let i = y - 1; i <= y + 3; i += 1) years.push(String(i))
+  return years
+}
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
+
+function ExpectedReturnEditors({ value, disabled, onChange }) {
+  const { year, month } = parseYearMonth(value)
+  const years = buildYearOptions()
+  const yearChoices = year && !years.includes(year) ? [year, ...years] : years
+
+  const commit = (nextMonth, nextYear) => {
+    if (!nextMonth || !nextYear) {
+      onChange('')
+      return
+    }
+    onChange(`${nextYear}-${nextMonth}`)
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        value={month}
+        disabled={disabled}
+        onChange={(e) => commit(e.target.value, year || String(new Date().getFullYear()))}
+        className="rounded-md border border-gray-300 px-1.5 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
+        aria-label="Month"
+      >
+        <option value="">--</option>
+        {MONTH_OPTIONS.map((mm) => (
+          <option key={mm} value={mm}>{mm}</option>
+        ))}
+      </select>
+      <span className="text-gray-500 text-sm">/</span>
+      <select
+        value={year}
+        disabled={disabled}
+        onChange={(e) => commit(month || '01', e.target.value)}
+        className="rounded-md border border-gray-300 px-1.5 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
+        aria-label="Year"
+      >
+        <option value="">----</option>
+        {yearChoices.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+      {value ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange('')}
+          className="ml-1 text-xs text-gray-500 hover:text-gray-800 underline cursor-pointer disabled:opacity-50"
+          title="Clear to 未定"
+        >
+          未定
+        </button>
+      ) : (
+        <span className="ml-1 text-xs text-gray-400">未定</span>
+      )}
+    </div>
+  )
 }
 
 export default function HiatusStudentsModal({ onClose }) {
@@ -96,7 +159,7 @@ export default function HiatusStudentsModal({ onClose }) {
     await runHiatusAction(
       student.ID,
       { action: 'returned' },
-      `${student.Name || 'Student'} set to Active (再会)`
+      `${student.Name || 'Student'} set to Active (再開)`
     )
   }
 
@@ -190,30 +253,11 @@ export default function HiatusStudentsModal({ onClose }) {
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-700">{s.ID}</td>
                         <td className="px-3 py-2 text-sm text-gray-700 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="month"
-                              value={toMonthInputValue(s.HiatusExpectedReturn)}
-                              disabled={rowBusy}
-                              onChange={(e) => handleExpectedReturnChange(s, e.target.value)}
-                              className="rounded-md border border-gray-300 px-2 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
-                              aria-label={`再開予定 ${s.Name}`}
-                              title={formatReturnDate(s.HiatusExpectedReturn)}
-                            />
-                            {s.HiatusExpectedReturn ? (
-                              <button
-                                type="button"
-                                disabled={rowBusy}
-                                onClick={() => handleExpectedReturnChange(s, '')}
-                                className="text-xs text-gray-500 hover:text-gray-800 underline cursor-pointer disabled:opacity-50"
-                                title="Clear to 未定"
-                              >
-                                未定
-                              </button>
-                            ) : (
-                              <span className="text-xs text-gray-400">未定</span>
-                            )}
-                          </div>
+                          <ExpectedReturnEditors
+                            value={s.HiatusExpectedReturn}
+                            disabled={rowBusy}
+                            onChange={(monthValue) => handleExpectedReturnChange(s, monthValue)}
+                          />
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input
