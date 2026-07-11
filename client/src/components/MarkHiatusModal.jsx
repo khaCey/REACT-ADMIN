@@ -32,10 +32,10 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
         </header>
         <div className="p-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            再開予定 <span className="text-gray-400 font-normal">(optional)</span>
+            再開予定 <span className="text-gray-400 font-normal">(optional, mm/yyyy)</span>
           </label>
           <input
-            type="date"
+            type="month"
             value={expectedReturn}
             onChange={(e) => setExpectedReturn(e.target.value)}
             disabled={submitting}
@@ -54,7 +54,7 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
           <button
             type="button"
             disabled={submitting}
-            onClick={() => onConfirm(expectedReturn.trim() || null)}
+            onClick={() => onConfirm(expectedReturn.trim() ? `${expectedReturn.trim()}-01` : null)}
             className="rounded-md bg-green-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-green-700 cursor-pointer disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Mark on break'}

@@ -19,6 +19,13 @@ function formatReturnDate(iso) {
   return `${mm}/${d.getFullYear()}`
 }
 
+/** YYYY-MM for <input type="month"> from stored DATE / ISO. */
+function toMonthInputValue(iso) {
+  if (!iso) return ''
+  const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
+  return m ? `${m[1]}-${m[2]}` : ''
+}
+
 export default function HiatusStudentsModal({ onClose }) {
   const { success } = useToast()
   const [list, setList] = useState([])
@@ -70,6 +77,19 @@ export default function HiatusStudentsModal({ onClose }) {
 
   const handleContactedChange = (student, checked) => {
     runHiatusAction(student.ID, { action: 'update', contacted: checked })
+  }
+
+  const handleExpectedReturnChange = (student, monthValue) => {
+    const next = monthValue ? `${monthValue}-01` : null
+    const prev = student.HiatusExpectedReturn
+      ? `${String(student.HiatusExpectedReturn).slice(0, 7)}-01`
+      : null
+    if (next === prev || (!next && !prev)) return
+    runHiatusAction(
+      student.ID,
+      { action: 'update', expected_return: next },
+      next ? `再開予定 updated to ${formatReturnDate(next)}` : '再開予定 cleared (未定)'
+    )
   }
 
   const handleReturned = async (student) => {
@@ -171,7 +191,30 @@ export default function HiatusStudentsModal({ onClose }) {
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-700">{s.ID}</td>
                         <td className="px-3 py-2 text-sm text-gray-700 whitespace-nowrap">
-                          {formatReturnDate(s.HiatusExpectedReturn)}
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="month"
+                              value={toMonthInputValue(s.HiatusExpectedReturn)}
+                              disabled={rowBusy}
+                              onChange={(e) => handleExpectedReturnChange(s, e.target.value)}
+                              className="rounded-md border border-gray-300 px-2 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
+                              aria-label={`再開予定 ${s.Name}`}
+                              title={formatReturnDate(s.HiatusExpectedReturn)}
+                            />
+                            {s.HiatusExpectedReturn ? (
+                              <button
+                                type="button"
+                                disabled={rowBusy}
+                                onClick={() => handleExpectedReturnChange(s, '')}
+                                className="text-xs text-gray-500 hover:text-gray-800 underline cursor-pointer disabled:opacity-50"
+                                title="Clear to 未定"
+                              >
+                                未定
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-400">未定</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input
