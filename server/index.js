@@ -400,9 +400,11 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
         [Number(id) || id, yyyyMm]
       );
-      const storedPack = parseInt(lessonPackRes.rows[0]?.lessons, 10) || 0;
-      if (storedPack > 0) {
-        paidLessons = storedPack;
+      if (lessonPackRes.rows.length > 0) {
+        const storedPack = parseInt(lessonPackRes.rows[0]?.lessons, 10);
+        if (Number.isFinite(storedPack) && storedPack >= 0) {
+          paidLessons = storedPack;
+        }
       }
       // Rows from DB only (before unscheduled placeholders).
       // Rescheduled-source lessons (`rescheduledTo` exists) do not consume monthly count.

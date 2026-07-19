@@ -886,7 +886,13 @@ export default function LessonsThisMonth({
   }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
-      setActionError('Cannot remove an unscheduled placeholder.')
+      const monthKey = findLessonMonthKey(serverData, lesson.eventID) || activeMonth
+      if (!monthKey) {
+        setActionError('Could not determine the month for this lesson.')
+        return
+      }
+      setActionError(null)
+      setPendingRemoveLesson({ ...lesson, reduceMonthKey: monthKey })
       return
     }
     setActionError(null)
@@ -1039,11 +1045,34 @@ export default function LessonsThisMonth({
     if (!pendingRemoveLesson?.eventID) return
     const lessonToRemove = pendingRemoveLesson
     const eventId = lessonToRemove.eventID
+    const isUnscheduledRemove = String(lessonToRemove.status || '').toLowerCase() === 'unscheduled'
     const isReservedRemove = String(lessonToRemove.status || '').toLowerCase() === 'reserved'
     setRemoving(true)
-    setRemovingEventId(eventId)
     setPendingRemoveLesson(null)
     setSelectedLesson(null)
+    if (isUnscheduledRemove) {
+      try {
+        const monthKey = String(lessonToRemove.reduceMonthKey || '').trim()
+        const monthEntry = serverData?.[monthKey]
+        const currentCount = Math.max(0, parseInt(monthEntry?.paidLessonsCount, 10) || 0)
+        const bookedCount = Math.max(0, parseInt(monthEntry?.bookedLessonsCount, 10) || 0)
+        const nextCount = Math.max(bookedCount, currentCount - 1)
+        await api.upsertStudentMonthLessons({
+          student_id: studentId,
+          month: monthKey,
+          lessons: nextCount,
+        })
+        success(`Monthly lesson count reduced to ${nextCount}`)
+        await refetch()
+        onMonthLessonsUpdated?.()
+      } catch (e) {
+        setActionError(e?.message || 'Failed to reduce monthly lesson count')
+      } finally {
+        setRemoving(false)
+      }
+      return
+    }
+    setRemovingEventId(eventId)
     applyOptimisticMutation({
       type: 'patch_lesson',
       eventID: eventId,
@@ -1278,6 +1307,8 @@ export default function LessonsThisMonth({
     .toLowerCase()
   const pendingRemoveIsLocalOnly = pendingRemoveSync === 'failed'
   const pendingRemoveIsReserved = String(pendingRemoveLesson?.status || '').toLowerCase() === 'reserved'
+  const pendingRemoveIsUnscheduled =
+    String(pendingRemoveLesson?.status || '').toLowerCase() === 'unscheduled'
 
   const content = (
     <div className="flex flex-1 flex-col min-h-0">
@@ -1405,26 +1436,38 @@ export default function LessonsThisMonth({
       {pendingRemoveLesson && (
         <ConfirmActionModal
           title={
-            pendingRemoveIsReserved
+            pendingRemoveIsUnscheduled
+              ? 'Reduce Monthly Lesson Count'
+              : pendingRemoveIsReserved
               ? '予約済みレッスンの削除'
               : pendingRemoveIsLocalOnly
                 ? 'Remove from schedule only'
                 : 'Remove Lesson'
           }
           message={
-            pendingRemoveIsReserved
+            pendingRemoveIsUnscheduled
+              ? 'Remove this unscheduled lesson and reduce the lesson count for this month by 1?'
+              : pendingRemoveIsReserved
               ? 'この操作を行うと、予約済みのレッスンがすべて削除されます。よろしいですか？'
               : pendingRemoveIsLocalOnly
                 ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
                 : 'Remove this lesson from the schedule?'
           }
           confirmLabel={
-            pendingRemoveIsReserved ? '削除' : pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'
+            pendingRemoveIsUnscheduled
+              ? 'Reduce by 1'
+              : pendingRemoveIsReserved
+                ? '削除'
+                : pendingRemoveIsLocalOnly
+                  ? 'Remove locally'
+                  : 'Remove'
           }
           cancelLabel={pendingRemoveIsReserved ? 'キャンセル' : 'Cancel'}
           destructive
           confirming={removing}
-          busyConfirmLabel={pendingRemoveIsReserved ? '削除中…' : undefined}
+          busyConfirmLabel={
+            pendingRemoveIsUnscheduled ? 'Reducing…' : pendingRemoveIsReserved ? '削除中…' : undefined
+          }
           onConfirm={confirmRemoveLesson}
           onClose={() => setPendingRemoveLesson(null)}
         />
