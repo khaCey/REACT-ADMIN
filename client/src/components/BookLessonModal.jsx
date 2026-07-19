@@ -5,7 +5,6 @@ import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import PreBookLessonModal from './PreBookLessonModal'
-import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
@@ -367,7 +366,6 @@ export default function BookLessonModal({
   const [overQuotaModalOpen, setOverQuotaModalOpen] = useState(false)
   /** Slot that triggered click-time over-quota warning (kept pending until pack is updated). */
   const [pendingOverQuotaSlotKey, setPendingOverQuotaSlotKey] = useState(null)
-  const [successModal, setSuccessModal] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   /** Hide the main calendar shell as soon as Submit runs; confirmation shows after the request. */
   const [hideBookingCalendar, setHideBookingCalendar] = useState(false)
@@ -684,11 +682,19 @@ export default function BookLessonModal({
           setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
         }
         setSelectedSlotKeys([])
-        success('Lesson rescheduled')
-        setSuccessModal({
-          title: 'Reschedule completed',
-          message: 'The lesson was rescheduled successfully.',
+        const studentLabel = student?.Name || student?.name || 'student'
+        const sid = resolveBookStudentId(studentId, student) ?? sidRaw
+        success(`Lesson rescheduled for ${studentLabel}. Click to open student details.`, {
+          durationMs: 0,
+          onClick: () => {
+            window.dispatchEvent(
+              new CustomEvent('student-admin:open-student', {
+                detail: { studentId: sid },
+              }),
+            )
+          },
         })
+        onClose?.()
       } catch (e) {
         onOptimisticScheduleMutation?.({
           type: 'reschedule_failed',
@@ -844,14 +850,25 @@ export default function BookLessonModal({
       } else {
         setSelectedSlotKeys([])
       }
-      if (successCount > 0 && failed.length === 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
-        setSuccessModal({
-          title: 'Booking Confirmed',
-          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} confirmed.`,
-        })
-      } else if (successCount > 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
+      if (successCount > 0) {
+        const studentLabel = student?.Name || student?.name || 'student'
+        const lessonWord = successCount > 1 ? 'lessons' : 'lesson'
+        success(
+          `${successCount} ${lessonWord} confirmed for ${studentLabel}. Click to open student details.`,
+          {
+            durationMs: 0,
+            onClick: () => {
+              window.dispatchEvent(
+                new CustomEvent('student-admin:open-student', {
+                  detail: { studentId: student_id },
+                }),
+              )
+            },
+          },
+        )
+        if (failed.length === 0) {
+          onClose?.()
+        }
       }
     } catch (e) {
       setError(e.message)
@@ -1340,21 +1357,6 @@ export default function BookLessonModal({
             } catch (e) {
               setError(e?.message || 'Failed to update monthly pack')
             }
-          }}
-        />
-      )}
-      {successModal && (
-        <ConfirmActionModal
-          title={successModal.title}
-          message={successModal.message}
-          confirmLabel="OK"
-          onClose={() => {
-            setSuccessModal(null)
-            onClose?.()
-          }}
-          onConfirm={() => {
-            setSuccessModal(null)
-            onClose?.()
           }}
         />
       )}
