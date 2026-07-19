@@ -739,59 +739,75 @@ export default function BookLessonModal({
       const failed = []
       let successCount = 0
       const isDemoBooking = studentIsDemo(student)
+      const shouldBookGroup = canBookSavedGroup && !rescheduleSource
+      const seed = Date.now()
 
-      for (const key of selected) {
+      // First pass: validate and show a pending card for every selected slot immediately,
+      // so a multi-slot booking reflects all lessons at once instead of appearing one by one.
+      const jobs = []
+      selected.forEach((key, index) => {
         const [date, time] = key.split('T')
-        if (!date || !time) continue
+        if (!date || !time) return
         const packTotal = packTotalForSlotDate(packResult, date)
-        const tempEventId = `optimistic-book-${date}-${time}-${Date.now()}-${successCount + failed.length}`
+        const tempEventId = `optimistic-book-${date}-${time}-${seed}-${index}`
         if (!isDemoBooking && (packTotal == null || packTotal <= 0)) {
           failed.push(`${date} ${time}: Missing lesson pack total for this month.`)
-          continue
+          return
         }
-        try {
-          const shouldBookGroup = canBookSavedGroup && !rescheduleSource
-          onOptimisticScheduleMutation?.({
-            type: 'book_start',
-            monthKey: String(date || '').slice(0, 7),
-            date,
-            time,
-            lesson: {
-              eventID: tempEventId,
-              day: String(date || '').slice(8, 10) || '--',
-              time,
-              status: 'scheduled',
-              calendarSyncStatus: 'pending',
-              calendarSyncError: null,
-              isGroup: shouldBookGroup,
-              lessonKind: optimisticLessonKindForStudent(student),
-              transientStatus: 'sync_pending',
-            },
-          })
-          await api.getBookingWarning(date, time, student_id)
-          const bookRes = await api.bookLesson({
-            student_id,
-            ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
-            date: String(date),
-            time: String(time),
-            duration_minutes: 50,
-            ...(!isDemoBooking ? { pack_total: packTotal } : {}),
-            location: 'Cafe',
-          })
-          const bookedEventId = String(bookRes?.event_id || '').trim()
-          if (!bookedEventId) {
-            throw new Error('Booking succeeded but no event id was returned')
-          }
-          await awaitCalendarSyncForEvent(bookedEventId)
-          successCount += 1
-        } catch (e) {
-          onOptimisticScheduleMutation?.({
-            type: 'book_failed',
+        onOptimisticScheduleMutation?.({
+          type: 'book_start',
+          monthKey: String(date || '').slice(0, 7),
+          date,
+          time,
+          lesson: {
             eventID: tempEventId,
-            error: e?.message || 'Failed to book',
-          })
-          failed.push(`${date} ${time}: ${e?.message || 'Failed to book'}`)
-        }
+            day: String(date || '').slice(8, 10) || '--',
+            time,
+            status: 'scheduled',
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            isGroup: shouldBookGroup,
+            lessonKind: optimisticLessonKindForStudent(student),
+            transientStatus: 'sync_pending',
+          },
+        })
+        jobs.push({ date, time, packTotal, tempEventId })
+      })
+
+      // Second pass: run the bookings concurrently (each slot is a distinct, non-overlapping
+      // hour) so all pending cards resolve together rather than trickling in one at a time.
+      const results = await Promise.all(
+        jobs.map(async ({ date, time, packTotal, tempEventId }) => {
+          try {
+            await api.getBookingWarning(date, time, student_id)
+            const bookRes = await api.bookLesson({
+              student_id,
+              ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
+              date: String(date),
+              time: String(time),
+              duration_minutes: 50,
+              ...(!isDemoBooking ? { pack_total: packTotal } : {}),
+              location: 'Cafe',
+            })
+            const bookedEventId = String(bookRes?.event_id || '').trim()
+            if (!bookedEventId) {
+              throw new Error('Booking succeeded but no event id was returned')
+            }
+            await awaitCalendarSyncForEvent(bookedEventId)
+            return { ok: true }
+          } catch (e) {
+            onOptimisticScheduleMutation?.({
+              type: 'book_failed',
+              eventID: tempEventId,
+              error: e?.message || 'Failed to book',
+            })
+            return { ok: false, error: `${date} ${time}: ${e?.message || 'Failed to book'}` }
+          }
+        })
+      )
+      for (const r of results) {
+        if (r.ok) successCount += 1
+        else failed.push(r.error)
       }
 
       if (successCount > 0) {
