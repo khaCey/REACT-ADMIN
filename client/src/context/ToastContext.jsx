@@ -4,28 +4,30 @@ import ToastViewport from '../components/ToastViewport'
 const ToastContext = createContext(null)
 const TOAST_SHOW_DELAY_MS = 500
 
-/** @param {number | { durationMs?: number, onClick?: () => void } | undefined} options */
+/** @param {number | { durationMs?: number, onClick?: () => void, actionLabel?: string } | undefined} options */
 function normalizeToastOptions(options) {
   if (typeof options === 'number') {
-    return { durationMs: options, onClick: undefined }
+    return { durationMs: options, onClick: undefined, actionLabel: '' }
   }
   if (options && typeof options === 'object') {
     return {
       durationMs: options.durationMs ?? 3000,
       onClick: typeof options.onClick === 'function' ? options.onClick : undefined,
+      actionLabel: String(options.actionLabel || '').trim(),
     }
   }
-  return { durationMs: 3000, onClick: undefined }
+  return { durationMs: 3000, onClick: undefined, actionLabel: '' }
 }
 
 function makeToast(type, message, options) {
-  const { durationMs, onClick } = normalizeToastOptions(options)
+  const { durationMs, onClick, actionLabel } = normalizeToastOptions(options)
   return {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     type,
     message,
     durationMs,
     onClick,
+    actionLabel,
   }
 }
 

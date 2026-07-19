@@ -684,8 +684,9 @@ export default function BookLessonModal({
         setSelectedSlotKeys([])
         const studentLabel = student?.Name || student?.name || 'student'
         const sid = resolveBookStudentId(studentId, student) ?? sidRaw
-        success(`Lesson rescheduled for ${studentLabel}. Click to open student details.`, {
+        success(`Lesson rescheduled for ${studentLabel}.`, {
           durationMs: 0,
+          actionLabel: 'Click to open student details',
           onClick: () => {
             window.dispatchEvent(
               new CustomEvent('student-admin:open-student', {
@@ -854,9 +855,10 @@ export default function BookLessonModal({
         const studentLabel = student?.Name || student?.name || 'student'
         const lessonWord = successCount > 1 ? 'lessons' : 'lesson'
         success(
-          `${successCount} ${lessonWord} confirmed for ${studentLabel}. Click to open student details.`,
+          `${successCount} ${lessonWord} confirmed for ${studentLabel}.`,
           {
             durationMs: 0,
+            actionLabel: 'Click to open student details',
             onClick: () => {
               window.dispatchEvent(
                 new CustomEvent('student-admin:open-student', {
