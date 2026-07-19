@@ -33,6 +33,7 @@ export default function LessonDetailsModal({
   onConfirmSchedule,
   confirmScheduleMonthKey,
   onRemove,
+  onBookLesson,
   onLessonNotesChanged,
 }) {
   const { success } = useToast()
@@ -469,6 +470,16 @@ export default function LessonDetailsModal({
               </>
             ) : (
               <>
+                {isUnscheduled && typeof onBookLesson === 'function' && (
+                  <button
+                    type="button"
+                    onClick={() => onBookLesson(lesson, student)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Book Lesson
+                  </button>
+                )}
                 {!isCancelled && !isRescheduled && !isUnscheduled && (
                   <button
                     type="button"

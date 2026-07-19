@@ -1338,6 +1338,15 @@ export default function LessonsThisMonth({
             findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
           }
           onRemove={handleRemove}
+          onBookLesson={
+            onBookLesson
+              ? () => {
+                  setSelectedLesson(null)
+                  setActionError(null)
+                  onBookLesson()
+                }
+              : undefined
+          }
           onLessonNotesChanged={handleLessonNotesChanged}
         />
       )}
