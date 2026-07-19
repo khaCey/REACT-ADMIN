@@ -1239,14 +1239,6 @@ async function syncBookedLessonEventToCalendar(localEventId) {
   }
 }
 
-function queueBookedLessonEventSync(localEventId) {
-  setTimeout(() => {
-    syncBookedLessonEventToCalendar(localEventId).catch((err) => {
-      console.error('[schedule/book background sync] failed:', err?.message || err);
-    });
-  }, 0);
-}
-
 function parsePackTotalFromTitle(title) {
   const m = String(title || '').match(/\/\s*(\d+)\s*$/);
   const n = m ? parseInt(m[1], 10) : 0;
@@ -2235,7 +2227,9 @@ router.post('/book', async (req, res) => {
       calendar_sync_status: CALENDAR_SYNC_STATUS_PENDING,
       group_id: null,
     });
-    queueBookedLessonEventSync(localEventId);
+    // Calendar sync is triggered by the client via POST /schedule/sync (single trigger).
+    // Do NOT auto-queue a background sync here: two concurrent syncs race and create
+    // duplicate calendar events / spurious "failed" results.
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3169,7 +3163,7 @@ router.post('/reschedule-linked', async (req, res) => {
     const startIso = startDate.toISOString();
     const endIso = endDate.toISOString();
 
-    /** Keep original Calendar event at original time: graphite + “Moved to …” title; create new event at new time via sync queue. */
+    /** Keep original Calendar event at original time: graphite + “Moved to …” title; the new event at the new time is created when the client calls POST /schedule/sync. */
     let calendarSourceGraphiteOk = false;
     let calendarSourceStyleError = null;
 
@@ -3196,9 +3190,9 @@ router.post('/reschedule-linked', async (req, res) => {
       }
     }
 
-    if (isBookingGasEnabled()) {
-      queueBookedLessonEventSync(localEventId);
-    }
+    // Calendar sync for the new event is triggered by the client via POST /schedule/sync
+    // (single trigger). Auto-queuing here in addition would race with the client call and
+    // create duplicate calendar events / spurious "failed" results.
 
     const sourceRowsAfter = (await query(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [sourceEventId])).rows;
     for (const oldSourceRow of sourceRowsForReschedule) {
