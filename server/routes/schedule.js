@@ -251,10 +251,10 @@ async function resolveOwnerCourseTeacherName() {
 }
 
 function deriveLessonKindFromStudent(student) {
+  const status = String(student?.status || '').trim().toUpperCase();
+  if (status === 'DEMO') return 'demo';
   const payment = String(student?.payment || '').toLowerCase();
   if (payment.includes('owner')) return 'owner';
-  const status = String(student?.status || '').toLowerCase();
-  if (status.includes('demo') || status.includes('trial')) return 'demo';
   return 'regular';
 }
 
@@ -1396,11 +1396,18 @@ router.get('/week', async (req, res) => {
       studentIdParam != null && studentIdParam !== '' ? Number(studentIdParam) : NaN;
     let studentNameForGrid = null;
     let studentPaymentForGrid = null;
+    let studentStatusForGrid = null;
     if (Number.isFinite(studentIdNum)) {
-      const sn = await query('SELECT name, payment FROM students WHERE id = $1', [studentIdNum]);
+      const sn = await query('SELECT name, payment, status FROM students WHERE id = $1', [studentIdNum]);
       studentNameForGrid = (sn.rows[0]?.name || '').trim() || null;
       studentPaymentForGrid = sn.rows[0]?.payment ?? null;
+      studentStatusForGrid = sn.rows[0]?.status ?? null;
     }
+    const isOwnerCourseForGrid =
+      deriveLessonKindFromStudent({
+        payment: studentPaymentForGrid,
+        status: studentStatusForGrid,
+      }) === 'owner';
     const [scheduleResult, teachersResult, breakPresetsResult] = await Promise.all([
       query(
         `SELECT
@@ -1643,9 +1650,9 @@ router.get('/week', async (req, res) => {
       clampBookingDurationMinutes(req.query.duration_minutes)
     );
 
-    /** Owner's course (payment contains "owner"): only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
+    /** Owner's course: only slots where OWNER_COURSE_STAFF_ID's teacher is on shift. */
     const ownerShamBlocked = {};
-    if (Number.isFinite(studentIdNum) && isOwnerCoursePayment(studentPaymentForGrid)) {
+    if (Number.isFinite(studentIdNum) && isOwnerCourseForGrid) {
       const shamName = await resolveOwnerCourseTeacherName();
       if (shamName) {
         const shamNorm = normalizeTeacherNameForOwner(shamName);
@@ -1663,7 +1670,7 @@ router.get('/week', async (req, res) => {
 
     /** Owner's course: cannot double-book another owner's lesson in the same hour (grid aligns with POST /book overlap rule). */
     const ownerCourseConflictBlocked =
-      Number.isFinite(studentIdNum) && isOwnerCoursePayment(studentPaymentForGrid)
+      Number.isFinite(studentIdNum) && isOwnerCourseForGrid
         ? { ...ownerCourseSlotOccupied }
         : {};
 
@@ -1901,6 +1908,13 @@ router.post('/book', async (req, res) => {
     if (studentKinds.size > 1) {
       return res.status(400).json({ error: 'Kids and adult students cannot be mixed in one linked group.' });
     }
+    const lessonKinds = new Set(orderedStudents.map((student) => deriveLessonKindFromStudent(student)));
+    if (lessonKinds.size > 1) {
+      return res.status(400).json({
+        error: 'Demo, owner, and regular students cannot be mixed in one linked-group booking.',
+      });
+    }
+    const bookingLessonKind = [...lessonKinds][0] || 'regular';
 
     const anchorStudent =
       orderedStudents.find((student) => Number(student.id) === anchorStudentId) || orderedStudents[0];
@@ -1952,7 +1966,7 @@ router.post('/book', async (req, res) => {
       }
     }
 
-    if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
+    if (bookingLessonKind === 'owner') {
       const ownerOverlap = await query(
         `SELECT 1 FROM monthly_schedule m
          LEFT JOIN students s ON s.id = m.student_id
@@ -2045,7 +2059,7 @@ router.post('/book', async (req, res) => {
       }
     }
 
-    if (orderedStudents.some((student) => isOwnerCoursePayment(student.payment))) {
+    if (bookingLessonKind === 'owner') {
       const shamTeacherName = await resolveOwnerCourseTeacherName();
       if (shamTeacherName) {
         const shamNorm = normalizeTeacherNameForOwner(shamTeacherName);
@@ -2129,7 +2143,7 @@ router.post('/book', async (req, res) => {
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStr.slice(0, 7);
-    const lessonKindForBooking = deriveLessonKindFromStudent(anchorStudent);
+    const lessonKindForBooking = bookingLessonKind;
 
     let title;
     if (lessonKindForBooking === 'demo') {

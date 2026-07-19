@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
-import { isStudentExcludedFromBooking, studentIsDemoOrTrial } from '../config/booking'
+import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import { useToast } from '../context/ToastContext'
 import PaymentModal from './PaymentModal'
@@ -257,7 +257,7 @@ export default function StudentDetailsModal({
       setBookLessonModal(true)
       return
     }
-    if (student && studentIsDemoOrTrial(student)) {
+    if (student && studentIsDemo(student)) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
       return
@@ -578,7 +578,7 @@ export default function StudentDetailsModal({
                     className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
                   >
                     <Calendar className="w-4 h-4" />
-                    Book lesson
+                    {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
                   </button>
                 )}
                 {student?.Group === 'Group' && (

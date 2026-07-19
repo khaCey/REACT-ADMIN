@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
+import { studentIsDemo } from '../config/booking'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
@@ -477,7 +478,7 @@ export default function LessonDetailsModal({
                     disabled={confirmDialogOpen || isTransientBusy}
                     className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Book Lesson
+                    {studentIsDemo(student) ? 'Book Demo Lesson' : 'Book Lesson'}
                   </button>
                 )}
                 {!isCancelled && !isRescheduled && !isUnscheduled && (

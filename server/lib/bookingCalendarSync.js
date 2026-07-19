@@ -193,10 +193,10 @@ export function isBookingGasEnabled() {
  */
 
 function deriveLessonKind(student) {
+  const status = String(student?.status || '').trim().toUpperCase();
+  if (status === 'DEMO') return 'demo';
   const payment = String(student?.payment || '').toLowerCase();
   if (payment.includes('owner')) return 'owner';
-  const status = String(student?.status || '').toLowerCase();
-  if (status.includes('demo') || status.includes('trial')) return 'demo';
   return 'regular';
 }
 

@@ -10,7 +10,7 @@ import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
-import { studentIsDemoOrTrial } from '../config/booking'
+import { studentIsDemo } from '../config/booking'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
 /** Matches POST /schedule/book default `duration_minutes` and `/schedule/week` overlap preview. */
@@ -177,10 +177,10 @@ function countSlotsInMonthForKeys(selectedKeys, ym) {
 
 /**
  * POST /book pack_total: override/local, else per selected calendar month from latest-by-month.
- * @returns {{ mode: 'none' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
+ * @returns {{ mode: 'none' } | { mode: 'demo' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
  */
 function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPackOverride, selectedSlotKeys, student) {
-  if (student && studentIsDemoOrTrial(student)) return { mode: 'single', value: 1 }
+  if (student && studentIsDemo(student)) return { mode: 'demo' }
   const loc = Number(localPackOverride)
   if (Number.isFinite(loc) && loc > 0) return { mode: 'single', value: loc }
   const overrideTotal = Number(overridePaidLessons)
@@ -202,7 +202,7 @@ function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPack
 }
 
 function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth, student) {
-  if (student && studentIsDemoOrTrial(student)) return null
+  if (student && studentIsDemo(student)) return null
   const months = [...new Set(selectedSlotKeys.map((k) => slotMonthFromKey(k)).filter(Boolean))].sort()
   for (const ym of months) {
     const paid = paidPackForMonth(ym, latestByMonth)
@@ -223,6 +223,7 @@ function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth, student) {
 }
 
 function packTotalForSlotDate(packResult, dateStr) {
+  if (packResult.mode === 'demo') return null
   const ym = String(dateStr || '').slice(0, 7)
   if (packResult.mode === 'single') return packResult.value
   if (packResult.mode === 'perMonth' && packResult.perMonth?.[ym]) return packResult.perMonth[ym]
@@ -298,9 +299,10 @@ function resolveBookStudentId(studentIdProp, student) {
 }
 
 function optimisticLessonKindForStudent(student) {
+  if (studentIsDemo(student)) return 'demo'
   const payment = String(student?.Payment || student?.payment || '').toLowerCase()
   if (payment.includes('owner')) return 'owner'
-  return studentIsDemoOrTrial(student) ? 'demo' : 'regular'
+  return 'regular'
 }
 
 /** Await GAS calendar create; treat "already synced" as success (background queue may finish first). */
@@ -380,6 +382,7 @@ export default function BookLessonModal({
   const [lessonBalanceLoaded, setLessonBalanceLoaded] = useState(
     () => preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
   )
+  const isDemoStudent = studentIsDemo(student)
   const canBookSavedGroup =
     String(student?.Group || '').toLowerCase() === 'group' &&
     Number(studentGroup?.groupId) > 0 &&
@@ -735,13 +738,14 @@ export default function BookLessonModal({
       const selected = [...(slotKeysOverride ?? selectedSlotKeys)].sort()
       const failed = []
       let successCount = 0
+      const isDemoBooking = studentIsDemo(student)
 
       for (const key of selected) {
         const [date, time] = key.split('T')
         if (!date || !time) continue
         const packTotal = packTotalForSlotDate(packResult, date)
         const tempEventId = `optimistic-book-${date}-${time}-${Date.now()}-${successCount + failed.length}`
-        if (packTotal == null || packTotal <= 0) {
+        if (!isDemoBooking && (packTotal == null || packTotal <= 0)) {
           failed.push(`${date} ${time}: Missing lesson pack total for this month.`)
           continue
         }
@@ -771,7 +775,7 @@ export default function BookLessonModal({
             date: String(date),
             time: String(time),
             duration_minutes: 50,
-            pack_total: packTotal,
+            ...(!isDemoBooking ? { pack_total: packTotal } : {}),
             location: 'Cafe',
           })
           const bookedEventId = String(bookRes?.event_id || '').trim()
@@ -902,7 +906,7 @@ export default function BookLessonModal({
 
   /** Compact header corner: booked / paid (not full-width). */
   const lessonBalanceCorner =
-    lessonBalanceLoaded && lessonMonthSummaries.length > 0 ? (
+    isDemoStudent ? null : lessonBalanceLoaded && lessonMonthSummaries.length > 0 ? (
       <div
         className="w-[7.25rem] shrink-0 rounded-md border border-gray-200 bg-gray-50/90 px-1.5 py-1 shadow-sm"
         aria-label="Lessons booked versus paid this period"
@@ -945,7 +949,9 @@ export default function BookLessonModal({
           {modalBusy && <ModalLoadingOverlay />}
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
-              <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">Book a New Lesson</h3>
+              <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">
+                {isDemoStudent ? 'Book a Demo Lesson' : 'Book a New Lesson'}
+              </h3>
               <p className="text-xs text-gray-600 mt-0.5">
                 {studentName} {studentKanji ? `(${studentKanji})` : ''}
               </p>
@@ -1213,7 +1219,9 @@ export default function BookLessonModal({
                 ? 'Submitting...'
                 : rescheduleSource
                   ? 'Confirm reschedule'
-                  : `Submit selected (${selectedSlotKeys.length})`}
+                  : isDemoStudent
+                    ? `Book demo lesson (${selectedSlotKeys.length})`
+                    : `Submit selected (${selectedSlotKeys.length})`}
             </button>
             <button
               type="button"

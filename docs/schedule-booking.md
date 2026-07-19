@@ -64,6 +64,14 @@ Additional rules enforced on submit:
 
 `GET /api/schedule/booking-warning` is currently a stub (`warn: false`); it does not block booking.
 
+### Demo bookings
+
+- Only a student whose stored status is exactly **`DEMO`** is classified as a demo booking; the client cannot select or spoof the lesson kind.
+- Demo bookings do not require or submit `pack_total`, do not open the 月の回数 flow, and do not use monthly quota checks.
+- Demo titles use **`Name D/L`** and rows are stored with `lesson_kind = 'demo'`.
+- Linked-group bookings cannot mix demo, owner, and regular students.
+- The server sends `lessonKind: 'demo'` to GAS. The deployed `calendarAPI/Code.js` routes it to `DEMO_CALENDAR_ID`; create, update, delete, polling, and webhook registration all include that calendar.
+
 ## Confirm Schedule — reserved → scheduled (weekly)
 
 For **reserved** (`monthly_schedule.status = 'reserved'`) lessons that are already **calendar-synced**, staff can **confirm the schedule** for a full **calendar month** from the lesson details modal (**Confirm schedule**). The UI calls the API **once per week** (oldest first); each card moves **Pending** → **Processing** → **Scheduled** as its request completes. After the **last** week removes the empty recurring series, the server creates a **bounded weekly reserved hold for the following month** (replacement for the deleted series).
