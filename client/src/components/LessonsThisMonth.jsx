@@ -58,10 +58,7 @@ const CARD_SIZES = {
   large: { date: 'text-[0.8rem]', dow: 'text-[0.7rem]', time: 'text-[0.75rem]', status: 'text-[0.7rem]', dot: 'h-2 w-2', pad: 'px-2 py-1.5', accent: 'w-1.5' },
 }
 
-function getLessonDisplayStatus(lesson, removingEventId = null) {
-  const eventID = String(lesson?.eventID || '')
-  if (removingEventId && eventID && eventID === removingEventId) return 'deleting'
-
+function getLessonDisplayStatus(lesson) {
   const transientStatus = String(lesson?.transientStatus || '').toLowerCase()
   const rawStatus = String(lesson?.status || '').toLowerCase()
   const syncStatus = String(lesson?.calendarSyncStatus || 'synced').toLowerCase()
@@ -429,8 +426,8 @@ function isOptimisticMutationResolved(serverData, mutation) {
 }
 
 
-function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal', removingEventId = null }) {
-  const displayStatus = getLessonDisplayStatus(lesson, removingEventId)
+function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
+  const displayStatus = getLessonDisplayStatus(lesson)
   const isUnscheduled = lesson.status === 'unscheduled'
   const dayNum = parseInt(lesson.day, 10)
   const date = !isNaN(dayNum) && year != null && monthIndex >= 0
@@ -591,6 +588,7 @@ export default function LessonsThisMonth({
   const pendingPollCountRef = useRef(0)
   const pendingPollFastTicksRef = useRef(0)
   const processedOptimisticMutationCountRef = useRef(0)
+  const unscheduledRemoveQueueRef = useRef(Promise.resolve())
   const normalizedPendingEventIds = useMemo(
     () => normalizePendingEventIds(pendingCalendarEventIds),
     [pendingCalendarEventIds]
@@ -602,7 +600,6 @@ export default function LessonsThisMonth({
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
-  const [removingEventId, setRemovingEventId] = useState(null)
   const [confirmingSchedule, setConfirmingSchedule] = useState(false)
   const applyOptimisticMutation = useCallback((mutation) => {
     setActiveOptimisticMutations((prev) => [...prev, mutation])
@@ -719,7 +716,6 @@ export default function LessonsThisMonth({
   }, [data, selectedLessonKey, selectedLesson?.eventID])
   const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
-  const [removing, setRemoving] = useState(false)
   const [actionError, setActionError] = useState(null)
   const [changeCountOpen, setChangeCountOpen] = useState(false)
   const [changeCountMonthKey, setChangeCountMonthKey] = useState(null)
@@ -1048,13 +1044,15 @@ export default function LessonsThisMonth({
     const eventId = lessonToRemove.eventID
     const isUnscheduledRemove = String(lessonToRemove.status || '').toLowerCase() === 'unscheduled'
     const isReservedRemove = String(lessonToRemove.status || '').toLowerCase() === 'reserved'
-    setRemoving(true)
     setPendingRemoveLesson(null)
     setSelectedLesson(null)
     if (isUnscheduledRemove) {
-      try {
-        const monthKey = String(lessonToRemove.reduceMonthKey || '').trim()
-        const monthEntry = serverData?.[monthKey]
+      const monthKey = String(lessonToRemove.reduceMonthKey || '').trim()
+      // Accept repeated removals immediately, but serialize the underlying count
+      // updates so concurrent clicks cannot overwrite each other's decrement.
+      const queuedRemove = unscheduledRemoveQueueRef.current.then(async () => {
+        const latest = await api.getStudentLatestByMonth(studentId)
+        const monthEntry = latest?.latestByMonth?.[monthKey] || serverData?.[monthKey]
         const currentCount = Math.max(0, parseInt(monthEntry?.paidLessonsCount, 10) || 0)
         const bookedCount = Math.max(0, parseInt(monthEntry?.bookedLessonsCount, 10) || 0)
         const nextCount = Math.max(bookedCount, currentCount - 1)
@@ -1063,17 +1061,19 @@ export default function LessonsThisMonth({
           month: monthKey,
           lessons: nextCount,
         })
-        success(`Monthly lesson count reduced to ${nextCount}`)
         await refetch()
         onMonthLessonsUpdated?.()
+        return nextCount
+      })
+      unscheduledRemoveQueueRef.current = queuedRemove.catch(() => {})
+      try {
+        const nextCount = await queuedRemove
+        success(`Monthly lesson count reduced to ${nextCount}`)
       } catch (e) {
         setActionError(e?.message || 'Failed to reduce monthly lesson count')
-      } finally {
-        setRemoving(false)
       }
       return
     }
-    setRemovingEventId(eventId)
     applyOptimisticMutation({
       type: 'patch_lesson',
       eventID: eventId,
@@ -1141,7 +1141,6 @@ export default function LessonsThisMonth({
       }
       setActionError(e.message)
     } finally {
-      setRemovingEventId(null)
       setActiveOptimisticMutations((prev) =>
         prev.filter(
           (m) =>
@@ -1152,7 +1151,6 @@ export default function LessonsThisMonth({
             )
         )
       )
-      setRemoving(false)
     }
   }
 
@@ -1341,7 +1339,6 @@ export default function LessonsThisMonth({
                         monthIndex={monthIndex}
                         onClick={confirmingSchedule ? undefined : setSelectedLesson}
                         size={cardSize}
-                        removingEventId={removingEventId}
                       />
                     ))}
                   </div>
@@ -1465,7 +1462,6 @@ export default function LessonsThisMonth({
           }
           cancelLabel={pendingRemoveIsReserved ? 'キャンセル' : 'Cancel'}
           destructive
-          confirming={removing}
           busyConfirmLabel={
             pendingRemoveIsUnscheduled ? 'Reducing…' : pendingRemoveIsReserved ? '削除中…' : undefined
           }
