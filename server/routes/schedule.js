@@ -615,10 +615,11 @@ async function deleteReservedHoldFromCalendar(batchRows, anchorRow, options = {}
   };
 }
 
-async function rollbackConfirmCreatedLessons(createdGasIds) {
+async function rollbackConfirmCreatedLessons(createdGasIds, lessonKind = 'regular') {
+  const kind = String(lessonKind || 'regular').trim().toLowerCase() || 'regular';
   for (const id of createdGasIds || []) {
     try {
-      await deleteBookedLessonEventInGas(id);
+      await deleteBookedLessonEventInGas(id, { lessonKind: kind });
     } catch (cleanupErr) {
       console.error('[confirm-reserved] rollback create failed', id, cleanupErr?.message || cleanupErr);
     }
@@ -1196,7 +1197,9 @@ async function syncBookedLessonEventToCalendar(localEventId) {
     if ((updateResult.rowCount || 0) === 0) {
       await client.query('ROLLBACK');
       try {
-        await deleteBookedLessonEventInGas(gasRes.eventId);
+        await deleteBookedLessonEventInGas(gasRes.eventId, {
+          lessonKind: String(row.lesson_kind || 'regular').trim().toLowerCase() || 'regular',
+        });
       } catch {}
       await query(
         `UPDATE monthly_schedule
@@ -2465,7 +2468,7 @@ router.post('/confirm-reserved', async (req, res) => {
       excludeEventIds: collectExcludeCalendarEventIds([gasRes.eventId], [plannedItem]),
     });
     if (!calendarDel.ok) {
-      await rollbackConfirmCreatedLessons([gasRes.eventId]);
+      await rollbackConfirmCreatedLessons([gasRes.eventId], lessonKindForBooking);
       return res.status(502).json({
         error:
           calendarDel.error ||
@@ -2483,7 +2486,7 @@ router.post('/confirm-reserved', async (req, res) => {
 
     const dbPersist = await persistConfirmReservedWeek(plannedItem);
     if (!dbPersist.ok) {
-      await rollbackConfirmCreatedLessons([gasRes.eventId]);
+      await rollbackConfirmCreatedLessons([gasRes.eventId], lessonKindForBooking);
       return res.status(500).json({
         error: `${dbPersist.error}. Database was not changed; Calendar may need manual cleanup.`,
         event_id: eventIdRaw,

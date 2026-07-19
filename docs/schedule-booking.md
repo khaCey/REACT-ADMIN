@@ -71,6 +71,7 @@ Additional rules enforced on submit:
 - Demo titles use **`Name D/L`** and rows are stored with `lesson_kind = 'demo'`.
 - Linked-group bookings cannot mix demo, owner, and regular students.
 - The server sends `lessonKind: 'demo'` to GAS. The deployed `calendarAPI/Code.js` routes it to `DEMO_CALENDAR_ID`; create, update, delete, polling, and webhook registration all include that calendar.
+- Failed-create rollbacks pass `lessonKind` so cleanup prefers the same calendar the lesson was created on.
 
 ## Confirm Schedule — reserved → scheduled (weekly)
 
