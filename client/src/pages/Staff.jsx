@@ -536,15 +536,8 @@ export default function Staff() {
 
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-y-auto">
-      <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
+      <div className="flex items-center pt-3 pb-3 mb-4 border-b border-gray-200">
         <h2 className="text-2xl font-bold text-gray-900">Staff</h2>
-        <button
-          type="button"
-          onClick={() => setShowAddStaffModal(true)}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer"
-        >
-          Add Staff
-        </button>
       </div>
 
       {error && (
@@ -552,102 +545,35 @@ export default function Staff() {
       )}
 
       <>
-          <section className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Staff list</h3>
-            <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
-              <table className="min-w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Name</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Color</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Calendar ID</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Type</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Role</th>
-                    <th className="px-4 py-2 text-center text-sm font-semibold text-gray-700">Active</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {staffList.map((s) => (
-                    <tr
-                      key={s.id}
-                      onClick={() => setSelectedStaff({ ...s, canEditRole: isAdmin })}
-                      className="hover:bg-gray-100 cursor-pointer"
-                    >
-                      <td className="px-4 py-2 font-medium text-gray-900">{s.name}</td>
-                      <td className="px-4 py-2">
-                        {(() => {
-                          const chip = staffScheduleColorChipPresentation(s, s.id)
-                          return (
-                        <span
-                          className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${chip.className}`}
-                          style={chip.style}
-                          title={
-                            s.calendar_color_id
-                              ? isCalendarHexColor(s.calendar_color_id)
-                                ? `Custom color ${s.calendar_color_id}`
-                                : `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
-                              : 'Auto (set in Edit Staff)'
-                          }
-                        >
-                          {s.calendar_color_id
-                            ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
-                            : 'Auto'}
-                        </span>
-                          )
-                        })()}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-600 truncate max-w-[200px]">
-                        {s.calendar_id || '—'}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">
-                        {STAFF_TYPE_LABELS[s.staff_type] ?? s.staff_type ?? '—'}
-                      </td>
-                      <td className="px-4 py-2">
-                        {s.is_admin ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                            Admin
-                          </span>
-                        ) : s.is_operator ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-800">
-                            Operator
-                          </span>
-                        ) : (
-                          <span className="text-gray-600">Staff</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-center text-sm">
-                        {s.active !== false ? 'Yes' : 'No'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="mb-8">
-            <div className="flex items-center gap-2 mb-4">
+          <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Weekly roster</h3>
+                <p className="text-xs font-medium text-gray-500">Japanese staff</p>
+              </div>
+              <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setWeekStart(addDaysJapan(weekStart, -7))
                 }}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Previous week"
               >
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
-              <span className="font-medium text-gray-700 min-w-[220px] text-center">
+              <span className="min-w-[190px] text-center text-sm font-semibold text-gray-800">
                 {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
                 onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Next week"
               >
                 <ChevronRight className="w-5 h-5 text-gray-600" />
               </button>
+              </div>
             </div>
 
             {shiftLoadError && (
@@ -663,14 +589,9 @@ export default function Staff() {
               </div>
             ) : (
               <>
-                <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift roster (week)</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Read-only view of staff on shift (same people as the assignment table: Japanese staff and legacy
-                    rows, not English teachers). Colors match each person&apos;s schedule color from Edit Staff.
-                  </p>
+                <div className="mb-6">
                   {isAdmin && (
-                    <div className="flex flex-wrap items-center gap-3 mb-3">
+                    <div className="flex flex-wrap items-center gap-3 mb-4">
                       <button
                         type="button"
                         onClick={async () => {
@@ -695,15 +616,11 @@ export default function Staff() {
                           }
                         }}
                         disabled={fetchJapaneseBulkLoading}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {fetchJapaneseBulkLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-                        {fetchJapaneseBulkLoading ? 'Fetching…' : 'Fetch Japanese staff from Google (all)'}
+                        {fetchJapaneseBulkLoading ? 'Syncing…' : 'Sync roster'}
                       </button>
-                      <span className="text-xs text-gray-500">
-                        Same as Admin → uses calendar IDs on Japanese / legacy staff rows. Refreshes this week&apos;s
-                        roster and the teacher calendar below.
-                      </span>
                       {fetchJapaneseBulkError && (
                         <span className="text-sm text-red-600">{fetchJapaneseBulkError}</span>
                       )}
@@ -852,12 +769,11 @@ export default function Staff() {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift management (week view)</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Cell tint follows each staff member&apos;s Google Calendar color (set in Edit Staff). Unassigned
-                    slots stay white.
-                  </p>
-              <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-gray-900">Shift assignments</h3>
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">AM / PM</span>
+                  </div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto bg-gray-50/40">
                 <table className="w-full table-fixed border-collapse min-w-[600px]">
                   <colgroup>
                     <col className="w-14 max-w-[3.5rem]" />
@@ -1056,45 +972,45 @@ export default function Staff() {
             )}
           </section>
 
-          <section className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Teacher calendar</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Time blocks from teacher_schedules for this week (English teachers only; from Google Calendar fetch or shift assignment).
-              Legend colors use each teacher&apos;s Schedule color from Edit Staff (Google Calendar palette).
-            </p>
-            <div className="flex items-center gap-2 mb-4">
+          <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Teacher calendar</h3>
+                <p className="text-xs font-medium text-gray-500">English teachers</p>
+              </div>
+              <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setWeekStart(addDaysJapan(weekStart, -7))
                 }}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Previous week"
               >
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
-              <span className="font-medium text-gray-700 min-w-[220px] text-center">
+              <span className="min-w-[190px] text-center text-sm font-semibold text-gray-800">
                 {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
                 onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Next week"
               >
                 <ChevronRight className="w-5 h-5 text-gray-600" />
               </button>
+              </div>
             </div>
             {isAdmin && (
-              <div className="flex flex-wrap items-center gap-3 mb-4">
-                <label className="text-sm font-medium text-gray-700">Fetch from Google Calendar:</label>
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <select
                   value={fetchScheduleStaffId}
                   onChange={(e) => {
                     setFetchScheduleStaffId(e.target.value)
                     setFetchScheduleError('')
                   }}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[200px]"
+                  className="min-w-[200px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                 >
                   <option value="">— Select staff —</option>
                   {staffList
@@ -1133,10 +1049,10 @@ export default function Staff() {
                     }
                   }}
                   disabled={!fetchScheduleStaffId || fetchScheduleLoading}
-                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-                  {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
+                  {fetchScheduleLoading ? 'Syncing…' : 'Sync teacher'}
                 </button>
                 {fetchScheduleError && (
                   <span className="text-sm text-red-600">{fetchScheduleError}</span>
@@ -1145,19 +1061,17 @@ export default function Staff() {
                   <button
                     type="button"
                     onClick={() => setExtendShiftOpen(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 text-sm font-medium cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
                     title="Widen bookable hours in the app only (does not edit Google Calendar)"
                   >
                     <Clock className="w-4 h-4" />
-                    Extend shift (app only)
+                    Extend shift
                   </button>
                 )}
               </div>
             )}
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 mb-4">
-              <p className="text-xs text-gray-600 mb-2">
-                Recurring break presets (1 hour from start time) are applied to booking capacity and shown in this calendar.
-              </p>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Break presets</p>
               <div className="flex flex-wrap items-end gap-2">
                 <select
                   value={newBreakPreset.teacher_name}
@@ -1479,6 +1393,96 @@ export default function Staff() {
                 )}
         </div>
             </details>
+          </section>
+
+          <section className="mb-4 rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Staff directory</h3>
+                <p className="text-xs font-medium text-gray-500">{staffList.length} staff members</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddStaffModal(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                Add staff
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Color</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Role</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar</th>
+                    <th className="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {staffList.map((s) => (
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedStaff({ ...s, canEditRole: isAdmin })}
+                      className="cursor-pointer transition-colors hover:bg-green-50/50"
+                    >
+                      <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const chip = staffScheduleColorChipPresentation(s, s.id)
+                          return (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${chip.className}`}
+                              style={chip.style}
+                              title={
+                                s.calendar_color_id
+                                  ? isCalendarHexColor(s.calendar_color_id)
+                                    ? `Custom color ${s.calendar_color_id}`
+                                    : `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
+                                  : 'Auto'
+                              }
+                            >
+                              {s.calendar_color_id
+                                ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
+                                : 'Auto'}
+                            </span>
+                          )
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {STAFF_TYPE_LABELS[s.staff_type] ?? s.staff_type ?? '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {s.is_admin ? (
+                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">Admin</span>
+                        ) : s.is_operator ? (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">Operator</span>
+                        ) : (
+                          <span className="text-sm text-gray-600">Staff</span>
+                        )}
+                      </td>
+                      <td className="max-w-[220px] truncate px-4 py-3 text-xs text-gray-500" title={s.calendar_id || ''}>
+                        {s.calendar_id || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            s.active !== false
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {s.active !== false ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
 
