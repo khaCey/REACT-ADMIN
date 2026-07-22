@@ -33,15 +33,16 @@ export default function Sidebar({
   const isAdmin = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const isOperator = !!staff?.is_operator
   const canAccessStaff = isAdmin || isOperator
+  const hasListActions = !!(onOpenUnpaid || onOpenUnscheduled || onOpenHiatus)
 
   return (
     <aside
       id="sidebar"
-      className={`fixed top-16 left-0 h-screen w-64 bg-gray-50 border-r border-gray-200 transition-transform duration-300 z-40 ${
+      className={`fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-gray-50 border-r border-gray-200 transition-transform duration-300 z-40 flex flex-col ${
         collapsed ? '-translate-x-full' : 'translate-x-0'
       }`}
     >
-      <div className="p-4">
+      <div className="flex-1 overflow-y-auto p-4">
         <ul className="space-y-1">
           <li>
             <Link to="/dashboard" className={navItemClass(path === '/dashboard')}>
@@ -97,50 +98,50 @@ export default function Sidebar({
             </li>
           )}
         </ul>
-
-        {(onOpenUnpaid || onOpenUnscheduled || onOpenHiatus) && (
-          <div className="mt-4 border-t border-gray-200 pt-4">
-            <ul className="space-y-1">
-              {onOpenUnpaid && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={onOpenUnpaid}
-                    className={`${navItemClass(false)} w-full text-left`}
-                  >
-                    <AlertCircle className="w-5 h-5" />
-                    <span>未納</span>
-                  </button>
-                </li>
-              )}
-              {onOpenUnscheduled && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={onOpenUnscheduled}
-                    className={`${navItemClass(false)} w-full text-left`}
-                  >
-                    <Calendar className="w-5 h-5" />
-                    <span>未定</span>
-                  </button>
-                </li>
-              )}
-              {onOpenHiatus && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={onOpenHiatus}
-                    className={`${navItemClass(false)} w-full text-left`}
-                  >
-                    <Coffee className="w-5 h-5" />
-                    <span>休会中</span>
-                  </button>
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
       </div>
+
+      {hasListActions && (
+        <div className="shrink-0 border-t border-gray-200 bg-gray-50 p-4">
+          <ul className="space-y-1">
+            {onOpenUnpaid && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenUnpaid}
+                  className={`${navItemClass(false)} w-full text-left`}
+                >
+                  <AlertCircle className="w-5 h-5" />
+                  <span>未納</span>
+                </button>
+              </li>
+            )}
+            {onOpenUnscheduled && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenUnscheduled}
+                  className={`${navItemClass(false)} w-full text-left`}
+                >
+                  <Calendar className="w-5 h-5" />
+                  <span>未定</span>
+                </button>
+              </li>
+            )}
+            {onOpenHiatus && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenHiatus}
+                  className={`${navItemClass(false)} w-full text-left`}
+                >
+                  <Coffee className="w-5 h-5" />
+                  <span>休会中</span>
+                </button>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
     </aside>
   )
 }
