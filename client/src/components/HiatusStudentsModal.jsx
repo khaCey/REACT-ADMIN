@@ -6,6 +6,7 @@ import { HIATUS_STATUS } from './StudentStatusBadge'
 import StudentDetailsModal from './StudentDetailsModal'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
+import ToggleSwitch from './ToggleSwitch'
 import { useToast } from '../context/ToastContext'
 
 /** Display 再開予定 as mm/yyyy, or 未定 when unset. */
@@ -265,24 +266,24 @@ export default function HiatusStudentsModal({ onClose }) {
                           />
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300 cursor-pointer disabled:opacity-50"
-                            checked={!!s.HiatusContacted}
-                            disabled={rowBusy}
-                            onChange={(e) => handleContactedChange(s, e.target.checked)}
-                            aria-label={`連絡 ${s.Name}`}
-                          />
+                          <div className="inline-flex justify-center">
+                            <ToggleSwitch
+                              checked={!!s.HiatusContacted}
+                              disabled={rowBusy}
+                              onChange={(next) => handleContactedChange(s, next)}
+                              aria-label={`連絡 ${s.Name}`}
+                            />
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300 cursor-pointer disabled:opacity-50"
-                            checked={!!s.HiatusOtsukisha}
-                            disabled={rowBusy}
-                            onChange={(e) => handleOtsukishaChange(s, e.target.checked)}
-                            aria-label={`お月謝 ${s.Name}`}
-                          />
+                          <div className="inline-flex justify-center">
+                            <ToggleSwitch
+                              checked={!!s.HiatusOtsukisha}
+                              disabled={rowBusy}
+                              onChange={(next) => handleOtsukishaChange(s, next)}
+                              aria-label={`お月謝 ${s.Name}`}
+                            />
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-right">
                           <div className="inline-flex items-center gap-2">
