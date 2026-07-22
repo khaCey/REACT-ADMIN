@@ -1,20 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Coffee, RefreshCw } from 'lucide-react'
+import { Coffee, RefreshCw, X } from 'lucide-react'
 import { api } from '../api'
-import { HIATUS_STATUS } from './StudentStatusBadge'
 import StudentDetailsModal from './StudentDetailsModal'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import ToggleSwitch from './ToggleSwitch'
 import { useToast } from '../context/ToastContext'
 
-/** Display 再開予定 as mm/yyyy, or 未定 when unset. */
+/** Display 再開予定 as mm/yyyy, or TBD when unset. */
 function formatReturnDate(iso) {
-  if (!iso) return '未定'
+  if (!iso) return 'TBD'
   const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
   if (m) return `${m[2]}/${m[1]}`
-  return '未定'
+  return 'TBD'
 }
 
 function parseYearMonth(iso) {
@@ -47,28 +46,28 @@ function ExpectedReturnEditors({ value, disabled, onChange }) {
   }
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="inline-flex items-center gap-1.5">
       <select
         value={month}
         disabled={disabled}
         onChange={(e) => commit(e.target.value, year || String(new Date().getFullYear()))}
-        className="rounded-md border border-gray-300 px-1.5 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
+        className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 shadow-sm disabled:opacity-50 cursor-pointer hover:border-gray-300"
         aria-label="Month"
       >
-        <option value="">--</option>
+        <option value="">MM</option>
         {MONTH_OPTIONS.map((mm) => (
           <option key={mm} value={mm}>{mm}</option>
         ))}
       </select>
-      <span className="text-gray-500 text-sm">/</span>
+      <span className="text-gray-400 text-sm font-medium">/</span>
       <select
         value={year}
         disabled={disabled}
         onChange={(e) => commit(month || '01', e.target.value)}
-        className="rounded-md border border-gray-300 px-1.5 py-1 text-sm bg-white disabled:opacity-50 cursor-pointer"
+        className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 shadow-sm disabled:opacity-50 cursor-pointer hover:border-gray-300"
         aria-label="Year"
       >
-        <option value="">----</option>
+        <option value="">YYYY</option>
         {yearChoices.map((y) => (
           <option key={y} value={y}>{y}</option>
         ))}
@@ -78,13 +77,15 @@ function ExpectedReturnEditors({ value, disabled, onChange }) {
           type="button"
           disabled={disabled}
           onClick={() => onChange('')}
-          className="ml-1 text-xs text-gray-500 hover:text-gray-800 underline cursor-pointer disabled:opacity-50"
-          title="Clear to 未定"
+          className="ml-0.5 rounded-md px-1.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
+          title="Clear to TBD"
         >
-          未定
+          Clear
         </button>
       ) : (
-        <span className="ml-1 text-xs text-gray-400">未定</span>
+        <span className="ml-0.5 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+          TBD
+        </span>
       )}
     </div>
   )
@@ -156,7 +157,7 @@ export default function HiatusStudentsModal({ onClose }) {
     runHiatusAction(
       student.ID,
       { action: 'update', expected_return: next },
-      next ? `再開予定 updated to ${formatReturnDate(next)}` : '再開予定 cleared (未定)'
+      next ? `Return date updated to ${formatReturnDate(next)}` : 'Return date cleared (TBD)'
     )
   }
 
@@ -164,7 +165,7 @@ export default function HiatusStudentsModal({ onClose }) {
     await runHiatusAction(
       student.ID,
       { action: 'returned' },
-      `${student.Name || 'Student'} set to Active (再開)`
+      `${student.Name || 'Student'} set to Active`
     )
   }
 
@@ -187,111 +188,136 @@ export default function HiatusStudentsModal({ onClose }) {
     <div className="fixed inset-0 z-[50]" role="dialog" aria-modal="true" aria-labelledby="hiatusModalTitle">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto">
-        <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh]">
+        <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 flex flex-col max-h-[90vh] overflow-hidden">
           {loading && <ModalLoadingOverlay className="rounded-2xl" />}
-          <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-green-600 text-white rounded-t-2xl">
-            <h3 id="hiatusModalTitle" className="text-lg font-semibold">休会中 — Students on break</h3>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-white/30 bg-white/10 px-2.5 py-1 text-xs font-medium hover:bg-white/20 cursor-pointer"
-            >
-              Close
-            </button>
-          </header>
-          <div className="p-6 flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-              <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Coffee className="w-5 h-5 text-green-600" />
-                </div>
-                <div>
-                  <h4 className="text-lg font-medium text-gray-900">Temporary break from lessons</h4>
-                  <p className="text-sm text-gray-500">Track outreach and return. Click a name to open student details.</p>
-                </div>
+
+          <header className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-green-600 to-emerald-600 text-white">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
+                <Coffee className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <h3 id="hiatusModalTitle" className="text-lg font-semibold leading-tight">
+                  Students on break
+                </h3>
+                <p className="text-xs text-white/80">
+                  {loading ? 'Loading…' : `${list.length} on temporary break`}
+                </p>
               </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={fetchList}
                 disabled={loading}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50 cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 cursor-pointer disabled:opacity-50"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-white/25 bg-white/10 hover:bg-white/20 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
+          </header>
 
-            {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+          <div className="p-5 flex flex-col flex-1 min-h-0">
+            {error && (
+              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </p>
+            )}
 
-            <div className="relative overflow-auto max-h-[50vh] w-full rounded-xl border border-black/5 bg-white shadow-sm flex-1 min-h-0">
-              <table className="min-w-full border-separate border-spacing-0">
-                <thead className="sticky top-0 bg-green-600 text-white shadow z-10">
+            <div className="relative overflow-auto max-h-[58vh] w-full rounded-xl border border-gray-200 bg-white shadow-sm flex-1 min-h-0">
+              <table className="min-w-full">
+                <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur border-b border-gray-200">
                   <tr>
-                    <th className="px-3 py-2 text-left font-semibold">Student</th>
-                    <th className="px-3 py-2 text-left font-semibold">ID</th>
-                    <th className="px-3 py-2 text-left font-semibold">再開予定</th>
-                    <th className="px-3 py-2 text-center font-semibold">連絡</th>
-                    <th className="px-3 py-2 text-center font-semibold">お月謝</th>
-                    <th className="px-3 py-2 text-right font-semibold">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Student
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      ID
+                    </th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Return
+                    </th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Contacted
+                    </th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Tuition
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {!loading && list.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
-                        No students on break ({HIATUS_STATUS}).
+                      <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-500">
+                        No students on break.
                       </td>
                     </tr>
                   )}
-                  {list.map((s) => {
+                  {list.map((s, index) => {
                     const rowBusy = busyId === s.ID
                     return (
-                      <tr key={s.ID} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="px-3 py-2 text-sm">
+                      <tr
+                        key={s.ID}
+                        className={`transition-colors hover:bg-green-50/40 ${
+                          index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'
+                        }`}
+                      >
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             onClick={() => setDetailStudentId(s.ID)}
-                            className="text-left text-blue-700 hover:underline font-medium cursor-pointer"
+                            className="text-left text-sm font-semibold text-green-700 hover:text-green-800 hover:underline cursor-pointer"
                           >
                             {s.Name || '—'}
                           </button>
-                          {s.漢字 ? <div className="text-xs text-gray-500">{s.漢字}</div> : null}
                         </td>
-                        <td className="px-3 py-2 text-sm text-gray-700">{s.ID}</td>
-                        <td className="px-3 py-2 text-sm text-gray-700 whitespace-nowrap">
+                        <td className="px-3 py-3 text-sm tabular-nums text-gray-600">{s.ID}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">
                           <ExpectedReturnEditors
                             value={s.HiatusExpectedReturn}
                             disabled={rowBusy}
                             onChange={(monthValue) => handleExpectedReturnChange(s, monthValue)}
                           />
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-3 text-center">
                           <div className="inline-flex justify-center">
                             <ToggleSwitch
                               checked={!!s.HiatusContacted}
                               disabled={rowBusy}
                               onChange={(next) => handleContactedChange(s, next)}
-                              aria-label={`連絡 ${s.Name}`}
+                              aria-label={`Contacted ${s.Name}`}
                             />
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-3 text-center">
                           <div className="inline-flex justify-center">
                             <ToggleSwitch
                               checked={!!s.HiatusOtsukisha}
                               disabled={rowBusy}
                               onChange={(next) => handleOtsukishaChange(s, next)}
-                              aria-label={`お月謝 ${s.Name}`}
+                              aria-label={`Tuition ${s.Name}`}
                             />
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-2">
                             <button
                               type="button"
                               disabled={rowBusy}
                               onClick={() => handleReturned(s)}
-                              className="rounded-md border border-green-600 bg-white px-2.5 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-50"
+                              className="rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-green-700 cursor-pointer disabled:opacity-50"
                             >
                               Set Active
                             </button>
@@ -299,7 +325,7 @@ export default function HiatusStudentsModal({ onClose }) {
                               type="button"
                               disabled={rowBusy}
                               onClick={() => setDormantTarget(s)}
-                              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-50"
                             >
                               Set Dormant
                             </button>
@@ -311,19 +337,17 @@ export default function HiatusStudentsModal({ onClose }) {
                 </tbody>
               </table>
             </div>
-
-            {!loading && (
-              <div className="mt-4 text-sm text-gray-600">
-                <span className="font-medium">Total on break: </span>
-                <span className="font-semibold text-green-700">{list.length}</span>
-              </div>
-            )}
           </div>
-          <footer className="flex-shrink-0 flex justify-end gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-2xl">
+
+          <footer className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 bg-gray-50 border-t border-gray-200">
+            <p className="text-sm text-gray-600">
+              <span className="font-medium text-gray-500">On break</span>{' '}
+              <span className="font-semibold text-green-700 tabular-nums">{list.length}</span>
+            </p>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 bg-white px-4 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
             >
               Close
             </button>
@@ -350,7 +374,7 @@ export default function HiatusStudentsModal({ onClose }) {
       {dormantTarget && (
         <ConfirmActionModal
           title="Set Dormant"
-          message={`Move ${dormantTarget.Name || 'this student'} from 休会中 to Dormant? They will be removed from the break list.`}
+          message={`Move ${dormantTarget.Name || 'this student'} from break to Dormant? They will be removed from this list.`}
           confirmLabel="Set Dormant"
           destructive
           confirming={dormantConfirming}
