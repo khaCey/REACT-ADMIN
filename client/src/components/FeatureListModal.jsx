@@ -146,21 +146,21 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
             </div>
           </header>
 
-          <div className="p-5 flex flex-col flex-1 min-h-0">
+          <div className="flex flex-col flex-1 min-h-0">
             {error && (
-              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </p>
             )}
 
-            <div className="relative overflow-auto max-h-[58vh] w-full rounded-xl border border-gray-200 bg-white shadow-sm flex-1 min-h-0">
+            <div className="relative overflow-auto max-h-[58vh] w-full flex-1 min-h-0 border-t border-gray-100">
               <table className="min-w-full">
-                <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur border-b border-gray-200">
+                <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Student
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                       ID
                     </th>
                   </tr>
@@ -168,7 +168,7 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
                 <tbody className="divide-y divide-gray-100">
                   {!loading && !error && list.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={2} className="px-5 py-12 text-center text-sm text-gray-500">
                         {isUnpaid ? 'No unpaid students for this month.' : 'No unscheduled students this month.'}
                       </td>
                     </tr>
@@ -183,10 +183,10 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
                           index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'
                         }`}
                       >
-                        <td className="px-4 py-3 text-sm font-semibold text-green-700 hover:underline">
+                        <td className="px-5 py-3 text-sm font-semibold text-green-700 hover:underline">
                           {s.Name || '—'}
                         </td>
-                        <td className="px-4 py-3 text-right text-sm tabular-nums text-gray-600">{s.ID}</td>
+                        <td className="px-5 py-3 text-right text-sm tabular-nums text-gray-600">{s.ID}</td>
                       </tr>
                     ))}
                 </tbody>

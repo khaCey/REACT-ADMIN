@@ -226,33 +226,33 @@ export default function HiatusStudentsModal({ onClose }) {
             </div>
           </header>
 
-          <div className="p-5 flex flex-col flex-1 min-h-0">
+          <div className="flex flex-col flex-1 min-h-0">
             {error && (
-              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </p>
             )}
 
-            <div className="relative overflow-auto max-h-[58vh] w-full rounded-xl border border-gray-200 bg-white shadow-sm flex-1 min-h-0">
+            <div className="relative overflow-auto max-h-[58vh] w-full flex-1 min-h-0 border-t border-gray-100">
               <table className="min-w-full">
-                <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur border-b border-gray-200">
+                <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Student
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       ID
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold tracking-wide text-gray-500">
+                    <th className="px-4 py-3 text-left text-xs font-semibold tracking-wide text-gray-500">
                       再開予定
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
+                    <th className="px-4 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
                       連絡
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
+                    <th className="px-4 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
                       お月謝
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Actions
                     </th>
                   </tr>
@@ -260,7 +260,7 @@ export default function HiatusStudentsModal({ onClose }) {
                 <tbody className="divide-y divide-gray-100">
                   {!loading && list.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={6} className="px-5 py-12 text-center text-sm text-gray-500">
                         No students on break.
                       </td>
                     </tr>
@@ -274,7 +274,7 @@ export default function HiatusStudentsModal({ onClose }) {
                           index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'
                         }`}
                       >
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-3">
                           <button
                             type="button"
                             onClick={() => setDetailStudentId(s.ID)}
@@ -283,15 +283,15 @@ export default function HiatusStudentsModal({ onClose }) {
                             {s.Name || '—'}
                           </button>
                         </td>
-                        <td className="px-3 py-3 text-sm tabular-nums text-gray-600">{s.ID}</td>
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-4 py-3 text-sm tabular-nums text-gray-600">{s.ID}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <ExpectedReturnEditors
                             value={s.HiatusExpectedReturn}
                             disabled={rowBusy}
                             onChange={(monthValue) => handleExpectedReturnChange(s, monthValue)}
                           />
                         </td>
-                        <td className="px-3 py-3 text-center">
+                        <td className="px-4 py-3 text-center">
                           <div className="inline-flex justify-center">
                             <ToggleSwitch
                               checked={!!s.HiatusContacted}
@@ -301,7 +301,7 @@ export default function HiatusStudentsModal({ onClose }) {
                             />
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-center">
+                        <td className="px-4 py-3 text-center">
                           <div className="inline-flex justify-center">
                             <ToggleSwitch
                               checked={!!s.HiatusOtsukisha}
@@ -311,7 +311,7 @@ export default function HiatusStudentsModal({ onClose }) {
                             />
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-5 py-3 text-right">
                           <div className="inline-flex items-center gap-2">
                             <button
                               type="button"
