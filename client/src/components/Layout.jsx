@@ -65,13 +65,13 @@ export default function Layout() {
 
   return (
     <>
-      <Navbar
-        onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+      <Navbar onToggleSidebar={() => setSidebarCollapsed((c) => !c)} />
+      <Sidebar
+        collapsed={sidebarCollapsed}
         onOpenUnpaid={() => setFeatureModalMode('unpaid')}
         onOpenUnscheduled={() => setFeatureModalMode('unscheduled')}
         onOpenHiatus={() => setFeatureModalMode('hiatus')}
       />
-      <Sidebar collapsed={sidebarCollapsed} />
       <main
         id="mainContent"
         className={`bg-gray-100 transition-all duration-300 sidebar-content flex flex-col ${
