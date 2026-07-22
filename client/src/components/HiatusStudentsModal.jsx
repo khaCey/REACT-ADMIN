@@ -8,12 +8,12 @@ import ModalLoadingOverlay from './ModalLoadingOverlay'
 import ToggleSwitch from './ToggleSwitch'
 import { useToast } from '../context/ToastContext'
 
-/** Display 再開予定 as mm/yyyy, or TBD when unset. */
+/** Display 再開予定 as mm/yyyy, or 未定 when unset. */
 function formatReturnDate(iso) {
-  if (!iso) return 'TBD'
+  if (!iso) return '未定'
   const m = String(iso).trim().match(/^(\d{4})-(\d{2})/)
   if (m) return `${m[2]}/${m[1]}`
-  return 'TBD'
+  return '未定'
 }
 
 function parseYearMonth(iso) {
@@ -78,13 +78,13 @@ function ExpectedReturnEditors({ value, disabled, onChange }) {
           disabled={disabled}
           onClick={() => onChange('')}
           className="ml-0.5 rounded-md px-1.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
-          title="Clear to TBD"
+          title="Clear to 未定"
         >
-          Clear
+          未定
         </button>
       ) : (
-        <span className="ml-0.5 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-          TBD
+        <span className="ml-0.5 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+          未定
         </span>
       )}
     </div>
@@ -157,7 +157,7 @@ export default function HiatusStudentsModal({ onClose }) {
     runHiatusAction(
       student.ID,
       { action: 'update', expected_return: next },
-      next ? `Return date updated to ${formatReturnDate(next)}` : 'Return date cleared (TBD)'
+      next ? `再開予定 updated to ${formatReturnDate(next)}` : '再開予定 cleared (未定)'
     )
   }
 
@@ -165,7 +165,7 @@ export default function HiatusStudentsModal({ onClose }) {
     await runHiatusAction(
       student.ID,
       { action: 'returned' },
-      `${student.Name || 'Student'} set to Active`
+      `${student.Name || 'Student'} set to Active (再開)`
     )
   }
 
@@ -198,7 +198,7 @@ export default function HiatusStudentsModal({ onClose }) {
               </span>
               <div className="min-w-0">
                 <h3 id="hiatusModalTitle" className="text-lg font-semibold leading-tight">
-                  Students on break
+                  休会中
                 </h3>
                 <p className="text-xs text-white/80">
                   {loading ? 'Loading…' : `${list.length} on temporary break`}
@@ -243,14 +243,14 @@ export default function HiatusStudentsModal({ onClose }) {
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       ID
                     </th>
-                    <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Return
+                    <th className="px-3 py-3 text-left text-xs font-semibold tracking-wide text-gray-500">
+                      再開予定
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Contacted
+                    <th className="px-3 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
+                      連絡
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Tuition
+                    <th className="px-3 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
+                      お月謝
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Actions
@@ -297,7 +297,7 @@ export default function HiatusStudentsModal({ onClose }) {
                               checked={!!s.HiatusContacted}
                               disabled={rowBusy}
                               onChange={(next) => handleContactedChange(s, next)}
-                              aria-label={`Contacted ${s.Name}`}
+                              aria-label={`連絡 ${s.Name}`}
                             />
                           </div>
                         </td>
@@ -307,7 +307,7 @@ export default function HiatusStudentsModal({ onClose }) {
                               checked={!!s.HiatusOtsukisha}
                               disabled={rowBusy}
                               onChange={(next) => handleOtsukishaChange(s, next)}
-                              aria-label={`Tuition ${s.Name}`}
+                              aria-label={`お月謝 ${s.Name}`}
                             />
                           </div>
                         </td>
@@ -341,7 +341,7 @@ export default function HiatusStudentsModal({ onClose }) {
 
           <footer className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 bg-gray-50 border-t border-gray-200">
             <p className="text-sm text-gray-600">
-              <span className="font-medium text-gray-500">On break</span>{' '}
+              <span className="font-medium text-gray-500">休会中</span>{' '}
               <span className="font-semibold text-green-700 tabular-nums">{list.length}</span>
             </p>
             <button
@@ -374,7 +374,7 @@ export default function HiatusStudentsModal({ onClose }) {
       {dormantTarget && (
         <ConfirmActionModal
           title="Set Dormant"
-          message={`Move ${dormantTarget.Name || 'this student'} from break to Dormant? They will be removed from this list.`}
+          message={`Move ${dormantTarget.Name || 'this student'} from 休会中 to Dormant? They will be removed from this list.`}
           confirmLabel="Set Dormant"
           destructive
           confirming={dormantConfirming}
