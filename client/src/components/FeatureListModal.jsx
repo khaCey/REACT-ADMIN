@@ -1,15 +1,28 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertCircle, CalendarX, RefreshCw } from 'lucide-react'
+import { AlertCircle, CalendarX, RefreshCw, X } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from './StudentDetailsModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 /**
- * Legacy-style modal: Unpaid Students or Unscheduled Students.
- * Two columns (Student Name, Student ID). Click row → open student details.
+ * Modal list: 未納 (unpaid) or 未定 (unscheduled).
+ * Click row → open student details.
  */
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
 function getCurrentMonthYYYYMM() {
   const now = new Date()
@@ -57,129 +70,140 @@ export default function FeatureListModal({ mode, onClose, onOpenStudent }) {
     else setDetailStudentId(id)
   }
 
-  const title = isUnpaid ? 'Unpaid Students' : 'Unscheduled Students'
-  const subtitle = isUnpaid
-    ? 'Students with Outstanding Payments'
-    : 'Students with no Appointments this month'
-  const countLabel = isUnpaid ? 'Total unpaid students' : 'Total unscheduled students'
+  const title = isUnpaid ? '未納' : '未定'
+  const accent = isUnpaid
+    ? { iconBg: 'bg-red-500/20', icon: 'text-white', count: 'text-red-600' }
+    : { iconBg: 'bg-white/15', icon: 'text-white', count: 'text-green-700' }
 
   const modal = (
     <div className="fixed inset-0 z-[50]" role="dialog" aria-modal="true" aria-labelledby="featureModalTitle">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto">
-        <div className="relative w-full max-w-4xl rounded-2xl bg-white shadow-xl ring-1 ring-black/5 flex flex-col max-h-[90vh]">
+        <div className="relative w-full max-w-3xl rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 flex flex-col max-h-[90vh] overflow-hidden">
           {loading && <ModalLoadingOverlay className="rounded-2xl" />}
-          <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-green-600 text-white rounded-t-2xl">
-            <h3 id="featureModalTitle" className="text-lg font-semibold">{title}</h3>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-white/30 bg-white/10 px-2.5 py-1 text-xs font-medium hover:bg-white/20 cursor-pointer"
-            >
-              Close
-            </button>
-          </header>
-          <div className="p-6 flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                  {isUnpaid ? (
-                    <AlertCircle className="w-5 h-5 text-red-600" />
-                  ) : (
-                    <CalendarX className="w-5 h-5 text-green-600" />
-                  )}
-                </div>
-                <div>
-                  <h4 className="text-lg font-medium text-gray-900">{subtitle}</h4>
-                  <p className="text-sm text-gray-500">Click on a student to view their details</p>
-                </div>
-              </div>
-              {isUnpaid && (
-                <div className="flex items-center gap-2">
-                  <label htmlFor="unpaidMonthSelect" className="text-sm text-gray-600">Month:</label>
-                  <select
-                    id="unpaidMonthSelect"
-                    value={unpaidMonth}
-                    onChange={(e) => setUnpaidMonth(e.target.value)}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 cursor-pointer"
-                  >
-                    {(() => {
-                      const now = new Date()
-                      const cur = getCurrentMonthYYYYMM()
-                      const options = []
-                      for (let i = -2; i <= 2; i++) {
-                        const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
-                        const yyyyMm = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-                        const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}${yyyyMm === cur ? ' (Current)' : ''}`
-                        options.push(<option key={yyyyMm} value={yyyyMm}>{label}</option>)
-                      }
-                      return options
-                    })()}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={fetchList}
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50 cursor-pointer"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    Refresh
-                  </button>
-                </div>
-              )}
-            </div>
 
-            <div className="relative overflow-auto max-h-[50vh] w-full rounded-xl border border-black/5 bg-white shadow-sm flex-1 min-h-0">
-              <table className="min-w-full border-separate border-spacing-0">
-                <thead className="sticky top-0 bg-green-600 text-white shadow">
+          <header className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-green-600 to-emerald-600 text-white">
+            <div className="flex items-center gap-3 min-w-0">
+              <span
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ring-white/20 ${accent.iconBg}`}
+              >
+                {isUnpaid ? (
+                  <AlertCircle className={`h-5 w-5 ${accent.icon}`} />
+                ) : (
+                  <CalendarX className={`h-5 w-5 ${accent.icon}`} />
+                )}
+              </span>
+              <div className="min-w-0">
+                <h3 id="featureModalTitle" className="text-lg font-semibold leading-tight">
+                  {title}
+                </h3>
+                <p className="text-xs text-white/80">
+                  {loading ? 'Loading…' : `${list.length} student${list.length === 1 ? '' : 's'}`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {isUnpaid && (
+                <select
+                  id="unpaidMonthSelect"
+                  value={unpaidMonth}
+                  onChange={(e) => setUnpaidMonth(e.target.value)}
+                  className="rounded-lg border border-white/25 bg-white/10 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white/40 cursor-pointer [&>option]:text-gray-900"
+                  aria-label="Month"
+                >
+                  {(() => {
+                    const now = new Date()
+                    const cur = getCurrentMonthYYYYMM()
+                    const options = []
+                    for (let i = -2; i <= 2; i++) {
+                      const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+                      const yyyyMm = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                      const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}${yyyyMm === cur ? ' (Current)' : ''}`
+                      options.push(
+                        <option key={yyyyMm} value={yyyyMm}>
+                          {label}
+                        </option>
+                      )
+                    }
+                    return options
+                  })()}
+                </select>
+              )}
+              <button
+                type="button"
+                onClick={fetchList}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-white/25 bg-white/10 hover:bg-white/20 cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </header>
+
+          <div className="p-5 flex flex-col flex-1 min-h-0">
+            {error && (
+              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </p>
+            )}
+
+            <div className="relative overflow-auto max-h-[58vh] w-full rounded-xl border border-gray-200 bg-white shadow-sm flex-1 min-h-0">
+              <table className="min-w-full">
+                <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur border-b border-gray-200">
                   <tr>
-                    <th className="px-3 py-2 text-left font-semibold">Student Name</th>
-                    <th className="px-3 py-2 text-left font-semibold">Student ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Student
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      ID
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
-                  {!loading && error && (
-                    <tr>
-                      <td colSpan={2} className="px-3 py-2 text-center text-red-600">
-                        {error}
-                      </td>
-                    </tr>
-                  )}
+                <tbody className="divide-y divide-gray-100">
                   {!loading && !error && list.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-3 py-2 text-center text-gray-500">
-                        {isUnpaid ? 'No unpaid entries in the Unpaid list.' : 'No unscheduled students this month.'}
+                      <td colSpan={2} className="px-4 py-12 text-center text-sm text-gray-500">
+                        {isUnpaid ? 'No unpaid students for this month.' : 'No unscheduled students this month.'}
                       </td>
                     </tr>
                   )}
-                  {!loading && !error && list.length > 0 &&
-                    list.map((s) => (
+                  {!loading &&
+                    !error &&
+                    list.map((s, index) => (
                       <tr
                         key={s.ID}
                         onClick={() => handleRowClick(s.ID)}
-                        className="hover:bg-gray-50 cursor-pointer border-b border-gray-100"
+                        className={`cursor-pointer transition-colors hover:bg-green-50/50 ${
+                          index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'
+                        }`}
                       >
-                        <td className="px-3 py-2 text-sm text-gray-900">{s.Name || ''}</td>
-                        <td className="px-3 py-2 text-sm">
-                          <span className="text-blue-600 underline">{s.ID}</span>
-                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-green-700">{s.Name || '—'}</td>
+                        <td className="px-4 py-3 text-right text-sm tabular-nums text-gray-500">{s.ID}</td>
                       </tr>
                     ))}
                 </tbody>
               </table>
             </div>
-
-            {!loading && list.length > 0 && (
-              <div className="mt-4 text-sm text-gray-600">
-                <span className="font-medium">{countLabel}: </span>
-                <span className="font-semibold text-red-600">{list.length}</span>
-              </div>
-            )}
           </div>
-          <footer className="flex-shrink-0 flex justify-end gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-2xl">
+
+          <footer className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 bg-gray-50 border-t border-gray-200">
+            <p className="text-sm text-gray-600">
+              <span className="font-medium text-gray-500">{title}</span>{' '}
+              <span className={`font-semibold tabular-nums ${accent.count}`}>{list.length}</span>
+            </p>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 bg-white px-4 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
             >
               Close
             </button>
