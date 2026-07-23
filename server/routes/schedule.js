@@ -71,13 +71,9 @@ function rowsShouldAttemptGasCalendarDelete(rows) {
  */
 async function attemptGasCalendarDeleteForLesson(monthlyEventId, rows, options = {}) {
   const row = rows?.[0];
-  const status = String(row?.status || '').toLowerCase().trim();
   const seriesMasterId = row ? bareSeriesMasterFromScheduleRow(row) : '';
-  if (
-    seriesMasterId &&
-    isBookingGasEnabled() &&
-    (status === 'reserved' || options.allowSeriesDelete === true)
-  ) {
+  // Whole-series Calendar delete only when explicitly requested (never on normal / single reserved remove).
+  if (seriesMasterId && isBookingGasEnabled() && options.allowSeriesDelete === true) {
     const seriesDel = await deleteReservedCalendarSeriesInGas({
       seriesMasterId,
       lessonKind: String(row?.lesson_kind || 'regular').trim().toLowerCase(),
@@ -3577,52 +3573,50 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
       if (!/^\d{4}-\d{2}$/.test(confirmMonth)) {
         return res.status(400).json({ error: 'Could not determine month for reserved remove' });
       }
-      const batchRows = await queryReservedBatchRows(anchorRow, confirmMonth);
-      if (batchRows.length === 0) {
-        return res.status(404).json({ error: 'No matching reserved rows for this month' });
-      }
-      const eventIds = [
-        ...new Set(batchRows.map((r) => String(r.event_id || '').trim()).filter(Boolean)),
-      ];
+      const seriesMasterId = bareSeriesMasterFromScheduleRow(anchorRow);
 
-      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(batchRows)) {
-        const holdDel = await deleteReservedHoldFromCalendar(batchRows, anchorRow);
-        if (!holdDel.ok) {
+      // Single occurrence only — do not delete the whole reserved series/batch.
+      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(oldRows)) {
+        const weekDel = await deleteReservedPlaceholderForWeek(oldRows);
+        if (!weekDel.ok) {
           return res.status(502).json({
-            error: holdDel.error || 'Failed to delete reserved calendar events',
+            error: weekDel.error || 'Failed to delete reserved calendar occurrence',
             event_id: eventId,
-            series_master_id: holdDel.seriesMasterId,
+            series_master_id: seriesMasterId || null,
+            ...(weekDel.gas_revision ? { gas_script_revision: weekDel.gas_revision } : {}),
           });
         }
       }
 
-      let removedRowCount = 0;
-      for (const eid of eventIds) {
-        const rowsForEvent = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eid])).rows;
-        if (rowsForEvent.length === 0) continue;
-        await recordScheduleSlotDismissals(rowsForEvent);
-        await deleteAllMonthlyScheduleRowsAtLessonSlot(rowsForEvent);
-        await query('DELETE FROM monthly_schedule WHERE event_id = $1', [eid]);
-        for (const oldRow of rowsForEvent) {
-          await logChange(
-            {
-              entityType: 'monthly_schedule',
-              entityKey: `${eid}_${oldRow.student_name}`,
-              action: 'delete',
-              oldData: oldRow,
-              newData: null,
-            },
-            req
-          );
-          removedRowCount += 1;
+      const { slotDeleted } = await finalizeLessonRemoveFromDb(oldRows, eventId, req);
+
+      // If this was the last reserved week in the month batch, clean up the empty series master.
+      let seriesCleanedUp = false;
+      if (!localOnlyRemove && seriesMasterId && isBookingGasEnabled()) {
+        const remainingReservedWeeks = await countReservedWeeksInBatch(anchorRow, confirmMonth);
+        if (remainingReservedWeeks === 0) {
+          const lessonKind = String(anchorRow.lesson_kind || 'regular').trim().toLowerCase();
+          const delSeries = await deleteReservedCalendarSeriesInGas({ seriesMasterId, lessonKind });
+          const seriesOutcome = interpretGasDeleteResultForDbRemove(delSeries);
+          if (!seriesOutcome.proceed) {
+            return res.status(502).json({
+              error:
+                seriesOutcome.blockingError ||
+                'Occurrence removed but failed to delete empty reserved calendar series',
+              event_id: eventId,
+              series_master_id: seriesMasterId,
+            });
+          }
+          seriesCleanedUp = true;
         }
       }
+
       return res.json({
         ok: true,
         event_id: eventId,
-        reserved_batch: true,
-        removed_event_count: eventIds.length,
-        removed_row_count: removedRowCount,
+        reserved_single: true,
+        series_cleaned_up: seriesCleanedUp,
+        ...(slotDeleted > (oldRows.length || 0) ? { duplicate_slot_rows_removed: slotDeleted } : {}),
       });
     }
 
