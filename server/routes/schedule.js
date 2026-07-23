@@ -3569,54 +3569,80 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     const anchorStatus = String(anchorRow.status || '').toLowerCase().trim();
 
     if (anchorStatus === 'reserved') {
-      const confirmMonth = scheduleRowDateToYyyyMmDd(anchorRow.date).slice(0, 7);
+      const occurrenceDateHint = String(req.query?.occurrenceDate || '').trim();
+      let targetRows = oldRows;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateHint)) {
+        const pinned = oldRows.filter(
+          (r) => scheduleRowDateToYyyyMmDd(r.date) === occurrenceDateHint
+        );
+        if (pinned.length > 0) targetRows = pinned;
+        else {
+          const byDate = (
+            await query(
+              `SELECT * FROM monthly_schedule WHERE event_id = $1 AND date = $2::date`,
+              [eventId, occurrenceDateHint]
+            )
+          ).rows;
+          if (byDate.length > 0) targetRows = byDate;
+        }
+      }
+      const targetAnchor = targetRows[0] || anchorRow;
+      const confirmMonth = scheduleRowDateToYyyyMmDd(targetAnchor.date).slice(0, 7);
       if (!/^\d{4}-\d{2}$/.test(confirmMonth)) {
         return res.status(400).json({ error: 'Could not determine month for reserved remove' });
       }
-      const seriesMasterId = bareSeriesMasterFromScheduleRow(anchorRow);
+      const targetDate = scheduleRowDateToYyyyMmDd(targetAnchor.date);
+      const targetStartIso = targetAnchor.start ? new Date(targetAnchor.start).toISOString() : null;
+      if (!targetDate || !targetStartIso) {
+        return res.status(400).json({ error: 'Reserved lesson is missing date/start' });
+      }
 
-      // Single occurrence only — do not delete the whole reserved series/batch.
-      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(oldRows)) {
-        const weekDel = await deleteReservedPlaceholderForWeek(oldRows);
+      // Single occurrence only — never delete the recurring series master here.
+      // Series cleanup belongs to confirm-reserved / purge flows. Cleaning the series
+      // after a single Remove wiped earlier instances on Google Calendar.
+      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(targetRows)) {
+        const weekDel = await deleteReservedPlaceholderForWeek(targetRows);
         if (!weekDel.ok) {
           return res.status(502).json({
             error: weekDel.error || 'Failed to delete reserved calendar occurrence',
             event_id: eventId,
-            series_master_id: seriesMasterId || null,
+            series_master_id: bareSeriesMasterFromScheduleRow(targetAnchor) || null,
             ...(weekDel.gas_revision ? { gas_script_revision: weekDel.gas_revision } : {}),
           });
         }
       }
 
-      const { slotDeleted } = await finalizeLessonRemoveFromDb(oldRows, eventId, req);
-
-      // If this was the last reserved week in the month batch, clean up the empty series master.
-      let seriesCleanedUp = false;
-      if (!localOnlyRemove && seriesMasterId && isBookingGasEnabled()) {
-        const remainingReservedWeeks = await countReservedWeeksInBatch(anchorRow, confirmMonth);
-        if (remainingReservedWeeks === 0) {
-          const lessonKind = String(anchorRow.lesson_kind || 'regular').trim().toLowerCase();
-          const delSeries = await deleteReservedCalendarSeriesInGas({ seriesMasterId, lessonKind });
-          const seriesOutcome = interpretGasDeleteResultForDbRemove(delSeries);
-          if (!seriesOutcome.proceed) {
-            return res.status(502).json({
-              error:
-                seriesOutcome.blockingError ||
-                'Occurrence removed but failed to delete empty reserved calendar series',
-              event_id: eventId,
-              series_master_id: seriesMasterId,
-            });
-          }
-          seriesCleanedUp = true;
-        }
+      await recordScheduleSlotDismissals(targetRows);
+      const slotDeleted = await deleteAllMonthlyScheduleRowsAtLessonSlot(targetRows);
+      // Scope to this occurrence only (event_id can theoretically collide across dates).
+      const primaryDeleted = await query(
+        `DELETE FROM monthly_schedule
+          WHERE event_id = $1
+            AND date = $2::date
+            AND start = $3::timestamptz`,
+        [eventId, targetDate, targetStartIso]
+      );
+      for (const oldRow of targetRows) {
+        await logChange(
+          {
+            entityType: 'monthly_schedule',
+            entityKey: `${eventId}_${oldRow.student_name}`,
+            action: 'delete',
+            oldData: oldRow,
+            newData: null,
+          },
+          req
+        );
       }
 
       return res.json({
         ok: true,
         event_id: eventId,
         reserved_single: true,
-        series_cleaned_up: seriesCleanedUp,
-        ...(slotDeleted > (oldRows.length || 0) ? { duplicate_slot_rows_removed: slotDeleted } : {}),
+        occurrence_date: targetDate,
+        ...(slotDeleted > (targetRows.length || 0) || (primaryDeleted.rowCount || 0) > 0
+          ? { duplicate_slot_rows_removed: slotDeleted }
+          : {}),
       });
     }
 

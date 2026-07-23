@@ -1045,6 +1045,14 @@ export default function LessonsThisMonth({
     const eventId = lessonToRemove.eventID
     const isUnscheduledRemove = String(lessonToRemove.status || '').toLowerCase() === 'unscheduled'
     const isReservedRemove = String(lessonToRemove.status || '').toLowerCase() === 'reserved'
+    const monthKeyForOcc =
+      findLessonMonthKey(serverData, eventId) ||
+      String(lessonToRemove.reduceMonthKey || activeMonth || '').trim()
+    const dayRaw = String(lessonToRemove.day || '').trim()
+    const occurrenceDate =
+      /^\d{4}-\d{2}$/.test(monthKeyForOcc) && /^\d{1,2}$/.test(dayRaw)
+        ? `${monthKeyForOcc}-${dayRaw.padStart(2, '0')}`
+        : null
     setPendingRemoveLesson(null)
     setSelectedLesson(null)
     if (isUnscheduledRemove) {
@@ -1084,7 +1092,8 @@ export default function LessonsThisMonth({
       },
     })
     try {
-      const tryRemove = async (localOnly) => api.removeScheduleEvent(eventId, { localOnly })
+      const tryRemove = async (localOnly) =>
+        api.removeScheduleEvent(eventId, { localOnly, occurrenceDate })
       let removeResult = null
       try {
         removeResult = await tryRemove(false)

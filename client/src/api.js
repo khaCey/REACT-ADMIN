@@ -256,9 +256,13 @@ export const api = {
     fetchApi('/schedule/reschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
   unrescheduleLinkedLesson: (body) =>
     fetchApi('/schedule/unreschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
-  /** @param {{ localOnly?: boolean }} [opts] — when true, server skips Google Calendar (GAS) delete */
-  removeScheduleEvent: (eventId, { localOnly = false } = {}) => {
-    const q = localOnly ? '?localOnly=1' : ''
+  /** @param {{ localOnly?: boolean, occurrenceDate?: string|null }} [opts] — occurrenceDate YYYY-MM-DD pins reserved single-occurrence delete */
+  removeScheduleEvent: (eventId, { localOnly = false, occurrenceDate = null } = {}) => {
+    const params = new URLSearchParams()
+    if (localOnly) params.set('localOnly', '1')
+    const date = String(occurrenceDate || '').trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) params.set('occurrenceDate', date)
+    const q = params.toString() ? `?${params.toString()}` : ''
     return fetchApi(`/schedule/${encodeURIComponent(eventId)}${q}`, { method: 'DELETE' })
   },
 
