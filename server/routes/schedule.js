@@ -3598,8 +3598,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
       }
 
       // Single occurrence only — never delete the recurring series master here.
-      // Series cleanup belongs to confirm-reserved / purge flows. Cleaning the series
-      // after a single Remove wiped earlier instances on Google Calendar.
+      // Series cleanup belongs to confirm-reserved / purge flows.
       if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(targetRows)) {
         const weekDel = await deleteReservedPlaceholderForWeek(targetRows);
         if (!weekDel.ok) {
@@ -3612,16 +3611,27 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         }
       }
 
+      // Exact DB row only — do not slot-sweep (that can wipe every week if event_ids collide).
       await recordScheduleSlotDismissals(targetRows);
-      const slotDeleted = await deleteAllMonthlyScheduleRowsAtLessonSlot(targetRows);
-      // Scope to this occurrence only (event_id can theoretically collide across dates).
-      const primaryDeleted = await query(
+      const hasDisambiguatedId = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/.test(eventId);
+      let primaryDeleted = await query(
         `DELETE FROM monthly_schedule
           WHERE event_id = $1
             AND date = $2::date
             AND start = $3::timestamptz`,
         [eventId, targetDate, targetStartIso]
       );
+      // Only fall back to event_id-only delete when the id is date-disambiguated (one week).
+      if ((primaryDeleted.rowCount || 0) === 0 && hasDisambiguatedId) {
+        primaryDeleted = await query(`DELETE FROM monthly_schedule WHERE event_id = $1`, [eventId]);
+      }
+      if ((primaryDeleted.rowCount || 0) === 0) {
+        return res.status(404).json({
+          error: 'Reserved occurrence row not found for delete',
+          event_id: eventId,
+          occurrence_date: targetDate,
+        });
+      }
       for (const oldRow of targetRows) {
         await logChange(
           {
@@ -3640,9 +3650,6 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         event_id: eventId,
         reserved_single: true,
         occurrence_date: targetDate,
-        ...(slotDeleted > (targetRows.length || 0) || (primaryDeleted.rowCount || 0) > 0
-          ? { duplicate_slot_rows_removed: slotDeleted }
-          : {}),
       });
     }
 
