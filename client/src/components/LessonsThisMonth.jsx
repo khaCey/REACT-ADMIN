@@ -324,6 +324,7 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
       let next = applyLessonPatch(prevData, mutation.sourceEventID, (lesson) => ({
         ...lesson,
         transientStatus: 'rescheduled',
+        awaitingRescheduleDate: false,
         optimisticRescheduledTo: {
           date: mutation.targetDate || null,
           time: mutation.targetTime || null,

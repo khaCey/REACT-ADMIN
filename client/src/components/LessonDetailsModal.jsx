@@ -133,7 +133,7 @@ export default function LessonDetailsModal({
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
   const transientStatus = String(lesson.transientStatus || '').toLowerCase()
-  const isAwaitingRescheduleDate = status === 'rescheduled' && !!lesson.awaitingRescheduleDate
+  const isAwaitingRescheduleDate = !!lesson.awaitingRescheduleDate
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   const displayStatus =
@@ -196,7 +196,7 @@ export default function LessonDetailsModal({
     !isCancelled &&
     !isRescheduled &&
     calendarSyncStatus === 'synced'
-  const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
+  const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate
   const canUnreschedule =
     !isTransientBusy &&
     isRescheduled &&
@@ -428,6 +428,9 @@ export default function LessonDetailsModal({
               {lesson?.rescheduledTo && (
                 <div>Moved to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
               )}
+              {isAwaitingRescheduleDate && !lesson?.rescheduledTo && !lesson?.optimisticRescheduledTo && (
+                <div className="text-amber-900 font-medium">Moved to: ???</div>
+              )}
               {lesson?.rescheduledFrom && (
                 <div>Moved from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
               )}
@@ -438,7 +441,7 @@ export default function LessonDetailsModal({
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
               )}
               {isAwaitingRescheduleDate && (
-                <div className="text-amber-900">Awaiting a new date (rescheduled; shown in graphite in Google Calendar).</div>
+                <div className="text-amber-800 text-xs mt-1">Awaiting a new date (graphite in Google Calendar).</div>
               )}
               {!hasSystemNotes && 'No system notes.'}
             </div>
@@ -516,9 +519,9 @@ export default function LessonDetailsModal({
                     type="button"
                     onClick={handleSelectRescheduleDate}
                     disabled={confirmDialogOpen || isTransientBusy}
-                    className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Select date…
+                    Set date
                   </button>
                 )}
                 {canUnreschedule && (
