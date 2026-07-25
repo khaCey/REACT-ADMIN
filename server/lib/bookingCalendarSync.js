@@ -58,6 +58,9 @@ const DEFAULT_TIMEOUT_MS = 60000;
 export function isGasCalendarEventMissingError(errorMessage) {
   const msg = String(errorMessage || '').trim().toLowerCase();
   if (!msg) return false;
+  // Lookup failed — the occurrence may still exist. Do not treat as already-deleted.
+  if (msg.includes('occurrence not found')) return false;
+  if (msg.includes('refusing to delete series master')) return false;
   return (
     msg.includes('calendar event not found') ||
     msg.includes('event not found') ||

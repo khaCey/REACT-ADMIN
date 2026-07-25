@@ -459,7 +459,9 @@ function bareSeriesMasterFromScheduleRow(row) {
   const src = String(row.calendar_source_event_id || '').trim();
   const fromEvent = stripOurMonthlyDisambiguationSuffix(String(row.event_id || ''));
   let base = src || fromEvent;
+  base = base.replace(/@google\.com$/i, '');
   base = base.replace(/_\d{8}T\d{6}Z$/i, '');
+  base = base.replace(/_R\d{8}T\d{6}Z?$/i, '');
   return base;
 }
 
