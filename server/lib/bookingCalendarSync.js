@@ -95,6 +95,7 @@ function normalizeDeleteResult(data, fallbackError = null, options = {}) {
 
 const CONFIRMED_CALENDAR_DELETE_ACTIONS = new Set([
   'deleted',
+  'cancelled_instance',
   'series_deleted',
   'already_deleted',
 ]);

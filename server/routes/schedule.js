@@ -3574,7 +3574,6 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
 
     if (anchorStatus === 'reserved') {
       // Reserved rows always use date-disambiguated event_ids (one week per event_id).
-      // Delete ONLY this event_id. Never batch-delete siblings / never Events.remove on Calendar.
       if (oldRows.length === 0) {
         return res.status(404).json({ error: 'Event not found', event_id: eventId });
       }
@@ -3588,6 +3587,20 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
           event_id: eventId,
           dates: [...distinctDates],
         });
+      }
+
+      let calendarCancel = null;
+      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(oldRows)) {
+        // Cancel this one Calendar occurrence only (GAS patches status=cancelled; never removes series).
+        calendarCancel = await deleteReservedPlaceholderForWeek(oldRows);
+        if (!calendarCancel.ok) {
+          return res.status(502).json({
+            error: calendarCancel.error || 'Failed to cancel reserved calendar occurrence',
+            event_id: eventId,
+            series_master_id: bareSeriesMasterFromScheduleRow(oldRows[0]) || null,
+            ...(calendarCancel.gas_revision ? { gas_script_revision: calendarCancel.gas_revision } : {}),
+          });
+        }
       }
 
       await recordScheduleSlotDismissals(oldRows);
@@ -3616,7 +3629,9 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         event_id: eventId,
         reserved_single: true,
         removed_row_count: primaryDeleted.rowCount || 0,
-        calendar_skipped: true,
+        calendar_cancelled: Boolean(calendarCancel?.ok),
+        ...(calendarCancel?.gas_event_id ? { calendar_event_id: calendarCancel.gas_event_id } : {}),
+        ...(calendarCancel?.gas_revision ? { gas_script_revision: calendarCancel.gas_revision } : {}),
       });
     }
 
