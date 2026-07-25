@@ -941,7 +941,84 @@ export default function LessonsThisMonth({
     }
   }
 
-  const handleConfirmSchedule = async (lesson) => {
+  const handleConfirmOneWeek = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
+    if (confirmingSchedule) return false
+    setActionError(null)
+    const eventID = String(lesson?.eventID || '').trim()
+    if (!eventID) {
+      setActionError('Missing event id for confirm')
+      return false
+    }
+    const monthKey = findLessonMonthKey(serverData, eventID) || activeMonth
+    if (!monthKey) {
+      setActionError('Could not determine month for confirm')
+      return false
+    }
+    const monthEntry = serverData?.[monthKey]
+    const paidPack = parseInt(monthEntry?.paidLessonsCount, 10)
+    const confirmBody = {
+      confirm_month: monthKey,
+      finalize_series: false,
+      ...(Number.isFinite(paidPack) && paidPack > 0 ? { pack_total: paidPack } : {}),
+    }
+    setConfirmingSchedule(true)
+    try {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID,
+        patch: {
+          status: 'reserved',
+          calendarSyncStatus: 'pending',
+          calendarSyncError: null,
+          transientError: null,
+          transientStatus: 'confirm_processing',
+        },
+      })
+      try {
+        await api.confirmReservedSchedule({ event_id: eventID, ...confirmBody })
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'scheduled',
+            calendarSyncStatus: 'synced',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: undefined,
+          },
+        })
+      } catch (e) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'failed',
+            transientStatus: 'sync_failed',
+            calendarSyncError: e.message,
+            transientError: e.message,
+          },
+        })
+        setActionError(e.message)
+        return false
+      }
+      try {
+        await refetchSilent()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+      }
+      setActiveOptimisticMutations((prev) =>
+        prev.filter((m) => !(m.type === 'patch_lesson' && m.eventID === eventID))
+      )
+      success('Week confirmed')
+      return true
+    } finally {
+      setConfirmingSchedule(false)
+    }
+  }
+
+  const handleConfirmAllWeeks = async (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
     if (confirmingSchedule) return false
     setActionError(null)
@@ -977,7 +1054,9 @@ export default function LessonsThisMonth({
           },
         })
       }
-      for (const eventID of batchEventIds) {
+      for (let i = 0; i < batchEventIds.length; i++) {
+        const eventID = batchEventIds[i]
+        const isLastWeek = i === batchEventIds.length - 1
         applyOptimisticMutation({
           type: 'patch_lesson',
           eventID,
@@ -990,7 +1069,11 @@ export default function LessonsThisMonth({
           },
         })
         try {
-          await api.confirmReservedSchedule({ event_id: eventID, ...confirmBodyBase })
+          await api.confirmReservedSchedule({
+            event_id: eventID,
+            ...confirmBodyBase,
+            finalize_series: isLastWeek,
+          })
           applyOptimisticMutation({
             type: 'patch_lesson',
             eventID,
@@ -1372,7 +1455,8 @@ export default function LessonsThisMonth({
           onOpenRescheduleChoice={handleOpenRescheduleChoice}
           onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
-          onConfirmSchedule={handleConfirmSchedule}
+          onConfirmOneWeek={handleConfirmOneWeek}
+          onConfirmAllWeeks={handleConfirmAllWeeks}
           confirmScheduleMonthKey={
             findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
           }

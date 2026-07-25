@@ -7,14 +7,14 @@
 
 ## What this feature does
 
-Staff confirm a **full month** of **reserved** (yellow placeholder) lessons from the student schedule UI. Each week is processed **one API call at a time** (oldest first). For each week:
+Staff confirm **reserved** (yellow / 固定 placeholder) lessons from the student schedule UI via **Confirm one** or **Confirm all**. Each week is processed with **one API call**. For each week:
 
 1. Create a real green single Calendar lesson (`lesson_book_create`).
 2. Delete **only that week’s** yellow placeholder (`lesson_book_delete`).
 3. Update DB: `reserved` → `scheduled` with new `event_id`.
-4. After the **last** week in the month, delete the empty recurring series shell once (`lesson_book_delete_series`).
+4. **Only when `finalize_series: true` and no reserved weeks remain** (Confirm all’s last week): delete the empty recurring series shell once (`lesson_book_delete_series`), then create a **replacement** bounded weekly reserved hold for the **following month** via `reserved_hold_recurring_create`.
 
-After the **last** week deletes the empty recurring series (`series_cleaned_up`), the server creates a **replacement** bounded weekly reserved hold for the **following month** via `reserved_hold_recurring_create` (same as the old bulk confirm’s step 3, but only on the final API call — not during each week).
+**Confirm one** never sends `finalize_series: true` — even if it confirms the last remaining reserved week of the month.
 
 ---
 
@@ -42,34 +42,44 @@ sequenceDiagram
   participant GAS as GAS_booking
   participant DB as PostgreSQL
 
-  loop Each_week_oldest_first
-    UI->>UI: patch card pending
-    UI->>API: event_id + confirm_month
+  alt ConfirmOne
+    UI->>API: event_id finalize_series false
     API->>GAS: lesson_book_create
     API->>GAS: lesson_book_delete placeholder
     API->>DB: persistConfirmReservedWeek
     API-->>UI: ok + new_event_id
-    UI->>UI: patch card scheduled
+  else ConfirmAll
+    loop Each_week_oldest_first
+      UI->>UI: patch card pending
+      UI->>API: event_id finalize_series only_on_last
+      API->>GAS: lesson_book_create
+      API->>GAS: lesson_book_delete placeholder
+      API->>DB: persistConfirmReservedWeek
+      API-->>UI: ok + new_event_id
+      UI->>UI: patch card scheduled
+    end
+    Note over API,GAS: Last week with finalize_series: delete series then create next-month hold
   end
-  Note over API,GAS: Last week only: delete series then create next-month hold
 ```
 
 ---
 
 ## Client (`LessonsThisMonth.jsx`)
 
-**Entry:** Confirm schedule in `LessonDetailsModal` → `handleConfirmSchedule`.
+**Entry:** `LessonDetailsModal` → **Confirm one** (`handleConfirmOneWeek`) or **Confirm all** (`handleConfirmAllWeeks`).
 
-**Batch discovery:** `listReservedBatchEventIds(monthData, monthKey, anchorLesson)`
+**Batch discovery (Confirm all):** `listReservedBatchEventIds(monthData, monthKey, anchorLesson)`
 
 - Same recurring hold as anchor: strip `event_id` to base (`stripMonthlyEventIdBase`), keep rows with `status === 'reserved'`.
 - Sort by `day` then `time` (oldest first).
 - One entry per distinct `event_id` (group lessons share one `event_id` per slot).
 
-**Loop (per `eventID`):**
+**Confirm one:** single `POST` with `{ event_id, confirm_month, pack_total?, finalize_series: false }`.
+
+**Confirm all loop (per `eventID`):**
 
 1. Optimistic patch: `calendarSyncStatus: 'pending'`.
-2. `POST /api/schedule/confirm-reserved` with `{ event_id, confirm_month, pack_total? }`.
+2. `POST /api/schedule/confirm-reserved` with `{ event_id, confirm_month, pack_total?, finalize_series }` — `finalize_series: true` **only** on the last week in the batch.
 3. On success: patch `status: 'scheduled'`, `calendarSyncStatus: 'synced'`.
 4. On failure: patch failed for that week, **break** loop (earlier weeks stay scheduled).
 5. `refetchSilent()` once at end.
@@ -80,7 +90,7 @@ sequenceDiagram
 
 ## Server (`POST /schedule/confirm-reserved`)
 
-**One week per request.** Body: `event_id` (that week’s row), optional `confirm_month`, optional `pack_total`.
+**One week per request.** Body: `event_id` (that week’s row), optional `confirm_month`, optional `pack_total`, **`finalize_series`** (boolean; default `false`).
 
 ### Batch scope (for overlap + numbering)
 
@@ -100,10 +110,10 @@ Grouped by distinct `event_id`, sorted by `date` / `start` → `groupReservedBat
 | 3 | **`createBookedLessonEventInGas`** — green single event | 502, DB unchanged |
 | 4 | **`deleteReservedPlaceholderForWeek`** — yellow placeholder only | Rollback create, 502, DB unchanged |
 | 5 | **`persistConfirmReservedWeek`** — one transaction for that `event_id` | Rollback create, 500 |
-| 6 | If no reserved weeks left in month → **`deleteReservedCalendarSeriesInGas`** | 502 (week already scheduled) |
-| 7 | If last week → `deleteOrphanReservedRowsAfterConfirm` | — |
+| 6 | If **`finalize_series`** and no reserved weeks left → **`deleteReservedCalendarSeriesInGas`** | 502 (week already scheduled) |
+| 7 | If series cleaned → create next-month hold; orphan reserved cleanup | — |
 
-**Invariant:** Create **before** delete. Delete uses `excludeEventIds` from the new lesson so slot sweep cannot remove the green event.
+**Invariant:** Create **before** delete. Delete uses `excludeEventIds` from the new lesson so slot sweep cannot remove the green event. Series cleanup / next-month hold require explicit `finalize_series: true`.
 
 ### Key helpers (`server/routes/schedule.js`)
 
@@ -112,7 +122,7 @@ Grouped by distinct `event_id`, sorted by `date` / `start` → `groupReservedBat
 | `groupReservedBatchRows` | Distinct `event_id` groups, sorted by date/start |
 | `deleteReservedPlaceholderForWeek` | GAS delete for one week’s placeholder |
 | `persistConfirmReservedWeek` | `reserved` → `scheduled` + reschedules FK rewrite for that old `event_id` |
-| `countReservedWeeksInBatch` | Drives series cleanup after last week |
+| `countReservedWeeksInBatch` | Drives series cleanup when combined with `finalize_series` |
 | `collectExcludeCalendarEventIds` | IDs that must not be deleted (new GAS id + new monthly id + bare forms) |
 | `bareSeriesMasterFromScheduleRow` | Series master id for instance lookup |
 | `rollbackConfirmCreatedLessons` | Delete newly created GAS event on failure |
@@ -175,7 +185,9 @@ Successful week response includes:
 - `new_event_id` — DB monthly disambiguated id
 - `created_calendar_id` / `created_calendar_event_id`
 - `deleted_calendar_id` / `deleted_calendar_event_id` / `deleted_count`
-- `series_cleaned_up` — true on last week when series master removed
+- `series_cleaned_up` — true when `finalize_series` ran and series master removed
+- `finalize_series` — echo of request flag
+- `next_month_hold_event_id` — set when next-month hold was created
 - `week_index` / `weeks_total` — position in **remaining** batch at request time (note: `week_index` resets as weeks are confirmed)
 
 Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete succeeded.
@@ -187,10 +199,11 @@ Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete 
 1. **Bulk create-all → delete-all** in one confirm request.
 2. **Delete placeholder before create** (leaves slot empty or blocks create; was a regression).
 3. **`deleteReservedCalendarSeriesInGas` during each week** (kills other weeks’ placeholders).
-4. **Next-month hold before series delete** or on every week (hold runs only after `series_cleaned_up` on the last week).
+4. **Next-month hold before series delete**, on every week, or on Confirm one (hold runs only after `series_cleaned_up` when `finalize_series: true`).
 5. **Treating GAS “not found” as success** for confirm placeholder deletes (`strictDelete: true`).
 6. **Slot sweep without `excludeEventIds`** after create (removed lesson 1/4 in old bulk flow).
 7. **Removing `confirmReservedPlaceholder` / id normalization in GAS** (placeholders stop deleting when Calendar id formats differ).
+8. **Auto-finalize on empty batch without `finalize_series`** (Confirm one on the last remaining week must not wipe the series or create next-month hold).
 
 ---
 
@@ -201,7 +214,7 @@ Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete 
 | API route | `server/routes/schedule.js` — `POST /confirm-reserved` |
 | GAS wrappers | `server/lib/bookingCalendarSync.js` — `createBookedLessonEventInGas`, `deleteBookedLessonEventInGas`, `strictDelete` |
 | Event id resolution | `server/lib/calendarEventId.js` — `gasCalendarEventIdFromMonthly`, instance suffix |
-| UI loop | `client/src/components/LessonsThisMonth.jsx` — `handleConfirmSchedule`, `listReservedBatchEventIds` |
+| UI loop | `client/src/components/LessonsThisMonth.jsx` — `handleConfirmOneWeek`, `handleConfirmAllWeeks`, `listReservedBatchEventIds` |
 | API client | `client/src/api.js` — `confirmReservedSchedule` |
 | GAS | `calendarAPI/Code.js` — `lesson_book_*`, `lessonBookExecuteDelete_` |
 | User docs | `docs/schedule-booking.md` — Confirm Schedule section |
@@ -210,11 +223,13 @@ Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete 
 
 ## Quick test checklist
 
-1. Month with 3+ reserved weeks: cards go Pending → Scheduled **one at a time**; Calendar shows green singles; yellow placeholders disappear week by week.
-2. After week 1, weeks 2+ placeholders still visible until their API turn.
+1. **Confirm all** with 3+ reserved weeks: cards go Pending → Scheduled **one at a time**; Calendar shows green singles; yellow placeholders disappear week by week.
+2. After Confirm-all week 1, weeks 2+ placeholders still visible until their API turn.
 3. Failure on week 2: week 1 scheduled in Calendar/DB; week 2+ still reserved; clear error.
-4. After last week: recurring series shell gone (`series_cleaned_up: true`); **no** new yellow series in next month.
-5. Group lesson (same `event_id`, multiple students): one API call updates all rows for that slot.
+4. After Confirm all’s last week: `series_cleaned_up: true` and next-month 固定 hold created.
+5. **Confirm one** mid-month: only that week scheduled; other reserved weeks remain; no series wipe; no next-month hold.
+6. **Confirm one** on the sole remaining reserved week: week scheduled; series shell left alone; no next-month hold.
+7. Group lesson (same `event_id`, multiple students): one API call updates all rows for that slot.
 
 ---
 

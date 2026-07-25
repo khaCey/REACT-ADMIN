@@ -2266,6 +2266,11 @@ router.post('/confirm-reserved', async (req, res) => {
     const eventIdRaw = String(req.body?.event_id || '').trim();
     const confirmMonthRaw = String(req.body?.confirm_month || '').trim();
     const pack_total = req.body?.pack_total;
+    // Series shell delete + next-month hold only when client opts in (Confirm all last week).
+    const finalizeSeries =
+      req.body?.finalize_series === true ||
+      req.body?.finalize_series === 1 ||
+      String(req.body?.finalize_series || '').toLowerCase() === 'true';
     if (!eventIdRaw) return res.status(400).json({ error: 'event_id is required' });
 
     const anchorResult = await query(
@@ -2497,7 +2502,12 @@ router.post('/confirm-reserved', async (req, res) => {
 
     let seriesCleanedUp = false;
     const remainingReservedWeeks = await countReservedWeeksInBatch(anchorRow, confirmMonth);
-    if (remainingReservedWeeks === 0 && seriesMasterId && isBookingGasEnabled()) {
+    if (
+      finalizeSeries &&
+      remainingReservedWeeks === 0 &&
+      seriesMasterId &&
+      isBookingGasEnabled()
+    ) {
       const lessonKind = String(anchorRow.lesson_kind || 'regular').trim().toLowerCase();
       const delSeries = await deleteReservedCalendarSeriesInGas({ seriesMasterId, lessonKind });
       const seriesOutcome = interpretGasDeleteResultForDbRemove(delSeries);
@@ -2526,7 +2536,7 @@ router.post('/confirm-reserved', async (req, res) => {
     }
 
     let orphanReservedRemoved = 0;
-    if (remainingReservedWeeks === 0) {
+    if (finalizeSeries && remainingReservedWeeks === 0) {
       orphanReservedRemoved = await deleteOrphanReservedRowsAfterConfirm(
         anchorRow,
         confirmMonth,
@@ -2563,6 +2573,7 @@ router.post('/confirm-reserved', async (req, res) => {
       week_index: weekIndex,
       weeks_total: weeksTotal,
       series_cleaned_up: seriesCleanedUp,
+      finalize_series: finalizeSeries,
       next_month_hold_event_id: nextMonthHoldEventId,
       ...(holdWarning ? { warning: holdWarning } : {}),
       ...(gasRes?.calendarId ? { created_calendar_id: gasRes.calendarId } : {}),

@@ -31,7 +31,8 @@ export default function LessonDetailsModal({
   onOpenRescheduleChoice,
   onSelectRescheduleDate,
   onSyncWithCalendar,
-  onConfirmSchedule,
+  onConfirmOneWeek,
+  onConfirmAllWeeks,
   confirmScheduleMonthKey,
   onRemove,
   onBookLesson,
@@ -39,7 +40,8 @@ export default function LessonDetailsModal({
 }) {
   const { success } = useToast()
   const [syncing, setSyncing] = useState(false)
-  const [confirmScheduleOpen, setConfirmScheduleOpen] = useState(false)
+  const [confirmOneOpen, setConfirmOneOpen] = useState(false)
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [uncancelConfirmOpen, setUncancelConfirmOpen] = useState(false)
   const [unrescheduleConfirmOpen, setUnrescheduleConfirmOpen] = useState(false)
@@ -60,7 +62,8 @@ export default function LessonDetailsModal({
 
   useEffect(() => {
     setSyncing(false)
-    setConfirmScheduleOpen(false)
+    setConfirmOneOpen(false)
+    setConfirmAllOpen(false)
     setCancelConfirmOpen(false)
     setUncancelConfirmOpen(false)
     setUnrescheduleConfirmOpen(false)
@@ -182,7 +185,7 @@ export default function LessonDetailsModal({
     !isRescheduled &&
     calendarSyncStatus !== 'synced'
   const canConfirmSchedule =
-    typeof onConfirmSchedule === 'function' &&
+    (typeof onConfirmOneWeek === 'function' || typeof onConfirmAllWeeks === 'function') &&
     !isTransientBusy &&
     !isUnscheduled &&
     !isCancelled &&
@@ -219,7 +222,12 @@ export default function LessonDetailsModal({
     ? lesson.time.replace(':', '：')
     : 'Not specified'
 
-  const confirmDialogOpen = cancelConfirmOpen || uncancelConfirmOpen || unrescheduleConfirmOpen || confirmScheduleOpen
+  const confirmDialogOpen =
+    cancelConfirmOpen ||
+    uncancelConfirmOpen ||
+    unrescheduleConfirmOpen ||
+    confirmOneOpen ||
+    confirmAllOpen
   const hasBlockingDialog = confirmDialogOpen || lessonNoteModalOpen
 
   const handleBackdropClick = (e) => {
@@ -283,10 +291,16 @@ export default function LessonDetailsModal({
     }
   }
 
-  const runConfirmSchedule = () => {
-    setConfirmScheduleOpen(false)
+  const runConfirmOneWeek = () => {
+    setConfirmOneOpen(false)
     onClose()
-    void onConfirmSchedule?.(lesson, student)
+    void onConfirmOneWeek?.(lesson, student)
+  }
+
+  const runConfirmAllWeeks = () => {
+    setConfirmAllOpen(false)
+    onClose()
+    void onConfirmAllWeeks?.(lesson, student)
   }
 
   const saveLessonNote = async () => {
@@ -451,14 +465,24 @@ export default function LessonDetailsModal({
           <div className="flex flex-wrap gap-2">
             {isReservedLesson ? (
               <>
-                {canConfirmSchedule && (
+                {canConfirmSchedule && typeof onConfirmOneWeek === 'function' && (
                   <button
                     type="button"
-                    onClick={() => setConfirmScheduleOpen(true)}
+                    onClick={() => setConfirmOneOpen(true)}
                     disabled={confirmDialogOpen || isTransientBusy}
                     className="rounded-md border border-cyan-600 bg-white px-3 py-1.5 text-sm font-medium text-cyan-800 hover:bg-cyan-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Confirm schedule
+                    Confirm one
+                  </button>
+                )}
+                {canConfirmSchedule && typeof onConfirmAllWeeks === 'function' && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAllOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-cyan-700 bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Confirm all
                   </button>
                 )}
                 {typeof onRemove === 'function' && (
@@ -653,14 +677,24 @@ export default function LessonDetailsModal({
         }}
       />
     )}
-    {confirmScheduleOpen && (
+    {confirmOneOpen && (
       <ConfirmActionModal
-        title="Confirm schedule"
-        message={`${confirmScheduleMonthKey || 'This month'} の予約済みスケジュールを、週ごとに順番に確定します（次月の予約ホールドは作成しません）。よろしいですか？`}
-        confirmLabel="Confirm schedule"
+        title="Confirm one"
+        message={`${confirmScheduleMonthKey || 'This month'} のこの週だけを確定します。他の固定（予約済み）週はそのまま残り、次月の予約ホールドは作成しません。よろしいですか？`}
+        confirmLabel="Confirm one"
         cancelLabel="Back"
-        onConfirm={runConfirmSchedule}
-        onClose={() => setConfirmScheduleOpen(false)}
+        onConfirm={runConfirmOneWeek}
+        onClose={() => setConfirmOneOpen(false)}
+      />
+    )}
+    {confirmAllOpen && (
+      <ConfirmActionModal
+        title="Confirm all"
+        message={`${confirmScheduleMonthKey || 'This month'} の固定（予約済み）スケジュールを週ごとに順番にすべて確定します。最後の週のあと、空のシリーズを削除し次月の予約ホールドを作成します。よろしいですか？`}
+        confirmLabel="Confirm all"
+        cancelLabel="Back"
+        onConfirm={runConfirmAllWeeks}
+        onClose={() => setConfirmAllOpen(false)}
       />
     )}
     </>,

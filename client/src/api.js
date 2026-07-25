@@ -235,7 +235,11 @@ export const api = {
   },
   bookLesson: (body) =>
     fetchApi('/schedule/book', { method: 'POST', body: JSON.stringify(body) }),
-  /** Confirm one reserved week (client loops oldest-first for a full month batch). */
+  /**
+   * Confirm one reserved week.
+   * Pass finalize_series: true only on the last week of a Confirm-all loop
+   * (series shell delete + next-month hold). Confirm-one always uses false.
+   */
   confirmReservedSchedule: (body) =>
     fetchApi('/schedule/confirm-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
