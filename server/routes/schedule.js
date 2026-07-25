@@ -803,7 +803,11 @@ async function deleteOrphanReservedRowsAfterConfirm(anchorRow, confirmMonth, pol
 
 function scheduleRowDateToYyyyMmDd(rowDate) {
   if (!rowDate) return '';
+  // pg returns DATE as JS Date at UTC midnight for the calendar day; use UTC ymd (not local).
+  // For timestamptz-ish values, prefer Asia/Tokyo calendar date.
   if (rowDate instanceof Date && !Number.isNaN(rowDate.getTime())) {
+    const jst = utcToJstDateAndTime(rowDate);
+    if (jst?.date) return jst.date;
     return rowDate.toISOString().slice(0, 10);
   }
   const s = String(rowDate).trim();
@@ -3569,60 +3573,32 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
     const anchorStatus = String(anchorRow.status || '').toLowerCase().trim();
 
     if (anchorStatus === 'reserved') {
-      const occurrenceDateHint = String(req.query?.occurrenceDate || '').trim();
-      let targetRows = oldRows;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateHint)) {
-        const pinned = oldRows.filter(
-          (r) => scheduleRowDateToYyyyMmDd(r.date) === occurrenceDateHint
-        );
-        if (pinned.length > 0) targetRows = pinned;
-        else {
-          const byDate = (
-            await query(
-              `SELECT * FROM monthly_schedule WHERE event_id = $1 AND date = $2::date`,
-              [eventId, occurrenceDateHint]
-            )
-          ).rows;
-          if (byDate.length > 0) targetRows = byDate;
-        }
+      // Reserved rows always use date-disambiguated event_ids (one week per event_id).
+      // Delete ONLY this event_id. Never batch-delete siblings / never Events.remove on Calendar.
+      if (oldRows.length === 0) {
+        return res.status(404).json({ error: 'Event not found', event_id: eventId });
       }
-      const targetAnchor = targetRows[0] || anchorRow;
-      const confirmMonth = scheduleRowDateToYyyyMmDd(targetAnchor.date).slice(0, 7);
-      if (!/^\d{4}-\d{2}$/.test(confirmMonth)) {
-        return res.status(400).json({ error: 'Could not determine month for reserved remove' });
-      }
-      const targetDate = scheduleRowDateToYyyyMmDd(targetAnchor.date);
-      const targetStartIso = targetAnchor.start ? new Date(targetAnchor.start).toISOString() : null;
-      if (!targetDate || !targetStartIso) {
-        return res.status(400).json({ error: 'Reserved lesson is missing date/start' });
+      const distinctDates = new Set(
+        oldRows.map((r) => scheduleRowDateToYyyyMmDd(r.date)).filter(Boolean)
+      );
+      if (distinctDates.size > 1) {
+        return res.status(409).json({
+          error:
+            'Refusing reserved remove: this event_id maps to multiple dates. Re-sync calendar and retry.',
+          event_id: eventId,
+          dates: [...distinctDates],
+        });
       }
 
-      // Reserved single Remove: delete this DB occurrence only.
-      // Do NOT call Google Calendar here — Events.remove on recurring holds has repeatedly
-      // wiped the whole series; poll sync then clears the rest of the month from Postgres.
-      // Slot dismissal prevents the poll from recreating this one week. Calendar series cleanup
-      // stays with confirm-reserved / purge (lesson_book_delete_series).
-      await recordScheduleSlotDismissals(targetRows);
-      const hasDisambiguatedId = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/.test(eventId);
-      let primaryDeleted = await query(
-        `DELETE FROM monthly_schedule
-          WHERE event_id = $1
-            AND date = $2::date
-            AND start = $3::timestamptz`,
-        [eventId, targetDate, targetStartIso]
-      );
-      // Only fall back to event_id-only delete when the id is date-disambiguated (one week).
-      if ((primaryDeleted.rowCount || 0) === 0 && hasDisambiguatedId) {
-        primaryDeleted = await query(`DELETE FROM monthly_schedule WHERE event_id = $1`, [eventId]);
-      }
+      await recordScheduleSlotDismissals(oldRows);
+      const primaryDeleted = await query(`DELETE FROM monthly_schedule WHERE event_id = $1`, [eventId]);
       if ((primaryDeleted.rowCount || 0) === 0) {
         return res.status(404).json({
           error: 'Reserved occurrence row not found for delete',
           event_id: eventId,
-          occurrence_date: targetDate,
         });
       }
-      for (const oldRow of targetRows) {
+      for (const oldRow of oldRows) {
         await logChange(
           {
             entityType: 'monthly_schedule',
@@ -3639,7 +3615,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         ok: true,
         event_id: eventId,
         reserved_single: true,
-        occurrence_date: targetDate,
+        removed_row_count: primaryDeleted.rowCount || 0,
         calendar_skipped: true,
       });
     }
