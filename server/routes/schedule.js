@@ -3597,21 +3597,11 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         return res.status(400).json({ error: 'Reserved lesson is missing date/start' });
       }
 
-      // Single occurrence only — never delete the recurring series master here.
-      // Series cleanup belongs to confirm-reserved / purge flows.
-      if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(targetRows)) {
-        const weekDel = await deleteReservedPlaceholderForWeek(targetRows);
-        if (!weekDel.ok) {
-          return res.status(502).json({
-            error: weekDel.error || 'Failed to delete reserved calendar occurrence',
-            event_id: eventId,
-            series_master_id: bareSeriesMasterFromScheduleRow(targetAnchor) || null,
-            ...(weekDel.gas_revision ? { gas_script_revision: weekDel.gas_revision } : {}),
-          });
-        }
-      }
-
-      // Exact DB row only — do not slot-sweep (that can wipe every week if event_ids collide).
+      // Reserved single Remove: delete this DB occurrence only.
+      // Do NOT call Google Calendar here — Events.remove on recurring holds has repeatedly
+      // wiped the whole series; poll sync then clears the rest of the month from Postgres.
+      // Slot dismissal prevents the poll from recreating this one week. Calendar series cleanup
+      // stays with confirm-reserved / purge (lesson_book_delete_series).
       await recordScheduleSlotDismissals(targetRows);
       const hasDisambiguatedId = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/.test(eventId);
       let primaryDeleted = await query(
@@ -3650,6 +3640,7 @@ router.delete(/^\/(.+)\/?$/, async (req, res) => {
         event_id: eventId,
         reserved_single: true,
         occurrence_date: targetDate,
+        calendar_skipped: true,
       });
     }
 

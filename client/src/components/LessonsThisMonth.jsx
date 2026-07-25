@@ -1456,7 +1456,7 @@ export default function LessonsThisMonth({
             pendingRemoveIsUnscheduled
               ? 'Remove this unscheduled lesson and reduce the lesson count for this month by 1?'
               : pendingRemoveIsReserved
-              ? 'この予約済みレッスン（この回のみ）を削除します。他の予約済み回は残ります。よろしいですか？'
+              ? 'この予約済みレッスン（この回のみ）をスケジュールから削除します。他の予約済み回は残ります。よろしいですか？'
               : pendingRemoveIsLocalOnly
                 ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
                 : 'Remove this lesson from the schedule?'
