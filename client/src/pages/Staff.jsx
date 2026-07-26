@@ -476,6 +476,21 @@ export default function Staff() {
   const calendarStaffOptions = staffList.filter(
     (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
   )
+  const englishTeachersForSync = useMemo(
+    () =>
+      staffList
+        .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
+        .sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+        ),
+    [staffList]
+  )
+  const selectedSyncStaff = useMemo(
+    () => englishTeachersForSync.find((s) => String(s.id) === String(fetchScheduleStaffId)) || null,
+    [englishTeachersForSync, fetchScheduleStaffId]
+  )
+  const selectedSyncHasCalendar =
+    !!selectedSyncStaff && String(selectedSyncStaff.calendar_id || '').trim() !== ''
   const shiftRosterBlocks = useMemo(() => {
     const raw = Array.isArray(teacherCalendarEvents)
       ? teacherCalendarEvents
@@ -1003,71 +1018,83 @@ export default function Staff() {
               </div>
             </div>
             {isAdmin && (
-              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                <select
-                  value={fetchScheduleStaffId}
-                  onChange={(e) => {
-                    setFetchScheduleStaffId(e.target.value)
-                    setFetchScheduleError('')
-                  }}
-                  className="min-w-[200px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="">— Select staff —</option>
-                  {staffList
-                    .filter((s) => s.active !== false && String(s.calendar_id || '').trim() !== '')
-                    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                        {s.staff_type === 'english_teacher'
-                          ? ' (English)'
-                          : s.staff_type === 'japanese_staff'
-                            ? ' (Japanese)'
-                            : ''}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const id = fetchScheduleStaffId ? parseInt(fetchScheduleStaffId, 10) : null
-                    if (!id || fetchScheduleLoading) return
-                    setFetchScheduleError('')
-                    setFetchScheduleLoading(true)
-                    try {
-                      const res = await api.fetchStaffScheduleForStaff(id)
-                      const msg =
-                        res.eventsStored != null
-                          ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
-                          : 'Schedule fetched.'
-                      success(msg)
-                      await Promise.all([loadTeacherCalendar(), loadWeek()])
-                    } catch (err) {
-                      setFetchScheduleError(err.message || 'Failed to fetch schedule')
-                    } finally {
-                      setFetchScheduleLoading(false)
-                    }
-                  }}
-                  disabled={!fetchScheduleStaffId || fetchScheduleLoading}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-                  {fetchScheduleLoading ? 'Syncing…' : 'Sync teacher'}
-                </button>
-                {fetchScheduleError && (
-                  <span className="text-sm text-red-600">{fetchScheduleError}</span>
-                )}
-                {canManageShifts && (
+              <div className="mb-4 flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={fetchScheduleStaffId}
+                    onChange={(e) => {
+                      setFetchScheduleStaffId(e.target.value)
+                      setFetchScheduleError('')
+                    }}
+                    className="min-w-[200px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">— Select staff —</option>
+                    {englishTeachersForSync.map((s) => {
+                      const hasCalendar = String(s.calendar_id || '').trim() !== ''
+                      return (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {hasCalendar ? '' : ' (no calendar)'}
+                        </option>
+                      )
+                    })}
+                  </select>
                   <button
                     type="button"
-                    onClick={() => setExtendShiftOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
-                    title="Widen bookable hours in the app only (does not edit Google Calendar)"
+                    onClick={async () => {
+                      const id = fetchScheduleStaffId ? parseInt(fetchScheduleStaffId, 10) : null
+                      if (!id || fetchScheduleLoading || !selectedSyncHasCalendar) return
+                      setFetchScheduleError('')
+                      setFetchScheduleLoading(true)
+                      try {
+                        const res = await api.fetchStaffScheduleForStaff(id)
+                        const msg =
+                          res.eventsStored != null
+                            ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
+                            : 'Schedule fetched.'
+                        success(msg)
+                        await Promise.all([loadTeacherCalendar(), loadWeek()])
+                      } catch (err) {
+                        setFetchScheduleError(err.message || 'Failed to fetch schedule')
+                      } finally {
+                        setFetchScheduleLoading(false)
+                      }
+                    }}
+                    disabled={!fetchScheduleStaffId || !selectedSyncHasCalendar || fetchScheduleLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={
+                      fetchScheduleStaffId && !selectedSyncHasCalendar
+                        ? 'Set Calendar ID on this teacher in Edit staff before syncing'
+                        : undefined
+                    }
                   >
-                    <Clock className="w-4 h-4" />
-                    Extend shift
+                    {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
+                    {fetchScheduleLoading ? 'Syncing…' : 'Sync teacher'}
                   </button>
-                )}
+                  {fetchScheduleError && (
+                    <span className="text-sm text-red-600">{fetchScheduleError}</span>
+                  )}
+                  {canManageShifts && (
+                    <button
+                      type="button"
+                      onClick={() => setExtendShiftOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+                      title="Widen bookable hours in the app only (does not edit Google Calendar)"
+                    >
+                      <Clock className="w-4 h-4" />
+                      Extend shift
+                    </button>
+                  )}
+                </div>
+                {englishTeachersForSync.length === 0 ? (
+                  <p className="text-xs text-gray-500">
+                    No active English teachers in the staff list. Set type to &quot;English Teacher&quot; on a staff row.
+                  </p>
+                ) : fetchScheduleStaffId && !selectedSyncHasCalendar ? (
+                  <p className="text-xs text-amber-800">
+                    This teacher has no Calendar ID. Open Edit staff and set Calendar ID before Sync teacher.
+                  </p>
+                ) : null}
               </div>
             )}
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mb-4">
