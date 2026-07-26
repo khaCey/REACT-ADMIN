@@ -111,14 +111,24 @@ export default function LessonDetailsModal({
         !cancelConfirmOpen &&
         !uncancelConfirmOpen &&
         !unrescheduleConfirmOpen &&
-        !confirmScheduleOpen &&
+        !confirmOneOpen &&
+        !confirmAllOpen &&
         !lessonNoteModalOpen
       )
         onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen, confirmScheduleOpen, lessonNoteModalOpen])
+  }, [
+    lesson,
+    onClose,
+    cancelConfirmOpen,
+    uncancelConfirmOpen,
+    unrescheduleConfirmOpen,
+    confirmOneOpen,
+    confirmAllOpen,
+    lessonNoteModalOpen,
+  ])
 
   const lessonNoteCount = lessonNotes.length
 
