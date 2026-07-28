@@ -397,6 +397,106 @@ async function getBookedCountForMonth(studentId, monthKey, db = query) {
   return parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
 }
 
+/**
+ * Upsert pack size and rewrite monthly_schedule titles as Name (Loc) i/N in start order.
+ * @returns {Promise<{ updated: number, pack_total: number }>}
+ */
+async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTotal, db = query) {
+  const sid = Number(studentId);
+  const month = String(monthKey || '').trim().slice(0, 7);
+  const pack = Math.max(1, parseInt(packTotal, 10) || 0);
+  if (!month || !/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(sid) || sid <= 0 || !pack) {
+    throw new Error('renumberMonthLessonTitlesForStudent requires studentId, YYYY-MM month, and pack_total >= 1');
+  }
+
+  const studentResult = await db('SELECT id, name FROM students WHERE id = $1', [sid]);
+  if (studentResult.rows.length === 0) {
+    throw new Error('Student not found');
+  }
+  const studentName = String(studentResult.rows[0].name || '').trim();
+  if (!studentName) {
+    throw new Error('Student has no name');
+  }
+
+  await db(
+    `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
+     ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
+    [sid, month, pack]
+  );
+
+  const rows = await db(
+    `SELECT event_id, student_name, title, lesson_kind, lesson_mode
+       FROM monthly_schedule
+      WHERE student_id = $1
+        AND to_char(date, 'YYYY-MM') = $2
+        AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+      ORDER BY start ASC`,
+    [sid, month]
+  );
+
+  let locationLabel = 'Cafe';
+  const locRe = /\(([^)]+)\)\s+\d+\/\d+/;
+  for (const r of rows.rows) {
+    const m = String(r.title || '').match(locRe);
+    if (m) {
+      locationLabel = m[1].trim();
+      break;
+    }
+  }
+
+  let idx = 0;
+  for (const r of rows.rows) {
+    idx += 1;
+    const orderedStudents = await getOrderedEventStudents(r.event_id, db);
+    const titleStudents =
+      orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
+    const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
+    const baseTitle =
+      lessonKind === 'demo'
+        ? buildLessonTitleForOrderedStudents({
+            students: titleStudents,
+            lessonKind,
+            locationLabel,
+          })
+        : buildLessonTitleForOrderedStudents({
+            students: titleStudents,
+            lessonKind,
+            locationLabel: lessonModeToLocationLabel(r.lesson_mode || locationLabel),
+            lessonNumber: idx,
+            totalLessons: pack,
+          });
+    const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
+    if (orderedStudents.length > 1) {
+      await db(`UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`, [newTitle, r.event_id]);
+    } else {
+      await db(
+        `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
+        [newTitle, r.event_id, r.student_name]
+      );
+    }
+  }
+
+  return { updated: rows.rows.length, pack_total: pack };
+}
+
+/**
+ * Active event_ids for a student/month ordered by start (for chronological n/total).
+ * @returns {Promise<string[]>}
+ */
+async function listActiveMonthEventIdsByStart(studentId, monthKey, db = query) {
+  const ordered = await db(
+    `SELECT m.event_id
+       FROM monthly_schedule m
+      WHERE m.student_id = $1
+        AND to_char(m.date, 'YYYY-MM') = $2
+        AND (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+      GROUP BY m.event_id
+      ORDER BY MIN(m.start) ASC`,
+    [studentId, monthKey]
+  );
+  return (ordered.rows || []).map((r) => String(r.event_id || '').trim()).filter(Boolean);
+}
+
 const SHORT_JST_TO_ISODOW = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
 
 function jstIsoDowFromUtcMs(utcMs) {
@@ -1731,78 +1831,14 @@ router.post('/renumber-month-titles', async (req, res) => {
       return res.status(400).json({ error: 'pack_total must be at least 1' });
     }
 
-    const studentResult = await query('SELECT id, name FROM students WHERE id = $1', [sid]);
-    if (studentResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Student not found' });
-    }
-    const studentName = String(studentResult.rows[0].name || '').trim();
-    if (!studentName) {
-      return res.status(400).json({ error: 'Student has no name' });
-    }
-
-    await query(
-      `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
-       ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
-      [sid, monthKey, pack]
-    );
-
-    const rows = await query(
-      `SELECT event_id, student_name, title, lesson_kind, lesson_mode
-       FROM monthly_schedule
-       WHERE student_id = $1
-         AND to_char(date, 'YYYY-MM') = $2
-        AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
-       ORDER BY start ASC`,
-      [sid, monthKey]
-    );
-
-    let locationLabel = 'Cafe';
-    const locRe = /\(([^)]+)\)\s+\d+\/\d+/;
-    for (const r of rows.rows) {
-      const m = String(r.title || '').match(locRe);
-      if (m) {
-        locationLabel = m[1].trim();
-        break;
-      }
-    }
-
-    let idx = 0;
-    for (const r of rows.rows) {
-      idx += 1;
-      const orderedStudents = await getOrderedEventStudents(r.event_id);
-      const titleStudents =
-        orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
-      const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
-      const baseTitle =
-        lessonKind === 'demo'
-          ? buildLessonTitleForOrderedStudents({
-              students: titleStudents,
-              lessonKind,
-              locationLabel,
-            })
-          : buildLessonTitleForOrderedStudents({
-              students: titleStudents,
-              lessonKind,
-              locationLabel: lessonModeToLocationLabel(r.lesson_mode || locationLabel),
-              lessonNumber: idx,
-              totalLessons: pack,
-            });
-      const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
-      if (orderedStudents.length > 1) {
-        await query(
-          `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`,
-          [newTitle, r.event_id]
-        );
-      } else {
-        await query(
-          `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
-          [newTitle, r.event_id, r.student_name]
-        );
-      }
-    }
-
-    res.json({ ok: true, updated: rows.rows.length, month: monthKey, pack_total: pack });
+    const result = await renumberMonthLessonTitlesForStudent(sid, monthKey, pack);
+    res.json({ ok: true, updated: result.updated, month: monthKey, pack_total: result.pack_total });
   } catch (err) {
+    const msg = String(err?.message || err);
+    if (msg === 'Student not found') return res.status(404).json({ error: msg });
+    if (msg === 'Student has no name' || msg.includes('requires studentId')) {
+      return res.status(400).json({ error: msg });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -2357,25 +2393,17 @@ router.post('/confirm-reserved', async (req, res) => {
     }
     const weekIndex = groups.indexOf(targetGroup) + 1;
     const groupRows = targetGroup;
-    const gi = weekIndex - 1;
 
-    const baseCountRes = await query(
-      `SELECT COUNT(DISTINCT m.event_id) AS cnt
-         FROM monthly_schedule m
-        WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
-          AND m.student_id = $1
-          AND to_char(m.date, 'YYYY-MM') = $2
-          AND NOT (m.event_id = ANY($3::text[]))`,
-      [anchorStudentId, confirmMonth, replacingEventIds]
-    );
-    const baseLessonCount = parseInt(baseCountRes.rows[0]?.cnt, 10) || 0;
+    const activeEventIdsByStart = await listActiveMonthEventIdsByStart(anchorStudentId, confirmMonth);
+    const activeCount = activeEventIdsByStart.length;
+    const chronoRank = activeEventIdsByStart.indexOf(eventIdRaw);
+    const lessonNumber = chronoRank >= 0 ? chronoRank + 1 : activeCount || 1;
 
     let totalLessons = await getPackTotalForBooking(anchorStudentId, confirmMonth, pack_total);
-    const monthLessonTotal = baseLessonCount + weeksTotal;
     if (!totalLessons) {
-      totalLessons = monthLessonTotal;
+      totalLessons = activeCount || weeksTotal;
     } else {
-      totalLessons = Math.max(totalLessons, monthLessonTotal);
+      totalLessons = Math.max(totalLessons, activeCount || weeksTotal);
     }
     if (!totalLessons) {
       return res.status(400).json({ error: 'No reserved lessons to confirm for this month.' });
@@ -2418,7 +2446,6 @@ router.post('/confirm-reserved', async (req, res) => {
         locationLabel,
       });
     } else {
-      const lessonNumber = baseLessonCount + gi + 1;
       title = buildLessonTitleForOrderedStudents({
         students: orderedStudents,
         lessonKind: lessonKindForBooking,
@@ -2500,6 +2527,37 @@ router.post('/confirm-reserved', async (req, res) => {
       });
     }
 
+    // Heal n/total for all students on this week (chronological by start).
+    const studentIdsToRenumber = [
+      ...new Set(
+        groupRows
+          .map((r) => Number(r.student_id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      ),
+    ];
+    let renumberWarning = null;
+    for (const sid of studentIdsToRenumber) {
+      try {
+        let packForStudent = await getPackTotalForBooking(sid, confirmMonth, pack_total);
+        const activeForStudent = await listActiveMonthEventIdsByStart(sid, confirmMonth);
+        if (!packForStudent) {
+          packForStudent = activeForStudent.length || totalLessons || 1;
+        } else {
+          packForStudent = Math.max(packForStudent, activeForStudent.length || 0, 1);
+        }
+        await renumberMonthLessonTitlesForStudent(sid, confirmMonth, packForStudent);
+      } catch (renumberErr) {
+        console.error(
+          '[confirm-reserved] renumber failed',
+          sid,
+          renumberErr?.message || renumberErr
+        );
+        renumberWarning =
+          renumberWarning ||
+          `Week confirmed but month title renumber failed: ${renumberErr?.message || renumberErr}`;
+      }
+    }
+
     let seriesCleanedUp = false;
     const remainingReservedWeeks = await countReservedWeeksInBatch(anchorRow, confirmMonth);
     if (
@@ -2575,7 +2633,11 @@ router.post('/confirm-reserved', async (req, res) => {
       series_cleaned_up: seriesCleanedUp,
       finalize_series: finalizeSeries,
       next_month_hold_event_id: nextMonthHoldEventId,
-      ...(holdWarning ? { warning: holdWarning } : {}),
+      lesson_number: lessonNumber,
+      total_lessons: totalLessons,
+      ...((holdWarning || renumberWarning)
+        ? { warning: [holdWarning, renumberWarning].filter(Boolean).join(' ') }
+        : {}),
       ...(gasRes?.calendarId ? { created_calendar_id: gasRes.calendarId } : {}),
       ...(gasRes?.eventId ? { created_calendar_event_id: gasRes.eventId } : {}),
       ...(calendarDel?.gas_calendar_id ? { deleted_calendar_id: calendarDel.gas_calendar_id } : {}),

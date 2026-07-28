@@ -92,7 +92,7 @@ Each request confirms **one** reserved week (`event_id` = that occurrence’s ro
 |--------|--------|
 | Body | `event_id` (that week’s reserved row), optional `confirm_month` (`YYYY-MM`; default from the row’s date), optional `pack_total` (override for `n/total` titles), **`finalize_series`** (boolean; default `false`) |
 | `finalize_series` | When `true` **and** no reserved weeks remain in the month batch: run `lesson_book_delete_series` then create the next-month reserved hold. Confirm one always sends `false`. Confirm all sends `true` only on the final week. |
-| Title `n/total` | Optional `pack_total`, else payments / `lessons` pack for the month if set; otherwise **`total = max(that pack, other lessons in month + reserved weeks in the batch)`** |
+| Title `n/total` | Chronological by `start ASC` among all active lessons in the month (including remaining reserved). Optional `pack_total`, else payments / `lessons` pack; `total = max(pack, activeCount)`. After DB persist, month titles are renumbered for each student on the week. |
 | Preconditions | Row is `reserved`, `student_id` set, `calendar_sync_status = synced`, not a `local-booking-` row; GAS booking URL + API key configured |
 | Batch scope | All **reserved** rows in `confirm_month` sharing the same recurring series (`calendar_source_event_id` or stripped `event_id` base) as the anchor — used for overlap exclusion and lesson numbering |
 
@@ -103,7 +103,7 @@ Each request confirms **one** reserved week (`event_id` = that occurrence’s ro
 3. **Update DB** for that week: `reserved` → `scheduled`, new `event_id` / `calendar_source_event_id`, title; rewrite `reschedules` FKs for that old `event_id`.
 4. When **`finalize_series` is true** and **no** reserved rows remain in the month for that series, **once**: `lesson_book_delete_series` on the empty recurring shell, then `reserved_hold_recurring_create` for the **next** calendar month (same weekday/time as the old hold).
 
-**Response (example):** `ok`, `event_id`, `new_event_id`, `week_index`, `weeks_total`, `finalize_series`, `series_cleaned_up`, `next_month_hold_event_id`.
+**Response (example):** `ok`, `event_id`, `new_event_id`, `week_index`, `weeks_total`, `lesson_number`, `total_lessons`, `finalize_series`, `series_cleaned_up`, `next_month_hold_event_id`.
 
 **UI:** Confirm all loops sorted weeks; only the current week shows **Pending**; earlier weeks are already **Scheduled**; later weeks stay **Reserved** until their turn. Confirm one patches only the opened week.
 

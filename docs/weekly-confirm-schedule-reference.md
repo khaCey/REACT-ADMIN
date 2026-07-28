@@ -110,8 +110,9 @@ Grouped by distinct `event_id`, sorted by `date` / `start` → `groupReservedBat
 | 3 | **`createBookedLessonEventInGas`** — green single event | 502, DB unchanged |
 | 4 | **`deleteReservedPlaceholderForWeek`** — yellow placeholder only | Rollback create, 502, DB unchanged |
 | 5 | **`persistConfirmReservedWeek`** — one transaction for that `event_id` | Rollback create, 500 |
-| 6 | If **`finalize_series`** and no reserved weeks left → **`deleteReservedCalendarSeriesInGas`** | 502 (week already scheduled) |
-| 7 | If series cleaned → create next-month hold; orphan reserved cleanup | — |
+| 6 | **`renumberMonthLessonTitlesForStudent`** for each student on the week | Log warning; week already scheduled |
+| 7 | If **`finalize_series`** and no reserved weeks left → **`deleteReservedCalendarSeriesInGas`** | 502 (week already scheduled) |
+| 8 | If series cleaned → create next-month hold; orphan reserved cleanup | — |
 
 **Invariant:** Create **before** delete. Delete uses `excludeEventIds` from the new lesson so slot sweep cannot remove the green event. Series cleanup / next-month hold require explicit `finalize_series: true`.
 
@@ -120,6 +121,8 @@ Grouped by distinct `event_id`, sorted by `date` / `start` → `groupReservedBat
 | Helper | Role |
 |--------|------|
 | `groupReservedBatchRows` | Distinct `event_id` groups, sorted by date/start |
+| `listActiveMonthEventIdsByStart` | Chronological active event_ids for title `n` |
+| `renumberMonthLessonTitlesForStudent` | Rewrite month titles `i/N` by `start ASC` |
 | `deleteReservedPlaceholderForWeek` | GAS delete for one week’s placeholder |
 | `persistConfirmReservedWeek` | `reserved` → `scheduled` + reschedules FK rewrite for that old `event_id` |
 | `countReservedWeeksInBatch` | Drives series cleanup when combined with `finalize_series` |
@@ -129,7 +132,13 @@ Grouped by distinct `event_id`, sorted by `date` / `start` → `groupReservedBat
 
 ### Title `n/total`
 
-`lessonNumber = baseLessonCount + weekIndexInBatch` where `baseLessonCount` counts other non-cancelled lessons in the month excluding the batch’s reserved `event_id`s.
+`lessonNumber` = 1-based index of this week’s `event_id` among **all** active lessons for the student in `confirm_month`, ordered by `MIN(start) ASC` (scheduled + remaining reserved; not cancelled/rescheduled).
+
+`totalLessons` = `getPackTotalForBooking(..., pack_total)`, then `max(pack, activeCount)`.
+
+After `persistConfirmReservedWeek`, `renumberMonthLessonTitlesForStudent` rewrites all month titles in start order for each `student_id` on the week (heals out-of-order Confirm one).
+
+Do **not** use `baseLessonCount + remainingBatchIndex` (that scrambled `n` when weeks were confirmed out of order).
 
 ---
 
@@ -186,9 +195,10 @@ Successful week response includes:
 - `created_calendar_id` / `created_calendar_event_id`
 - `deleted_calendar_id` / `deleted_calendar_event_id` / `deleted_count`
 - `series_cleaned_up` — true when `finalize_series` ran and series master removed
+- `lesson_number` / `total_lessons` — chronological `n/total` used for the Calendar create title (before post-persist renumber)
+- `week_index` / `weeks_total` — position in **remaining** reserved batch at request time (batch progress only; not the title `n`)
 - `finalize_series` — echo of request flag
 - `next_month_hold_event_id` — set when next-month hold was created
-- `week_index` / `weeks_total` — position in **remaining** batch at request time (note: `week_index` resets as weeks are confirmed)
 
 Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete succeeded.
 
@@ -204,6 +214,7 @@ Verify: `created_calendar_event_id` ≠ `deleted_calendar_event_id` when delete 
 6. **Slot sweep without `excludeEventIds`** after create (removed lesson 1/4 in old bulk flow).
 7. **Removing `confirmReservedPlaceholder` / id normalization in GAS** (placeholders stop deleting when Calendar id formats differ).
 8. **Auto-finalize on empty batch without `finalize_series`** (Confirm one on the last remaining week must not wipe the series or create next-month hold).
+9. **`lessonNumber = baseLessonCount + remainingBatchIndex`** (scrambles `n/total` on out-of-order Confirm one; use chronological `start` rank + post-persist renumber).
 
 ---
 
