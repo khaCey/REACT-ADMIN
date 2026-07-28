@@ -399,7 +399,8 @@ async function getBookedCountForMonth(studentId, monthKey, db = query) {
 
 /**
  * Upsert pack size and rewrite monthly_schedule titles as Name (Loc) i/N in start order.
- * @returns {Promise<{ updated: number, pack_total: number }>}
+ * Then best-effort patch Google Calendar titles for synced scheduled lessons.
+ * @returns {Promise<{ updated: number, pack_total: number, calendar_patched: number, calendar_errors: Array<{ event_id: string, error: string }> }>}
  */
 async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTotal, db = query) {
   const sid = Number(studentId);
@@ -425,12 +426,13 @@ async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTota
   );
 
   const rows = await db(
-    `SELECT event_id, student_name, title, lesson_kind, lesson_mode
+    `SELECT event_id, student_id, student_name, title, lesson_kind, lesson_mode,
+            status, start, "end", calendar_source_event_id, calendar_sync_status
        FROM monthly_schedule
       WHERE student_id = $1
         AND to_char(date, 'YYYY-MM') = $2
         AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
-      ORDER BY start ASC`,
+      ORDER BY start ASC, event_id ASC`,
     [sid, month]
   );
 
@@ -444,10 +446,28 @@ async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTota
     }
   }
 
+  /** @type {string[]} */
+  const eventOrder = [];
+  /** @type {Map<string, object[]>} */
+  const rowsByEvent = new Map();
+  for (const r of rows.rows || []) {
+    const eid = String(r.event_id || '').trim();
+    if (!eid) continue;
+    if (!rowsByEvent.has(eid)) {
+      rowsByEvent.set(eid, []);
+      eventOrder.push(eid);
+    }
+    rowsByEvent.get(eid).push(r);
+  }
+
+  /** @type {Map<string, string>} */
+  const titlesByEvent = new Map();
   let idx = 0;
-  for (const r of rows.rows) {
+  for (const eid of eventOrder) {
     idx += 1;
-    const orderedStudents = await getOrderedEventStudents(r.event_id, db);
+    const groupRows = rowsByEvent.get(eid) || [];
+    const r = groupRows[0];
+    const orderedStudents = await getOrderedEventStudents(eid, db);
     const titleStudents =
       orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
     const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
@@ -466,17 +486,67 @@ async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTota
             totalLessons: pack,
           });
     const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
-    if (orderedStudents.length > 1) {
-      await db(`UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`, [newTitle, r.event_id]);
+    titlesByEvent.set(eid, newTitle);
+    if (orderedStudents.length > 1 || groupRows.length > 1) {
+      await db(`UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`, [newTitle, eid]);
     } else {
       await db(
         `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
-        [newTitle, r.event_id, r.student_name]
+        [newTitle, eid, r.student_name]
       );
     }
   }
 
-  return { updated: rows.rows.length, pack_total: pack };
+  let calendar_patched = 0;
+  /** @type {Array<{ event_id: string, error: string }>} */
+  const calendar_errors = [];
+  if (isBookingGasEnabled()) {
+    for (const eid of eventOrder) {
+      const groupRows = rowsByEvent.get(eid) || [];
+      const r = groupRows[0];
+      if (!r) continue;
+      const status = String(r.status || '').toLowerCase().trim();
+      if (status === 'reserved') continue;
+      if (String(eid).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)) continue;
+      if (normalizeCalendarSyncStatus(r.calendar_sync_status) !== CALENDAR_SYNC_STATUS_SYNCED) {
+        continue;
+      }
+      try {
+        if (await shouldSkipAmbiguousRecurringCalendarUpdate(eid, r.calendar_source_event_id, sid)) {
+          continue;
+        }
+      } catch (skipErr) {
+        calendar_errors.push({
+          event_id: eid,
+          error: skipErr?.message || String(skipErr),
+        });
+        continue;
+      }
+      const title = titlesByEvent.get(eid);
+      if (!title) continue;
+      try {
+        const gasRes = await updateBookedLessonEventInGas(eid, { title }, calendarGasOptions(groupRows));
+        if (gasRes?.ok) {
+          calendar_patched += 1;
+        } else {
+          const errMsg = String(gasRes?.error || 'Calendar title update failed').trim();
+          console.error('[renumber] Calendar title patch failed', eid, errMsg);
+          calendar_errors.push({ event_id: eid, error: errMsg });
+        }
+      } catch (patchErr) {
+        const errMsg = String(patchErr?.message || patchErr).trim();
+        console.error('[renumber] Calendar title patch error', eid, errMsg);
+        calendar_errors.push({ event_id: eid, error: errMsg });
+      }
+    }
+  }
+
+  return {
+    updated: eventOrder.length,
+    pack_total: pack,
+    calendar_patched,
+    calendar_errors,
+  };
 }
 
 /**
@@ -1816,7 +1886,8 @@ router.get('/week', async (req, res) => {
 
 /**
  * POST /api/schedule/renumber-month-titles
- * Upsert `lessons` pack size for the month and rewrite `monthly_schedule.title` as `Name (Loc) i/N` in start order.
+ * Upsert `lessons` pack size, rewrite DB titles as `Name (Loc) i/N` in start order,
+ * and best-effort patch Google Calendar titles for synced scheduled lessons.
  */
 router.post('/renumber-month-titles', async (req, res) => {
   try {
@@ -1832,7 +1903,16 @@ router.post('/renumber-month-titles', async (req, res) => {
     }
 
     const result = await renumberMonthLessonTitlesForStudent(sid, monthKey, pack);
-    res.json({ ok: true, updated: result.updated, month: monthKey, pack_total: result.pack_total });
+    res.json({
+      ok: true,
+      updated: result.updated,
+      month: monthKey,
+      pack_total: result.pack_total,
+      calendar_patched: result.calendar_patched ?? 0,
+      ...(Array.isArray(result.calendar_errors) && result.calendar_errors.length > 0
+        ? { calendar_errors: result.calendar_errors }
+        : {}),
+    });
   } catch (err) {
     const msg = String(err?.message || err);
     if (msg === 'Student not found') return res.status(404).json({ error: msg });

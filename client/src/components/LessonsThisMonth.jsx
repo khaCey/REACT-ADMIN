@@ -1350,7 +1350,7 @@ export default function LessonsThisMonth({
         initialPackTotal={
           changeCountEntry.paidLessonsCount > 0 ? changeCountEntry.paidLessonsCount : 4
         }
-        description={`${changeCountEntry.label || changeCountMonthKey} の月の回数を保存し、その月のレッスンタイトル（1/N…）を開始時刻順に振り直します`}
+        description={`${changeCountEntry.label || changeCountMonthKey} の月の回数を保存し、アプリと Google Calendar のレッスンタイトル（1/N…）を開始時刻順に振り直します`}
         confirmLabel="Save & renumber"
         onClose={() => {
           setChangeCountOpen(false)
@@ -1363,12 +1363,32 @@ export default function LessonsThisMonth({
               month: changeCountMonthKey,
               lessons: n,
             })
-            await api.renumberMonthLessonTitles({
+            const renumberRes = await api.renumberMonthLessonTitles({
               student_id: studentId,
               month: changeCountMonthKey,
               pack_total: n,
             })
-            success('月の回数を保存し、タイトルを振り直しました')
+            const patched = Number(renumberRes?.calendar_patched) || 0
+            const calErrs = Array.isArray(renumberRes?.calendar_errors)
+              ? renumberRes.calendar_errors
+              : []
+            if (calErrs.length > 0) {
+              success(
+                `タイトルを振り直しました（Calendar ${patched}件更新、${calErrs.length}件失敗）`
+              )
+              setActionError(
+                calErrs
+                  .slice(0, 3)
+                  .map((e) => e?.error || 'Calendar update failed')
+                  .join('; ')
+              )
+            } else {
+              success(
+                patched > 0
+                  ? `月の回数を保存し、タイトルを振り直しました（Calendar ${patched}件更新）`
+                  : '月の回数を保存し、タイトルを振り直しました'
+              )
+            }
             setChangeCountOpen(false)
             setChangeCountMonthKey(null)
             await refetch()
