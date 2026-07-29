@@ -15,7 +15,6 @@ function formatBackupDate(iso) {
 }
 
 const MONTHLY_SCHEDULE_PAGE_SIZE = 100
-const purgeReservedMonth = getCurrentYyyyMmJst()
 
 function formatMonthlyScheduleDateTime(date, start) {
   const dateStr = date ? String(date).slice(0, 10) : '—'
@@ -69,6 +68,7 @@ export default function Admin() {
   const [deletingMonthlyRow, setDeletingMonthlyRow] = useState(false)
   const [reservedPlaceholderCount, setReservedPlaceholderCount] = useState(null)
   const [reservedCountLoading, setReservedCountLoading] = useState(true)
+  const [purgeReservedMonth, setPurgeReservedMonth] = useState(() => getCurrentYyyyMmJst())
   const [purgeReservedConfirmOpen, setPurgeReservedConfirmOpen] = useState(false)
   const [purgingReserved, setPurgingReserved] = useState(false)
   const [purgeReservedError, setPurgeReservedError] = useState('')
@@ -125,6 +125,11 @@ export default function Admin() {
   }, [])
 
   const loadReservedPlaceholderCount = useCallback(async () => {
+    if (!/^\d{4}-\d{2}$/.test(purgeReservedMonth)) {
+      setReservedPlaceholderCount(null)
+      setReservedCountLoading(false)
+      return
+    }
     setReservedCountLoading(true)
     try {
       const res = await api.getAdminMonthlyScheduleEntries({
@@ -139,7 +144,7 @@ export default function Admin() {
     } finally {
       setReservedCountLoading(false)
     }
-  }, [])
+  }, [purgeReservedMonth])
 
   useEffect(() => {
     loadReservedPlaceholderCount()
@@ -803,10 +808,22 @@ export default function Admin() {
           </h3>
           <p className="text-sm text-gray-600 mb-4">
             Remove <code className="bg-gray-100 px-1 rounded">reserved</code> rows from{' '}
-            <code className="bg-gray-100 px-1 rounded">monthly_schedule</code> for{' '}
-            <strong>{purgeReservedMonth}</strong> (Japan time) only. Google Calendar is not changed.
+            <code className="bg-gray-100 px-1 rounded">monthly_schedule</code> for the selected month
+            (Japan calendar month) only. Google Calendar is not changed.
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-2">
+            <label className="text-sm text-gray-700 inline-flex items-center gap-2">
+              Month
+              <input
+                type="month"
+                value={purgeReservedMonth}
+                onChange={(e) => {
+                  setPurgeReservedError('')
+                  setPurgeReservedMonth(e.target.value)
+                }}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-sm"
+              />
+            </label>
             <span className="text-sm text-gray-700">
               {reservedCountLoading
                 ? 'Counting reserved rows…'
@@ -817,7 +834,7 @@ export default function Admin() {
             <button
               type="button"
               onClick={loadReservedPlaceholderCount}
-              disabled={reservedCountLoading}
+              disabled={reservedCountLoading || !/^\d{4}-\d{2}$/.test(purgeReservedMonth)}
               className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
             >
               {reservedCountLoading ? <LoadingSpinner size="xs" /> : <RefreshCw className="w-4 h-4" />}
@@ -829,7 +846,12 @@ export default function Admin() {
                 setPurgeReservedError('')
                 setPurgeReservedConfirmOpen(true)
               }}
-              disabled={purgingReserved || reservedCountLoading || reservedPlaceholderCount === 0}
+              disabled={
+                purgingReserved ||
+                reservedCountLoading ||
+                reservedPlaceholderCount === 0 ||
+                !/^\d{4}-\d{2}$/.test(purgeReservedMonth)
+              }
               className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {purgingReserved ? <LoadingSpinner size="xs" /> : <Trash2 className="w-4 h-4" />}
