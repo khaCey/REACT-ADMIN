@@ -1,0 +1,29 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows, x64]
+
+    defaults:
+      run:
+        shell: powershell
+        working-directory: C:\wamp64\www\greensquare
+
+    steps:
+      - name: Pull latest main branch
+        run: git pull --ff-only origin main
+
+      - name: Build application
+        run: npm run build
+
+      - name: Restart all PM2 processes
+        run: pm2 restart all
