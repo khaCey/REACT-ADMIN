@@ -4,6 +4,7 @@ import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
@@ -258,9 +259,11 @@ export default function LessonDetailsModal({
     }
   }
   const handleOpenRescheduleChoice = () => {
+    if (BOOKING_WIP_DISABLED) return
     onOpenRescheduleChoice?.(lesson, student)
   }
   const handleSelectRescheduleDate = () => {
+    if (BOOKING_WIP_DISABLED) return
     onSelectRescheduleDate?.(lesson, student)
   }
   const runUncancel = async () => {
@@ -512,8 +515,13 @@ export default function LessonDetailsModal({
                   <button
                     type="button"
                     onClick={() => onBookLesson(lesson, student)}
-                    disabled={confirmDialogOpen || isTransientBusy}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'inline-flex items-center gap-1.5 rounded-md bg-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
+                        : 'inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
                   >
                     {studentIsDemo(student) ? 'Book Demo Lesson' : 'Book Lesson'}
                   </button>
@@ -542,8 +550,13 @@ export default function LessonDetailsModal({
                   <button
                     type="button"
                     onClick={handleOpenRescheduleChoice}
-                    disabled={confirmDialogOpen || isTransientBusy}
-                    className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
                   >
                     Reschedule
                   </button>
@@ -552,8 +565,13 @@ export default function LessonDetailsModal({
                   <button
                     type="button"
                     onClick={handleSelectRescheduleDate}
-                    disabled={confirmDialogOpen || isTransientBusy}
-                    className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'rounded-md bg-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
                   >
                     Set date
                   </button>

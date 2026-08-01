@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import { useToast } from '../context/ToastContext'
 import PaymentModal from './PaymentModal'
@@ -80,7 +81,10 @@ export default function StudentDetailsModal({
   const bookingExcluded = isStudentExcludedFromBooking(studentId, student)
 
   useEffect(() => {
-    if (bookingExcluded) setBookLessonModal(false)
+    if (bookingExcluded || BOOKING_WIP_DISABLED) {
+      setBookLessonModal(false)
+      setPreBookLessonModal(false)
+    }
   }, [bookingExcluded])
 
   useEffect(() => {
@@ -249,6 +253,7 @@ export default function StudentDetailsModal({
   }
 
   const openBookingFlow = (opts = {}) => {
+    if (BOOKING_WIP_DISABLED) return
     const source = opts?.rescheduleSource || null
     setGuideFocusKey(null)
     setRescheduleSourceLesson(source)
@@ -575,7 +580,13 @@ export default function StudentDetailsModal({
                   <button
                     type="button"
                     onClick={openBookingFlow}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
+                    disabled={BOOKING_WIP_DISABLED}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-3 py-1.5 text-sm font-semibold line-through cursor-not-allowed'
+                        : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer'
+                    }
                   >
                     <Calendar className="w-4 h-4" />
                     {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
@@ -666,7 +677,7 @@ export default function StudentDetailsModal({
         }}
       />
     )}
-    {bookLessonModal && !bookingExcluded && (
+    {bookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
       <BookLessonModal
         studentId={studentId}
         student={student}
@@ -683,7 +694,7 @@ export default function StudentDetailsModal({
         rescheduleSource={rescheduleSourceLesson}
       />
     )}
-    {preBookLessonModal && !bookingExcluded && (
+    {preBookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
       <PreBookLessonModal
         onClose={() => {
           setPreBookLessonModal(false)

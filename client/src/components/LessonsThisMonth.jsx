@@ -9,6 +9,7 @@ import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
 
@@ -864,6 +865,7 @@ export default function LessonsThisMonth({
     }
   }
   const openBookingReschedule = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
     if (typeof onBookLesson !== 'function') {
@@ -873,11 +875,13 @@ export default function LessonsThisMonth({
     onBookLesson({ rescheduleSource: lesson })
   }
   const handleOpenRescheduleChoice = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
     setRescheduleChoiceLesson(lesson)
   }
   const handleSelectRescheduleDate = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setSelectedLesson(null)
     openBookingReschedule(lesson)
@@ -1292,7 +1296,13 @@ export default function LessonsThisMonth({
               <button
                 type="button"
                 onClick={onBookLesson}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                disabled={BOOKING_WIP_DISABLED}
+                title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                className={
+                  BOOKING_WIP_DISABLED
+                    ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2.5 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                    : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                }
               >
                 <Calendar className="w-4 h-4" />
                 {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
@@ -1612,7 +1622,13 @@ export default function LessonsThisMonth({
                 <button
                   type="button"
                   onClick={onBookLesson}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                  disabled={BOOKING_WIP_DISABLED}
+                  title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                  className={
+                    BOOKING_WIP_DISABLED
+                      ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2.5 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                      : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                  }
                 >
                   <Calendar className="w-4 h-4" />
                   {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
@@ -1646,7 +1662,13 @@ export default function LessonsThisMonth({
               <button
                 type="button"
                 onClick={onBookLesson}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                disabled={BOOKING_WIP_DISABLED}
+                title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                className={
+                  BOOKING_WIP_DISABLED
+                    ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                    : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                }
               >
                 <Calendar className="w-4 h-4" />
                 Book
