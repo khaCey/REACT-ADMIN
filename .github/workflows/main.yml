@@ -16,7 +16,7 @@ jobs:
     defaults:
       run:
         shell: powershell
-        working-directory: C:\wamp64\www\greensquare
+        working-directory: C:\github\react-admin
 
     steps:
       - name: Pull latest main branch
