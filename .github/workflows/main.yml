@@ -18,9 +18,12 @@ jobs:
     defaults:
       run:
         shell: cmd
-        working-directory: C:\github\react-admin
+        working-directory: C:\GitHub\REACT-ADMIN
 
     steps:
+      - name: Trust deployment repository
+        run: git config --global --add safe.directory C:/GitHub/REACT-ADMIN
+
       - name: Pull latest main branch
         run: git pull --ff-only origin main
 
