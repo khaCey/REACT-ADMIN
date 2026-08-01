@@ -1,22 +1,22 @@
 ---
-description: Calendar API / GAS — separate app, gitignore workflow when editing
+description: calendarAPI / GAS — separate app, gitignore workflow when editing
 alwaysApply: true
 ---
 
-# Calendar API — separate app
+# calendarAPI — separate app
 
-- **`Calendar API/` is not part of REACT-ADMIN.** It is a standalone Google Apps Script project kept in the workspace for reference and local editing only.
-- **Default:** `Calendar API/` is listed in `.gitignore`. Do not `git add`, commit, or push it unless you are deliberately tracking a GAS change in-repo (see below).
+- **`calendarAPI/` is not part of REACT-ADMIN.** It is the cloned repo [khaCey/calendarAPI](https://github.com/khaCey/calendarAPI) — a standalone Google Apps Script project for local editing and `clasp` pull/push.
+- **Default:** `calendarAPI/` is listed in `.gitignore`. Do not `git add`, commit, or push it from the REACT-ADMIN root unless you are deliberately tracking it in REACT-ADMIN (see below).
 
 ## When making GAS changes in this workspace (agent or manual)
 
-1. **Temporarily remove** the `Calendar API/` line from `.gitignore` so Git and tools (e.g. clasp) can see the folder.
-2. Edit files under `Calendar API/` as needed.
-3. When finished, **add `Calendar API/` back** to `.gitignore` so the local GAS copy stays untracked by default again.
-4. **Remind the user** to deploy from the Apps Script editor or `clasp push` if they use clasp—deployment is still from their GAS project.
+1. **Temporarily remove** the `calendarAPI/` line from `.gitignore` if you need REACT-ADMIN’s git to see the folder (rare).
+2. Edit files under `calendarAPI/` as needed, or sync with **`clasp pull`** / **`clasp push`** from `calendarAPI/`.
+3. When finished, **restore** `calendarAPI/` in `.gitignore` if you removed it so the nested repo stays untracked by REACT-ADMIN by default.
+4. **Remind the user** to deploy from the Apps Script editor or `clasp push` + new Web App version when the live URL must pick up changes.
 
-If the folder is not present locally, edits may need to be pasted into script.google.com instead.
+If the folder is not present locally, run `git clone https://github.com/khaCey/calendarAPI.git calendarAPI` from the REACT-ADMIN root, or paste edits into script.google.com.
 
 ## Secrets
 
-- Do **not** commit `BOOKING_API_KEY`, poll keys, webhook URLs, or credentials inside `Calendar API/` files. Use **Apps Script → Project settings → Script properties** (and `migratePropertiesFromConfig_()` / `getBookingApiKey_()` patterns already in `Code.js`). Keep `Config.js` in Git with **empty strings** for secrets; configure locally or in Script properties only.
+- Do **not** commit `BOOKING_API_KEY`, poll keys, webhook URLs, or credentials inside `calendarAPI/` files. Use **Apps Script → Project settings → Script properties** (and `migratePropertiesFromConfig_()` / `getBookingApiKey_()` patterns in `Code.js`). Keep `Config.js` in Git with **empty strings** for secrets; configure locally or in Script properties only.

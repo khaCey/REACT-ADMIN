@@ -4,12 +4,30 @@ import ToastViewport from '../components/ToastViewport'
 const ToastContext = createContext(null)
 const TOAST_SHOW_DELAY_MS = 500
 
-function makeToast(type, message, durationMs = 3000) {
+/** @param {number | { durationMs?: number, onClick?: () => void, actionLabel?: string } | undefined} options */
+function normalizeToastOptions(options) {
+  if (typeof options === 'number') {
+    return { durationMs: options, onClick: undefined, actionLabel: '' }
+  }
+  if (options && typeof options === 'object') {
+    return {
+      durationMs: options.durationMs ?? 3000,
+      onClick: typeof options.onClick === 'function' ? options.onClick : undefined,
+      actionLabel: String(options.actionLabel || '').trim(),
+    }
+  }
+  return { durationMs: 3000, onClick: undefined, actionLabel: '' }
+}
+
+function makeToast(type, message, options) {
+  const { durationMs, onClick, actionLabel } = normalizeToastOptions(options)
   return {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     type,
     message,
     durationMs,
+    onClick,
+    actionLabel,
   }
 }
 
@@ -20,8 +38,8 @@ export function ToastProvider({ children }) {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
-  const pushToast = useCallback((type, message, durationMs) => {
-    const toast = makeToast(type, message, durationMs)
+  const pushToast = useCallback((type, message, options) => {
+    const toast = makeToast(type, message, options)
     setTimeout(() => {
       setToasts((prev) => [...prev, toast])
       if (toast.durationMs > 0) {
@@ -30,8 +48,8 @@ export function ToastProvider({ children }) {
     }, TOAST_SHOW_DELAY_MS)
   }, [dismissToast])
 
-  const success = useCallback((message, durationMs) => {
-    pushToast('success', message, durationMs)
+  const success = useCallback((message, options) => {
+    pushToast('success', message, options)
   }, [pushToast])
 
   const value = useMemo(() => ({

@@ -38,18 +38,18 @@ Deploy as a **Web app** (Execute as: typically the account that can read the sha
 Each lesson row in **`data`** / diff arrays must include:
 
 - **`eventID`** — **Stable Google Calendar event identifier** for that occurrence (the same string the client and DB will key on). Prefer the Calendar API **`id`** for the event (or whatever you already store in MonthlySchedule).  
-  - Do **not** put `|` in `eventID` (the client builds keys as `eventID + '|' + studentName`).
+  - Do **not** put `|` in `eventID` (poll row keys join fields with `|`; see **Removed lessons** below).
 - **`studentName`** — Display name string, trimmed; should match student names in the admin DB when possible (spacing normalized on the server).
 
-**Removed lessons:** When an event disappears from the calendar (deleted or no longer matches your filter), the poll response **must** list it under **`diff.removed`** using the **exact same key string** the client would use:
+**Removed lessons:** When an event disappears from the calendar (deleted or no longer matches your filter), the poll response **must** list it under **`diff.removed`** using the **exact same key string** as in the current snapshot rows:
 
 ```text
-<eventID>|<studentName>
+<eventID>|<studentName>|<YYYY-MM-DD>
 ```
 
-Example: `abc123@google.com_20260321T090000Z|Tarou Tanaka` — only if that was the `eventID` and `studentName` you emitted while the row existed.
+The **`date` segment is required** when the same `eventID` can appear on multiple days (recurring series). Legacy two-part keys `<eventID>|<studentName>` are still accepted for backward compatibility, but recurring lessons should use the three-part form so PostgreSQL deletes only that day’s row.
 
-The Node server also accepts `{ eventID, studentName }` in `removed[]` on `POST /api/calendar-poll/sync`, which the SPA derives by splitting that key. If `removed` is wrong or empty, deletions may not reach PostgreSQL until a reconcile runs for that month.
+Example: `abc123@google.com_20260520T050000Z|Tarou Tanaka|2026-05-20`
 
 ---
 
@@ -194,4 +194,4 @@ Reject invalid input clearly. Use ContentService.createTextOutput(JSON.stringify
 - Client polling: `client/src/api/pollingApi.js`, `client/src/hooks/useCalendarPolling.js`, `client/src/context/CalendarPollingContext.jsx`
 - Server sync / deletes: `server/lib/calendarSync.js`, `POST /api/calendar-poll/sync`, `POST /api/calendar-poll/backfill`
 
-The **`Calendar API/`** folder in this workspace (if present) is a **separate** GAS project for reference only and is not committed per `.gitignore`; copy any changes into your live Apps Script project manually.
+The **`calendarAPI/`** folder ([khaCey/calendarAPI](https://github.com/khaCey/calendarAPI)) at the REACT-ADMIN root is a **separate** GAS clone and is not tracked by REACT-ADMIN’s git (see `.gitignore`). Use `git` / `clasp` inside that directory to sync GitHub and Apps Script.

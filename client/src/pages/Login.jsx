@@ -11,7 +11,12 @@ export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = location.state?.from?.pathname || '/students'
+  /** Root `/` is only a redirect shell; sending users there after login shows a blank outlet until Navigate runs. */
+  const rawFrom = location.state?.from?.pathname
+  const from =
+    !rawFrom || String(rawFrom).trim() === '' || String(rawFrom).trim() === '/'
+      ? '/dashboard'
+      : String(rawFrom).trim()
 
   useEffect(() => {
     api.getStaffList()

@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import { LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
+import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import FullPageLoading from '../components/FullPageLoading'
 
@@ -21,15 +22,17 @@ function formatMonthLabel(yyyyMm) {
   return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
 }
 
-/** Merge three per-month series into one array: { month, label, regularStudents, demoLessons, studentsJoined } */
+/** Merge per-month series into one array for the metrics chart. */
 function mergeMetrics(metrics) {
   if (!metrics) return []
   const regular = new Map((metrics.regularStudentsPerMonth || []).map((d) => [d.month, d.count]))
+  const lessons = new Map((metrics.regularLessonsPerMonth || []).map((d) => [d.month, d.count]))
   const demo = new Map((metrics.demoLessonsPerMonth || []).map((d) => [d.month, d.count]))
   const joined = new Map((metrics.studentsJoinedPerMonth || []).map((d) => [d.month, d.count]))
   const months = [
     ...new Set([
       ...regular.keys(),
+      ...lessons.keys(),
       ...demo.keys(),
       ...joined.keys(),
     ]),
@@ -38,6 +41,7 @@ function mergeMetrics(metrics) {
     month,
     label: formatMonthLabel(month),
     regularStudents: regular.get(month) ?? 0,
+    regularLessons: lessons.get(month) ?? 0,
     demoLessons: demo.get(month) ?? 0,
     studentsJoined: joined.get(month) ?? 0,
   }))
@@ -179,9 +183,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true)
-    setError('')
+  const { lastSynced } = useCalendarPollingContext()
+
+  const fetchDashboard = useCallback(async (opts = {}) => {
+    const silent = opts.silent === true
+    if (!silent) {
+      setLoading(true)
+      setError('')
+    }
     const monthsBack = chartRangeYears * 12 - 1
     const from = subtractMonths(chartEndMonth, monthsBack)
     const to = chartEndMonth
@@ -193,19 +202,29 @@ export default function Dashboard() {
       setMetrics(metricsData)
       setTodayLessons(Array.isArray(todayData?.lessons) ? todayData.lessons : [])
       setTodayDate(todayData?.date || '')
+      if (silent) setError('')
     } catch (err) {
       setError(err.message || 'Failed to load dashboard data')
-      setMetrics(null)
-      setTodayLessons([])
-      setTodayDate('')
+      if (!silent) {
+        setMetrics(null)
+        setTodayLessons([])
+        setTodayDate('')
+      }
     } finally {
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }, [chartEndMonth, chartRangeYears])
 
   useEffect(() => {
     fetchDashboard()
   }, [fetchDashboard])
+
+  useEffect(() => {
+    if (lastSynced == null) return
+    fetchDashboard({ silent: true })
+  }, [lastSynced, fetchDashboard])
 
   const showPaymentBadges = (lesson) =>
     lesson.is_last_lesson_of_month === true || lesson.is_last_lesson_of_month === 't'
@@ -265,6 +284,7 @@ export default function Dashboard() {
                           <div key={segIdx} className="grid grid-cols-4 gap-1 w-full">
                             {seg.lessons.map((lesson, li) => {
                               const colSpan = seg.layout === 'full' ? 'col-span-4' : 'col-span-2'
+                              const hasNote = !!(lesson?.has_note ?? lesson?.hasNote)
                               return (
                             <article
                               key={`${lesson.event_id ?? 'ev'}-${lesson.student_id ?? 's'}-${segIdx}-${li}-${lesson.student_name ?? ''}`}
@@ -278,12 +298,18 @@ export default function Dashboard() {
                                 if (!lesson.student_id) return
                                 if (e.key === 'Enter') setSelectedStudentId(lesson.student_id)
                               }}
-                              className={`dashboard-lesson-card h-[50px] rounded border flex items-center justify-between overflow-hidden px-2 ${colSpan} border-gray-200 bg-gray-50 ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
+                              className={`dashboard-lesson-card relative h-[50px] rounded border flex items-center justify-between overflow-hidden pl-2 pr-9 ${colSpan} border-gray-200 bg-gray-50 ${hasNote ? 'ring-2 ring-red-400' : ''} ${lesson.student_id ? 'cursor-pointer hover:bg-white' : ''}`}
                             >
+                              <span
+                                className={`pointer-events-none absolute top-1 right-1 inline-grid h-5 w-5 place-items-center rounded-full border border-red-500 bg-red-100 text-[10px] font-bold text-red-800 shadow-sm ${hasNote ? '' : 'invisible'}`}
+                                aria-hidden="true"
+                              >
+                                <span className="block leading-[1]">!</span>
+                              </span>
                               <span className="dashboard-lesson-card-name font-semibold text-gray-900 min-w-0 truncate">
                                 {lesson.student_name}
                               </span>
-                              <div className="flex items-center gap-1 shrink-0">
+                              <div className="flex items-center gap-1 shrink-0 min-w-0 mr-1">
                                 {lessonModeLabel(lesson.lesson_mode) && (
                                   <span className={`dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 ${lessonModeBadgeClass(lesson.lesson_mode)}`}>
                                     {lessonModeLabel(lesson.lesson_mode)}
@@ -372,7 +398,7 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-sm text-gray-500 mb-5">
-              Students (with at least one regular lesson), demo lessons, and students who made their first payment in that month.
+              Regular students and lessons, demo lessons, and students who made their first payment in that month.
             </p>
             {mergeMetrics(metrics).length === 0 ? (
               <p className="text-sm text-gray-500 py-8">No data for this period.</p>
@@ -393,6 +419,14 @@ export default function Dashboard() {
                       dataKey="regularStudents"
                       name="Students"
                       stroke="#16a34a"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="regularLessons"
+                      name="Lessons"
+                      stroke="#9333ea"
                       strokeWidth={2}
                       dot={{ r: 3 }}
                     />
@@ -425,6 +459,7 @@ export default function Dashboard() {
           onClose={() => setSelectedStudentId(null)}
           onStudentDeleted={fetchDashboard}
           onStudentUpdated={fetchDashboard}
+          onLessonNotesChanged={() => fetchDashboard({ silent: true })}
         />
       )}
     </div>

@@ -5,7 +5,9 @@ import { NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import FeatureListModal from './FeatureListModal'
+import HiatusStudentsModal from './HiatusStudentsModal'
 import PostLoginUnreadModal from './PostLoginUnreadModal'
+import StudentDetailsModal from './StudentDetailsModal'
 
 export default function Layout() {
   const location = useLocation()
@@ -14,6 +16,8 @@ export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [featureModalMode, setFeatureModalMode] = useState(null)
   const [showPostLoginUnread, setShowPostLoginUnread] = useState(false)
+  /** Opened from sticky booking toasts via `student-admin:open-student`. */
+  const [toastStudentId, setToastStudentId] = useState(null)
   const isStudentsListPage = location.pathname === '/students'
 
   useEffect(() => {
@@ -21,8 +25,10 @@ export default function Layout() {
     setShowPostLoginUnread(true)
     const nextState = location.state ? { ...location.state } : {}
     delete nextState.openPostLoginUnread
+    const path =
+      location.pathname === '/' || location.pathname === '' ? '/dashboard' : location.pathname
     navigate(
-      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { pathname: path, search: location.search, hash: location.hash },
       {
         replace: true,
         state: Object.keys(nextState).length > 0 ? nextState : undefined,
@@ -41,14 +47,31 @@ export default function Layout() {
     setShowPostLoginUnread(false)
   }, [])
 
+  useEffect(() => {
+    const openHiatus = () => setFeatureModalMode('hiatus')
+    window.addEventListener('student-admin:open-hiatus-list', openHiatus)
+    return () => window.removeEventListener('student-admin:open-hiatus-list', openHiatus)
+  }, [])
+
+  useEffect(() => {
+    const openStudent = (e) => {
+      const id = e?.detail?.studentId
+      if (id == null || id === '') return
+      setToastStudentId(id)
+    }
+    window.addEventListener('student-admin:open-student', openStudent)
+    return () => window.removeEventListener('student-admin:open-student', openStudent)
+  }, [])
+
   return (
     <>
-      <Navbar
-        onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+      <Navbar onToggleSidebar={() => setSidebarCollapsed((c) => !c)} />
+      <Sidebar
+        collapsed={sidebarCollapsed}
         onOpenUnpaid={() => setFeatureModalMode('unpaid')}
         onOpenUnscheduled={() => setFeatureModalMode('unscheduled')}
+        onOpenHiatus={() => setFeatureModalMode('hiatus')}
       />
-      <Sidebar collapsed={sidebarCollapsed} />
       <main
         id="mainContent"
         className={`bg-gray-100 transition-all duration-300 sidebar-content flex flex-col ${
@@ -61,14 +84,23 @@ export default function Layout() {
           </div>
         </div>
       </main>
-      {featureModalMode && (
+      {featureModalMode && featureModalMode !== 'hiatus' && (
         <FeatureListModal
           mode={featureModalMode}
           onClose={() => setFeatureModalMode(null)}
         />
       )}
+      {featureModalMode === 'hiatus' && (
+        <HiatusStudentsModal onClose={() => setFeatureModalMode(null)} />
+      )}
       {showPostLoginUnread && staff && !NOTIFICATIONS_WIP_DISABLED && (
         <PostLoginUnreadModal open onClose={closePostLoginUnread} />
+      )}
+      {toastStudentId != null && (
+        <StudentDetailsModal
+          studentId={toastStudentId}
+          onClose={() => setToastStudentId(null)}
+        />
       )}
     </>
   )

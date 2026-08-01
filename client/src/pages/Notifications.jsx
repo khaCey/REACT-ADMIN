@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { areGuidesAvailable, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
+import { areGuidesAvailable, MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import FullPageLoading from '../components/FullPageLoading'
 
 const PAGE_SIZE = 25
@@ -26,6 +26,13 @@ function formatDateTime(value) {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+function getMessageConversationIdFromNotification(notification) {
+  if (!notification || notification.kind !== 'message') return null
+  const slug = String(notification.slug || '')
+  const match = slug.match(/^message-thread:([^:]+):staff:\d+$/)
+  return match?.[1] || null
 }
 
 export default function Notifications() {
@@ -242,8 +249,39 @@ export default function Notifications() {
   const canPrev = offset > 0
   const canNext = offset + PAGE_SIZE < total
 
-  const handleMarkRead = async (id) => {
+  const handleOpenThreadFromNotification = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : items.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    if (!notification) return false
+    const conversationId = getMessageConversationIdFromNotification(notification)
+    if (!conversationId) return false
+    setReadingId(notification.id)
+    try {
+      await markAsRead(notification.id)
+      await refreshUnread()
+      if (MESSAGES_WIP_DISABLED) {
+        success('Marked as read')
+        return true
+      }
+      navigate('/messages', { state: { conversationId } })
+      return true
+    } finally {
+      setReadingId(null)
+    }
+  }
+
+  const handleMarkRead = async (notificationOrId) => {
     if (notificationsDisabled) return
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : items.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    const id = Number(notification?.id || notificationOrId)
+    const opened = await handleOpenThreadFromNotification(notification || id)
+    if (opened) {
+      setSelectedNotification(null)
+      return
+    }
     setReadingId(id)
     try {
       await markAsRead(id)
@@ -386,11 +424,13 @@ export default function Notifications() {
                 {!item.is_read && (
                   <button
                     type="button"
-                    onClick={() => handleMarkRead(item.id)}
+                    onClick={() => handleMarkRead(item)}
                     disabled={readingId === item.id}
                     className="text-sm text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-60"
                   >
-                    {readingId === item.id ? '処理中…' : '既読する'}
+                    {readingId === item.id
+                      ? '処理中…'
+                      : (item.kind === 'message' ? 'Open Message' : '既読する')}
                   </button>
                 )}
                 {canEditNotification(item) && (
@@ -459,6 +499,7 @@ export default function Notifications() {
             setSelectedNotification(null)
           }}
           onMarkRead={handleMarkRead}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'Open Message' : '既読にする'}
           onMarkUnread={handleMarkUnread}
           markingRead={readingId === selectedNotification.id}
           canDelete={canDeleteNotification(selectedNotification)}

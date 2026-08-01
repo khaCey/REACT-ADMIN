@@ -1,34 +1,24 @@
 /**
- * CalendarPollingProvider — GAS MonthlySchedule poll → POST /api/calendar-poll/sync (PostgreSQL).
+ * CalendarPollingProvider — poll GAS (cur+next month), then POST server backfill for those months.
  *
- * Schedule UIs (e.g. LessonsThisMonth, BookLessonModal) must load lessons from API routes that read
- * the DB; context `data` is the in-memory GAS snapshot used only to sync to the server, not for
- * rendering grids/cards. Those components use `lastSynced` as a signal to refetch DB-backed data.
- *
- * See POLLING_API_SPEC.md for the GAS contract.
+ * Optional `CALENDAR_POLL_SERVER_CRON` in root `.env` also syncs when no browser is open.
  */
 
-import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { useCalendarPolling } from '../hooks/useCalendarPolling'
-import { api } from '../api'
 import { useAuth } from './AuthContext'
+import { api } from '../api'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const CalendarPollingContext = createContext(null)
 
-const DEFAULT_POLL_INTERVAL_MS = 120000
+const DEFAULT_POLL_INTERVAL_MS = 15 * 60 * 1000
 
 function resolvePollIntervalMs(propMs) {
   if (propMs != null && Number.isFinite(propMs) && propMs >= 10000) return propMs
   const fromEnv = parseInt(import.meta.env.VITE_CALENDAR_POLL_INTERVAL_MS || '', 10)
   if (Number.isFinite(fromEnv) && fromEnv >= 10000) return fromEnv
   return DEFAULT_POLL_INTERVAL_MS
-}
-
-function parseRemovedKey(key) {
-  if (key == null || typeof key !== 'string') return null
-  const i = key.indexOf('|')
-  if (i <= 0) return null
-  return { eventID: key.slice(0, i), studentName: key.slice(i + 1) }
 }
 
 export function useCalendarPollingContext() {
@@ -41,56 +31,7 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   const intervalMs = useMemo(() => resolvePollIntervalMs(intervalMsProp), [intervalMsProp])
 
   const [lastSynced, setLastSynced] = useState(null)
-  const syncLoopRunningRef = useRef(false)
-  const pendingResyncRef = useRef(false)
-  const latestDataForSyncRef = useRef([])
-  const removedQueueRef = useRef([])
-
-  const onPollDiff = useCallback((diff) => {
-    for (const key of diff?.removed || []) {
-      const parsed = parseRemovedKey(key)
-      if (parsed?.eventID && parsed?.studentName) removedQueueRef.current.push(parsed)
-    }
-  }, [])
-
-  const syncToServer = useCallback(async (data) => {
-    latestDataForSyncRef.current = Array.isArray(data) ? data : []
-    if (syncLoopRunningRef.current) {
-      pendingResyncRef.current = true
-      return
-    }
-    syncLoopRunningRef.current = true
-    pendingResyncRef.current = false
-    try {
-      // Serialize: overlapping effect runs only set pendingResyncRef; we drain until quiescent.
-      while (true) {
-        pendingResyncRef.current = false
-        const removed = removedQueueRef.current.splice(0)
-        const payload = latestDataForSyncRef.current
-        const hasPayload = Array.isArray(payload) && payload.length > 0
-        if (!hasPayload && removed.length === 0) {
-          if (!pendingResyncRef.current) break
-          continue
-        }
-        try {
-          await api.syncCalendarPoll({ data: hasPayload ? payload : [], removed })
-          setLastSynced(Date.now())
-          console.debug(
-            '[CalendarPolling] Synced',
-            hasPayload ? payload.length : 0,
-            'rows,',
-            removed.length,
-            'removed, to server'
-          )
-        } catch (err) {
-          console.warn('[CalendarPolling] Sync failed:', err.message)
-        }
-        if (!pendingResyncRef.current) break
-      }
-    } finally {
-      syncLoopRunningRef.current = false
-    }
-  }, [])
+  const backfillGenRef = useRef(0)
 
   const {
     data,
@@ -103,15 +44,28 @@ export function CalendarPollingProvider({ children, intervalMs: intervalMsProp }
   } = useCalendarPolling({
     intervalMs,
     enabled: !!staff && !authLoading,
-    onChanged: onPollDiff,
   })
 
-  // Sync to server when data changes (full fetch or diff applied)
+  // After each successful GAS poll, run server-side month backfill (reconcile) then bump UI refresh.
   useEffect(() => {
-    if (isConfigured && !loading) {
-      syncToServer(data ?? [])
-    }
-  }, [isConfigured, data, loading, syncToServer])
+    if (!staff || authLoading || !isConfigured || loading) return
+    const gen = ++backfillGenRef.current
+    const curYm = getCurrentYyyyMmJst()
+    const nextYm = addOneMonthYyyyMm(curYm)
+    ;(async () => {
+      try {
+        await Promise.all([
+          api.backfillFromCalendar({ month: curYm }),
+          nextYm ? api.backfillFromCalendar({ month: nextYm }) : Promise.resolve(),
+        ])
+        if (backfillGenRef.current === gen) {
+          setLastSynced(Date.now())
+        }
+      } catch (err) {
+        console.warn('[CalendarPolling] Backfill failed:', err?.message || err)
+      }
+    })()
+  }, [staff, authLoading, isConfigured, loading, lastUpdated])
 
   const value = {
     data,

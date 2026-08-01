@@ -3,6 +3,9 @@
  * update the event's start/end (same as create path). Student Admin PATCH /schedule/:id/reschedule
  * sends these after moving a lesson in the database.
  *
+ * body.eventId must be the **occurrence** id for recurring lessons (…_YYYYMMDDTHHMMSSZ), not the
+ * series master. The Node server builds that from monthly_schedule.start when needed.
+ *
  * Example (Conceptual — adapt to your event lookup):
  *   if (body.start && body.end) {
  *     var s = new Date(body.start);

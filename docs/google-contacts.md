@@ -1,6 +1,6 @@
 # Google Contacts sync (students via GAS)
 
-Student contact sync now runs through **Calendar API (Google Apps Script)**:
+Student contact sync now runs through **calendarAPI** (Google Apps Script — see `calendarAPI/` clone):
 
 1. Admin app creates/updates a student in Node (`/api/students`).
 2. Node sends a server-to-server POST to GAS.
@@ -25,7 +25,7 @@ In Apps Script project settings, add script property:
 
 ## OAuth (required for People API)
 
-The manifest must include `https://www.googleapis.com/auth/contacts`, and the **same Google account that deploys the Web app** must complete consent after that scope is added. In the Apps Script editor, run **`runAuthorizePeopleContactsOnce`** once (see `Calendar API/Code.js`), then deploy a **new** Web app version. If the error persists, see **Contacts permission** in [`how-to-update-gas.md`](how-to-update-gas.md) (revoke + re-authorize, Workspace admin).
+The manifest must include `https://www.googleapis.com/auth/contacts`, and the **same Google account that deploys the Web app** must complete consent after that scope is added. In the Apps Script editor, run **`runAuthorizePeopleContactsOnce`** once (see `calendarAPI/Code.js`), then deploy a **new** Web app version. If the error persists, see **Contacts permission** in [`how-to-update-gas.md`](how-to-update-gas.md) (revoke + re-authorize, Workspace admin).
 
 ## Request contract (Node -> GAS)
 
@@ -68,5 +68,5 @@ Repeated `student_upsert` requests update the same contact when possible.
 
 - `server/lib/studentContactSync.js` — Node sender
 - `server/routes/students.js` — create/update hooks + response status
-- `Calendar API/Code.js` — `doPost` routing/auth for `student_upsert`
-- `Calendar API/Functions.js` — `upsertStudentContact_` helpers
+- `calendarAPI/Code.js` — `doPost` routing/auth for `student_upsert`
+- `calendarAPI/Functions.js` — `upsertStudentContact_` helpers

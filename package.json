@@ -11,7 +11,8 @@
     "uuid": "node -e \"console.log(require('crypto').randomUUID())\"",
     "build": "cd client && npm run build",
     "server": "node server/index.js",
-    "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\""
+    "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\"",
+    "test:booking": "node --test server/lib/booking/__tests__/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -23,6 +24,7 @@
     "express": "^4.18.2",
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "open": "^10.0.0",
     "pg": "^8.11.3"

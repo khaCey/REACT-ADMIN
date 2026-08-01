@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS students (
 
 -- Existing DBs (before this column existed)
 ALTER TABLE students ADD COLUMN IF NOT EXISTS google_contact_resource_name VARCHAR(512);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_contacted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_expected_return DATE NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_otsukisha BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Payments
 CREATE TABLE IF NOT EXISTS payments (
@@ -201,6 +204,7 @@ ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_dat
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_to_time VARCHAR(16);
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_date DATE;
 ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS reschedule_snapshot_from_time VARCHAR(16);
+ALTER TABLE monthly_schedule ADD COLUMN IF NOT EXISTS calendar_source_event_id TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_schedule_calendar_sync_key
   ON monthly_schedule(calendar_sync_key)
@@ -210,23 +214,20 @@ CREATE INDEX IF NOT EXISTS idx_monthly_schedule_group_id
 CREATE INDEX IF NOT EXISTS idx_monthly_schedule_lesson_uuid
   ON monthly_schedule(lesson_uuid);
 
+-- Staff removed a lesson slot locally while Calendar no longer has the event; poll must not re-insert.
+CREATE TABLE IF NOT EXISTS schedule_slot_dismissals (
+  student_name TEXT NOT NULL,
+  lesson_date DATE NOT NULL,
+  start_time_utc TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (student_name, lesson_date, start_time_utc)
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_slot_dismissals_date
+  ON schedule_slot_dismissals (lesson_date);
+
 -- Optional manual migration after app no longer reads monthly_schedule.group_id:
 -- DROP INDEX IF EXISTS idx_monthly_schedule_group_id;
 -- ALTER TABLE monthly_schedule DROP COLUMN IF EXISTS group_id;
-
--- Linked reschedules: source lesson -> destination lesson
-CREATE TABLE IF NOT EXISTS reschedules (
-  id SERIAL PRIMARY KEY,
-  from_event_id VARCHAR(255) NOT NULL,
-  from_student_name VARCHAR(255) NOT NULL,
-  to_event_id VARCHAR(255) NOT NULL,
-  to_student_name VARCHAR(255) NOT NULL,
-  created_by_staff_id INTEGER REFERENCES staff(id),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT reschedules_from_unique UNIQUE (from_event_id, from_student_name)
-);
-CREATE INDEX IF NOT EXISTS idx_reschedules_from ON reschedules(from_event_id, from_student_name);
-CREATE INDEX IF NOT EXISTS idx_reschedules_to ON reschedules(to_event_id, to_student_name);
 
 -- Teacher schedules
 CREATE TABLE IF NOT EXISTS teacher_schedules (
@@ -323,6 +324,20 @@ ALTER TABLE staff ADD COLUMN IF NOT EXISTS calendar_color_id VARCHAR(8);
 
 CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(name);
 
+-- Linked reschedules: source lesson -> destination lesson (requires staff)
+CREATE TABLE IF NOT EXISTS reschedules (
+  id SERIAL PRIMARY KEY,
+  from_event_id VARCHAR(255) NOT NULL,
+  from_student_name VARCHAR(255) NOT NULL,
+  to_event_id VARCHAR(255) NOT NULL,
+  to_student_name VARCHAR(255) NOT NULL,
+  created_by_staff_id INTEGER REFERENCES staff(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT reschedules_from_unique UNIQUE (from_event_id, from_student_name)
+);
+CREATE INDEX IF NOT EXISTS idx_reschedules_from ON reschedules(from_event_id, from_student_name);
+CREATE INDEX IF NOT EXISTS idx_reschedules_to ON reschedules(to_event_id, to_student_name);
+
 -- Staff-created notifications
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
@@ -360,6 +375,56 @@ CREATE TABLE IF NOT EXISTS notification_reads (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notification_reads_staff_id ON notification_reads(staff_id);
+
+-- Staff threaded messages (separate from notifications).
+CREATE TABLE IF NOT EXISTS message_conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject VARCHAR(255),
+  created_by_staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  archived_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS message_conversation_participants (
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  left_at TIMESTAMPTZ,
+  PRIMARY KEY (conversation_id, staff_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_items (
+  id BIGSERIAL PRIMARY KEY,
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  sender_staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE RESTRICT,
+  parent_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ
+);
+ALTER TABLE message_items
+  ADD COLUMN IF NOT EXISTS parent_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS message_participant_reads (
+  conversation_id UUID NOT NULL REFERENCES message_conversations(id) ON DELETE CASCADE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  last_read_message_id BIGINT REFERENCES message_items(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, staff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_items_conversation_created
+  ON message_items(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_items_conversation_parent_created
+  ON message_items(conversation_id, parent_message_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_message_items_sender
+  ON message_items(sender_staff_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_conversation_participants_staff
+  ON message_conversation_participants(staff_id);
+CREATE INDEX IF NOT EXISTS idx_message_participant_reads_staff_updated
+  ON message_participant_reads(staff_id, updated_at DESC);
 
 -- Staff shift log: login = shift start, logout = shift end
 CREATE TABLE IF NOT EXISTS staff_shifts (

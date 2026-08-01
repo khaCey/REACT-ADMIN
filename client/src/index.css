@@ -147,6 +147,7 @@ table.table thead.bg-green-600 {
 
 .badge-status-active { background-color: #059669; color: white; }
 .badge-status-dormant { background-color: #475569; color: white; }
+.badge-status-hiatus { background-color: #d97706; color: white; }
 .badge-status-demo { background-color: #7c3aed; color: white; }
 .badge-pay-neo { background-color: #0284c7; color: white; }
 .badge-pay-old { background-color: #475569; color: white; }

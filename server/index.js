@@ -27,13 +27,14 @@ import notesRouter from './routes/notes.js';
 import lessonsRouter from './routes/lessons.js';
 import dashboardRouter from './routes/dashboard.js';
 import configRouter from './routes/config.js';
-import scheduleRouter from './routes/schedule.js';
+import scheduleRouter, { purgeAllReservedPlaceholders } from './routes/schedule.js';
 import changeLogRouter from './routes/changeLog.js';
 import calendarRouter, { registerWatch } from './routes/calendar.js';
 import authRouter from './routes/auth.js';
 import staffRouter from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
+import messagesRouter from './routes/messages.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import {
   bulkSyncCalendarsFromGasForStaffType,
@@ -43,14 +44,43 @@ import {
   normaliseGasEvents,
   syncOneStaffCalendarFromGas,
 } from './lib/staffScheduleGasSync.js';
-import { runBackup, cleanupBackupsOlderThan, runRestore } from './lib/backup.js';
+import {
+  runBackup,
+  cleanupBackupsOlderThan,
+  runRestore,
+  runRestoreFromDriveFileId,
+  runRestoreFromUpload,
+} from './lib/backup.js';
+import { listBackupFilesInFolder } from './lib/googleDrive.js';
+import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
 import cron from 'node-cron';
+import multer from 'multer';
+import { tmpdir } from 'os';
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+const backupUploadMaxMb = Math.max(1, parseInt(process.env.BACKUP_UPLOAD_MAX_MB || '500', 10) || 500);
+const backupUpload = multer({
+  storage: multer.diskStorage({
+    destination: tmpdir(),
+    filename: (_req, file, cb) => {
+      const safe = String(file.originalname || 'backup.sql').replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `restore-upload-${Date.now()}-${safe}`);
+    },
+  }),
+  limits: { fileSize: backupUploadMaxMb * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!String(file.originalname || '').toLowerCase().endsWith('.sql')) {
+      cb(new Error('Only .sql backup files are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 app.use('/api/auth', authRouter);
 
@@ -114,6 +144,40 @@ function formatFetchError(err) {
   }
   if (parts.length === 0) return 'fetch failed';
   return parts.join(' — ');
+}
+
+/** Prefer synced scheduled rows when poll/sync left duplicate DB rows at the same slot. */
+function dedupeStudentLessonsBySlot(lessons) {
+  const rank = (lesson) => {
+    let score = 0;
+    const sync = String(lesson?.calendarSyncStatus || '').toLowerCase();
+    const status = String(lesson?.status || '').toLowerCase();
+    const eventId = String(lesson?.eventID || '');
+    if (sync === 'synced') score += 40;
+    if (status === 'scheduled') score += 20;
+    if (status === 'rescheduled') score += 10;
+    if (!eventId.startsWith('local-booking-') && !eventId.startsWith('optimistic-')) score += 8;
+    if (sync === 'pending') score += 2;
+    return score;
+  };
+  const bySlot = new Map();
+  const unscheduled = [];
+  for (const lesson of lessons || []) {
+    if (String(lesson?.status || '').toLowerCase() === 'unscheduled') {
+      unscheduled.push(lesson);
+      continue;
+    }
+    const day = String(lesson?.day || '').padStart(2, '0');
+    const time = String(lesson?.time || '');
+    if (!day || day === '--' || !time || time === '--') {
+      unscheduled.push(lesson);
+      continue;
+    }
+    const key = `${day}\t${time}`;
+    const prev = bySlot.get(key);
+    if (!prev || rank(lesson) > rank(prev)) bySlot.set(key, lesson);
+  }
+  return [...bySlot.values(), ...unscheduled];
 }
 
 app.get('/api/students/:id/latest-by-month', async (req, res) => {
@@ -210,8 +274,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   mt.event_id,
                   (SELECT x.event_id FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1),
                   rt.to_event_id
@@ -220,8 +283,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mt.date, 'YYYY-MM-DD'),
                   (SELECT to_char(x.date, 'YYYY-MM-DD') FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_to_date,
@@ -229,8 +291,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mt.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
                   (SELECT to_char(x.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule x
                    WHERE rt.to_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(x.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(x.event_id) = TRIM(rt.to_event_id)
                      AND (x.student_id = $3::integer OR REGEXP_REPLACE(TRIM(x.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_to_time,
@@ -238,8 +299,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   mf.event_id,
                   (SELECT y.event_id FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1),
                   rf.from_event_id
@@ -248,8 +308,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mf.date, 'YYYY-MM-DD'),
                   (SELECT to_char(y.date, 'YYYY-MM-DD') FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_from_date,
@@ -257,35 +316,30 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
                   to_char(mf.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI'),
                   (SELECT to_char(y.start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') FROM monthly_schedule y
                    WHERE rf.from_event_id IS NOT NULL
-                     AND REGEXP_REPLACE(TRIM(y.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+                     AND TRIM(y.event_id) = TRIM(rf.from_event_id)
                      AND (y.student_id = $3::integer OR REGEXP_REPLACE(TRIM(y.student_name), '\\s+', ' ', 'g') = ANY($1::text[]))
                    LIMIT 1)
                 ) AS rescheduled_from_time,
                 (SELECT COUNT(*) FROM monthly_schedule m2 WHERE m2.event_id = m.event_id AND to_char(m2.date, 'YYYY-MM') = $2) AS student_count
          FROM monthly_schedule m
          INNER JOIN students canst ON canst.id = $3::integer
-         LEFT JOIN reschedules rt ON REGEXP_REPLACE(TRIM(rt.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                   = REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN reschedules rt ON TRIM(rt.from_event_id) = TRIM(m.event_id)
            AND (
              REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(rt.from_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN monthly_schedule mt ON REGEXP_REPLACE(TRIM(mt.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                       = REGEXP_REPLACE(TRIM(rt.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN monthly_schedule mt ON TRIM(mt.event_id) = TRIM(rt.to_event_id)
            AND (
              mt.student_id = $3::integer
              OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(mt.student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN reschedules rf ON REGEXP_REPLACE(TRIM(rf.to_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                   = REGEXP_REPLACE(TRIM(m.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN reschedules rf ON TRIM(rf.to_event_id) = TRIM(m.event_id)
            AND (
              REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
              OR REGEXP_REPLACE(TRIM(rf.to_student_name), '\\s+', ' ', 'g') = ANY($1::text[])
            )
-         LEFT JOIN monthly_schedule mf ON REGEXP_REPLACE(TRIM(mf.event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
-                                       = REGEXP_REPLACE(TRIM(rf.from_event_id), '_\\d{4}-\\d{2}-\\d{2}(?:_\\d{2}-\\d{2}-\\d{2})?$', '')
+         LEFT JOIN monthly_schedule mf ON TRIM(mf.event_id) = TRIM(rf.from_event_id)
            AND (
              mf.student_id = $3::integer
              OR REGEXP_REPLACE(TRIM(mf.student_name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(canst.name), '\\s+', ' ', 'g')
@@ -298,7 +352,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         [normalizedVariants, yyyyMm, studentIdForJoin]
       );
 
-      const lessons = scheduleResult.rows.map((r) => {
+      const lessonsRaw = scheduleResult.rows.map((r) => {
         const dateStr = r.date ? String(r.date).trim() : '';
         const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
         const day = dateMatch ? dateMatch[3] : '--';
@@ -335,6 +389,9 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         };
       });
 
+      /** One card per day+time; avoids duplicate pending rows after reschedule/calendar sync retries. */
+      const lessons = dedupeStudentLessonsBySlot(lessonsRaw);
+
       const isPaid = paidMonths.has(yyyyMm);
       const sumPaid = paidLessonsSumByMonth[yyyyMm] || 0;
       const maxPaid = paidLessonsMaxByMonth[yyyyMm] || 0;
@@ -343,9 +400,11 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         'SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2',
         [Number(id) || id, yyyyMm]
       );
-      const storedPack = parseInt(lessonPackRes.rows[0]?.lessons, 10) || 0;
-      if (storedPack > 0) {
-        paidLessons = storedPack;
+      if (lessonPackRes.rows.length > 0) {
+        const storedPack = parseInt(lessonPackRes.rows[0]?.lessons, 10);
+        if (Number.isFinite(storedPack) && storedPack >= 0) {
+          paidLessons = storedPack;
+        }
       }
       // Rows from DB only (before unscheduled placeholders).
       // Rescheduled-source lessons (`rescheduledTo` exists) do not consume monthly count.
@@ -400,6 +459,7 @@ app.use('/api/shifts', shiftsRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/change-log', changeLogRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/messages', messagesRouter);
 
 /** Admin: create backup (pg_dump + Drive upload). Admin only. */
 app.post('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
@@ -429,18 +489,70 @@ app.get('/api/admin/backups', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-/** Admin: restore database from a backup (by id). Downloads from Drive, runs psql. Admin only. */
+/** Admin: list .sql backup files in the Google Drive backup folder. Admin only. */
+app.get('/api/admin/backups/drive', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const files = await listBackupFilesInFolder();
+    res.json(files);
+  } catch (err) {
+    console.error('[admin/backups/drive]', err.message);
+    const code = err.message?.includes('not configured') || err.message?.includes('not set') ? 503 : 500;
+    res.status(code).json({ error: err.message || 'Failed to list Drive backups' });
+  }
+});
+
+/** Admin: restore database from a backup (by id or Drive file id). Admin only. */
 app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { backupId } = req.body || {};
-    const { fileName } = await runRestore(backupId);
+    const { backupId, driveFileId, fileName: driveFileName } = req.body || {};
+    const hasBackupId = backupId != null && backupId !== '';
+    const hasDriveId = driveFileId != null && String(driveFileId).trim() !== '';
+    if (hasBackupId && hasDriveId) {
+      return res.status(400).json({ error: 'Provide backupId or driveFileId, not both' });
+    }
+    if (!hasBackupId && !hasDriveId) {
+      return res.status(400).json({ error: 'Provide backupId or driveFileId' });
+    }
+    const { fileName } = hasBackupId
+      ? await runRestore(backupId)
+      : await runRestoreFromDriveFileId(driveFileId, driveFileName || '');
     res.json({ ok: true, fileName });
   } catch (err) {
     console.error('[admin/restore]', err.message);
-    const status = err.message?.includes('not found') ? 404 : err.message?.includes('Invalid') ? 400 : 500;
+    const status = err.message?.includes('not found') ? 404 : err.message?.includes('Invalid') || err.message?.includes('required') ? 400 : 500;
     res.status(status).json({ error: err.message || 'Restore failed' });
   }
 });
+
+/** Admin: restore database from an uploaded .sql file. Admin only. */
+app.post(
+  '/api/admin/restore/upload',
+  requireAuth,
+  requireAdmin,
+  (req, res, next) => {
+    backupUpload.single('file')(req, res, (err) => {
+      if (err) {
+        const msg = err.code === 'LIMIT_FILE_SIZE'
+          ? `File too large (max ${backupUploadMaxMb} MB)`
+          : err.message || 'Upload failed';
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    try {
+      const { fileName } = await runRestoreFromUpload(req.file.path, req.file.originalname);
+      res.json({ ok: true, fileName });
+    } catch (err) {
+      console.error('[admin/restore/upload]', err.message);
+      res.status(500).json({ error: err.message || 'Restore failed' });
+    }
+  }
+);
 
 const ADMIN_CLEARABLE_TABLES = new Set([
   'backups',
@@ -482,11 +594,15 @@ app.get('/api/admin/monthly-schedule', requireAuth, requireAdmin, async (req, re
     const rawSyncStatus = String(req.query?.syncStatus ?? '').trim().toLowerCase();
     const rawStatus = String(req.query?.status ?? '').trim().toLowerCase();
     const rawQ = String(req.query?.q ?? '').trim();
+    const rawMonth = String(req.query?.month ?? '').trim();
     const limit = Math.max(1, Math.min(500, parseInt(String(req.query?.limit ?? '100'), 10) || 100));
     const offset = Math.max(0, parseInt(String(req.query?.offset ?? '0'), 10) || 0);
     const studentId = rawStudentId === '' ? null : Number(rawStudentId);
     if (rawStudentId !== '' && !Number.isFinite(studentId)) {
       return res.status(400).json({ error: 'studentId must be a number when provided' });
+    }
+    if (rawMonth && !/^\d{4}-\d{2}$/.test(rawMonth)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM when provided' });
     }
 
     const filterSql = `
@@ -500,16 +616,17 @@ app.get('/api/admin/monthly-schedule', requireAuth, requireAdmin, async (req, re
           OR COALESCE(ms.student_name, '') ILIKE '%' || $4::text || '%'
           OR COALESCE(ms.title, '') ILIKE '%' || $4::text || '%'
         )
+        AND ($5::text = '' OR to_char(ms.date, 'YYYY-MM') = $5::text)
     `;
 
-    const params = [studentId, rawSyncStatus, rawStatus, rawQ];
+    const params = [studentId, rawSyncStatus, rawStatus, rawQ, rawMonth];
     const totalResult = await query(`SELECT COUNT(*)::integer AS total ${filterSql}`, params);
     const rowsResult = await query(
       `SELECT ms.event_id, ms.student_name, ms.student_id, ms.title, ms.date, ms.start, ms.status,
               ms.calendar_sync_status, ms.calendar_sync_error, ms.awaiting_reschedule_date
        ${filterSql}
        ORDER BY ms.date DESC NULLS LAST, ms.start DESC NULLS LAST, ms.student_name ASC, ms.event_id ASC
-       LIMIT $5 OFFSET $6`,
+       LIMIT $6 OFFSET $7`,
       [...params, limit, offset]
     );
 
@@ -558,6 +675,25 @@ app.delete('/api/admin/monthly-schedule/:eventId', requireAuth, requireAdmin, as
   } catch (err) {
     console.error('[admin/monthly-schedule:delete]', err.message);
     res.status(500).json({ error: err.message || 'Failed to delete monthly schedule row' });
+  }
+});
+
+/** Admin: purge reserved placeholder rows for one month (DB only by default from Admin UI). */
+app.post('/api/admin/purge-reserved-placeholders', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const localOnly =
+      req.body?.localOnly === true || String(req.body?.localOnly || '').toLowerCase() === 'true';
+    const month = String(req.body?.month || '').trim();
+    if (month && !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM when provided' });
+    }
+
+    const result = await purgeAllReservedPlaceholders(req, { localOnly, month: month || undefined });
+    const status = result.ok ? 200 : result.batches_purged > 0 ? 207 : 502;
+    res.status(status).json(result);
+  } catch (err) {
+    console.error('[admin/purge-reserved-placeholders]', err.message);
+    res.status(500).json({ error: err.message || 'Failed to purge reserved placeholders' });
   }
 });
 
@@ -765,8 +901,24 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
     if (removed != null && !Array.isArray(removed)) {
       return res.status(400).json({ error: 'removed must be an array when present' });
     }
-    console.log('[calendar-poll/sync] received', data.length, 'rows,', (removed || []).length, 'removed');
-    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, { removed: removed || [] });
+    const removedArr = removed || [];
+    console.log('[calendar-poll/sync] received', data.length, 'rows,', removedArr.length, 'removed');
+    const syncResult = await upsertMonthlySchedule(data, {
+      removed: removedArr,
+      // Incremental polls must be treated as deltas; never reconcile by "missing from this payload"
+      // because incremental payloads may omit rows that were not changed in this poll.
+      reconcile: false,
+    });
+    const {
+      upserted,
+      months,
+      deletedOrphans,
+      removedReceived,
+      removedParsed,
+      removedParsedAttempts,
+      removedSkippedInvalid,
+      removedDeleted,
+    } = syncResult;
 
     // Keep teacher_schedules aligned with lesson updates so booking UI capacity constraints are correct.
     // We refresh only when lesson months touch the current JST month or the next JST month.
@@ -792,9 +944,21 @@ app.post('/api/calendar-poll/sync', async (req, res) => {
       upserted,
       'rows for months',
       months.sort().join(', '),
-      deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : ''
+      deletedOrphans ? `; reconciled (deleted ${deletedOrphans} orphan row(s))` : '',
+      `; removed: received=${removedReceived} parsed=${removedParsed} (attempts=${removedParsedAttempts}) skippedInvalid=${removedSkippedInvalid} deletedRows=${removedDeleted}`
     );
-    res.json({ ok: true, upserted, months, deletedOrphans: deletedOrphans || 0, teacherSchedulesRefresh });
+    res.json({
+      ok: true,
+      upserted,
+      months,
+      deletedOrphans: deletedOrphans || 0,
+      removedReceived,
+      removedParsed,
+      removedParsedAttempts,
+      removedSkippedInvalid,
+      removedDeleted,
+      teacherSchedulesRefresh,
+    });
   } catch (err) {
     console.error('[calendar-poll/sync] error:', err.message);
     res.status(500).json({ error: err.message });
@@ -837,7 +1001,14 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
     }
     const data = Array.isArray(json.data) ? json.data : [];
     console.log('[calendar-poll/backfill] fetched', data.length, 'rows from GAS');
-    const { upserted, months } = await upsertMonthlySchedule(data);
+    /** Only reconcile months this request asked for (avoids orphan-deleting other months from stray rows). */
+    const reconcileOpts =
+      month && /^\d{4}-\d{2}$/.test(String(month))
+        ? { reconcileMonthsAllowlist: [String(month)] }
+        : year && /^\d{4}$/.test(String(year))
+          ? { reconcileOnlyYear: String(year) }
+          : {};
+    const { upserted, months } = await upsertMonthlySchedule(data, reconcileOpts);
 
     // Keep teacher_schedules in sync so booking UI has correct capacity/constraints.
     // (Booking grid calls GET /schedule/week which reads teacher_schedules from DB.)
@@ -928,6 +1099,25 @@ app.listen(PORT, '0.0.0.0', () => {
         },
         { timezone: tz }
       );
+
+      const pollCronExpr = (process.env.CALENDAR_POLL_SERVER_CRON || '').trim();
+      const pollDisabled =
+        !pollCronExpr ||
+        pollCronExpr === '0' ||
+        /^off$/i.test(pollCronExpr);
+      if (!pollDisabled) {
+        const pollTz = process.env.CALENDAR_POLL_SERVER_CRON_TZ || 'Asia/Tokyo';
+        cron.schedule(
+          pollCronExpr,
+          () => {
+            runServerCalendarPollSync().catch((err) =>
+              console.error('[calendar-poll/server] scheduled sync failed:', err.message)
+            );
+          },
+          { timezone: pollTz }
+        );
+        console.log('[calendar-poll/server] cron:', pollCronExpr, pollTz);
+      }
     });
   })
   .catch((err) => {

@@ -7,41 +7,35 @@ import ConfirmActionModal from './ConfirmActionModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
+import { studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
 
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000
-
-/** Match server `/students/:id/latest-by-month` window (Asia/Tokyo calendar month). */
-function getCurrentYyyyMmJst() {
-  const jst = new Date(Date.now() + JST_OFFSET_MS)
-  const y = jst.getUTCFullYear()
-  const m = jst.getUTCMonth() + 1
-  return `${y}-${String(m).padStart(2, '0')}`
-}
-
-function addOneMonthYyyyMm(yyyyMm) {
-  const [ys, ms] = String(yyyyMm).split('-')
-  const y = parseInt(ys, 10)
-  const mo = parseInt(ms, 10)
-  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
-  let ny = y
-  let nm = mo + 1
-  if (nm > 12) {
-    nm = 1
-    ny += 1
-  }
-  return `${ny}-${String(nm).padStart(2, '0')}`
-}
-
 const CARD_STYLES = {
   scheduled: { accent: 'bg-emerald-600', bg: 'bg-emerald-50', dot: 'bg-emerald-600', hoverRing: 'hover:ring-emerald-500/60', label: 'Scheduled' },
+  /** Calendar placeholder / yellow hold slots (see GAS MonthlyCache). */
+  reserved: {
+    accent: 'bg-cyan-600',
+    bg: 'bg-cyan-50',
+    dot: 'bg-cyan-600',
+    hoverRing: 'hover:ring-cyan-500/60',
+    label: 'Reserved',
+  },
   calendar_pending: {
     accent: 'bg-sky-600',
     bg: 'bg-sky-50',
     dot: 'bg-sky-600',
     hoverRing: 'hover:ring-sky-500/60',
     label: 'Pending',
+  },
+  confirm_processing: {
+    accent: 'bg-violet-600',
+    bg: 'bg-violet-50',
+    dot: 'bg-violet-600',
+    hoverRing: 'hover:ring-violet-500/60',
+    label: 'Processing',
   },
   cancelled: { accent: 'bg-slate-500', bg: 'bg-slate-50', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-500/60', label: 'Cancelled' },
   reschedule_date_tbd: {
@@ -74,6 +68,7 @@ function getLessonDisplayStatus(lesson) {
   if (transientStatus === 'deleting') return 'deleting'
   if (transientStatus === 'sync_failed') return 'sync_failed'
   if (transientStatus === 'rescheduled') return 'rescheduled'
+  if (transientStatus === 'confirm_processing') return 'confirm_processing'
   if (transientStatus === 'sync_pending') return 'sync_pending'
   if (rawStatus === 'unscheduled') return 'unscheduled'
   if ((rawStatus === 'rescheduled' || rawStatus === 'cancelled') && lesson?.awaitingRescheduleDate) return 'reschedule_date_tbd'
@@ -81,9 +76,39 @@ function getLessonDisplayStatus(lesson) {
   if (rawStatus === 'rescheduled') return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
   if (syncStatus === 'failed') return 'sync_failed'
-  if (syncStatus === 'pending' && rawStatus === 'scheduled') return 'calendar_pending'
+  if (syncStatus === 'pending' && (rawStatus === 'scheduled' || rawStatus === 'reserved')) return 'calendar_pending'
   if (isDemoLesson) return 'demo'
+  if (rawStatus === 'reserved') return 'reserved'
   return rawStatus || 'scheduled'
+}
+
+function stripMonthlyEventIdBase(eventId) {
+  return String(eventId || '')
+    .trim()
+    .replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/, '')
+}
+
+/** Same reserved recurring hold as anchor (matches server confirm-reserved batch). */
+function listReservedBatchEventIds(monthData, monthKey, anchorLesson) {
+  const anchorId = String(anchorLesson?.eventID || '').trim()
+  if (!anchorId || !monthKey || !monthData?.[monthKey]) return anchorId ? [anchorId] : []
+  const idBase = stripMonthlyEventIdBase(anchorId)
+  const byEvent = new Map()
+  for (const lesson of monthData[monthKey].lessons || []) {
+    if (String(lesson?.status || '').toLowerCase() !== 'reserved') continue
+    const eid = String(lesson?.eventID || '').trim()
+    if (!eid || stripMonthlyEventIdBase(eid) !== idBase) continue
+    if (!byEvent.has(eid)) byEvent.set(eid, lesson)
+  }
+  return [...byEvent.values()]
+    .sort((a, b) => {
+      const aDay = parseInt(a?.day, 10) || 999
+      const bDay = parseInt(b?.day, 10) || 999
+      if (aDay !== bDay) return aDay - bDay
+      return String(a?.time || '99:99').localeCompare(String(b?.time || '99:99'))
+    })
+    .map((l) => String(l.eventID || '').trim())
+    .filter(Boolean)
 }
 
 function sortLessonsForDisplay(lessons) {
@@ -145,6 +170,67 @@ function hasRealLessonAtDateTime(monthDataObj, monthKey, date, time, optimisticE
     if (eventID.startsWith('optimistic-')) return false
     return String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
   })
+}
+
+function findRealLessonAtDateTime(monthDataObj, monthKey, date, time) {
+  if (!monthDataObj || !monthKey || !date || !time) return null
+  const day = String(date).slice(8, 10)
+  return (
+    (monthDataObj[monthKey]?.lessons || []).find((lesson) => {
+      const eventID = String(lesson?.eventID || '')
+      if (!eventID || eventID.startsWith('optimistic-')) return false
+      return String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
+    }) || null
+  )
+}
+
+function isLessonCalendarSyncPending(lesson) {
+  return String(lesson?.calendarSyncStatus || '').toLowerCase() === 'pending'
+}
+
+/** Drop temp optimistic rows at a slot when the server already has a real lesson there. */
+function removeOptimisticLessonsAtSlot(data, monthKey, date, time) {
+  if (!data || !monthKey || !date || !time) return data
+  if (!hasRealLessonAtDateTime(data, monthKey, date, time)) return data
+  return clearLessonsAtSlot(data, monthKey, date, time, { onlyOptimistic: true })
+}
+
+/** Remove lessons occupying a slot (e.g. before inserting a new optimistic reschedule target). */
+function clearLessonsAtSlot(data, monthKey, date, time, { onlyOptimistic = false, keepEventID = '' } = {}) {
+  if (!data || !monthKey || !date || !time) return data
+  const day = String(date).slice(8, 10)
+  return withPatchedMonth(data, monthKey, (entry) => ({
+    ...entry,
+    lessons: sortLessonsForDisplay(
+      (entry.lessons || []).filter((lesson) => {
+        const eventID = String(lesson?.eventID || '')
+        if (keepEventID && eventID === keepEventID) return true
+        const sameSlot =
+          String(lesson?.day || '').padStart(2, '0') === day && String(lesson?.time || '') === time
+        if (!sameSlot) return true
+        if (onlyOptimistic) return !eventID.startsWith('optimistic-')
+        return false
+      })
+    ),
+  }))
+}
+
+function stripOptimisticDuplicatesFromMonthData(data) {
+  if (!data) return data
+  let next = data
+  for (const monthKey of Object.keys(next)) {
+    for (const lesson of next[monthKey]?.lessons || []) {
+      const eventID = String(lesson?.eventID || '')
+      if (!eventID.startsWith('optimistic-')) continue
+      const yyyyMm = monthKey
+      const day = String(lesson?.day || '').padStart(2, '0')
+      const time = String(lesson?.time || '')
+      if (!day || day === '--' || !time || time === '--') continue
+      const date = `${yyyyMm}-${day}`
+      next = removeOptimisticLessonsAtSlot(next, monthKey, date, time)
+    }
+  }
+  return next
 }
 
 function buildOptimisticUnscheduled(monthKey, seed = Date.now()) {
@@ -239,12 +325,17 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
       let next = applyLessonPatch(prevData, mutation.sourceEventID, (lesson) => ({
         ...lesson,
         transientStatus: 'rescheduled',
+        awaitingRescheduleDate: false,
         optimisticRescheduledTo: {
           date: mutation.targetDate || null,
           time: mutation.targetTime || null,
         },
         calendarSyncError: null,
       }))
+      next = clearLessonsAtSlot(next, mutation.targetMonthKey, mutation.targetDate, mutation.targetTime, {
+        onlyOptimistic: true,
+        keepEventID: mutation.targetLesson?.eventID || '',
+      })
       if (
         !hasRealLessonAtDateTime(
           next,
@@ -287,27 +378,42 @@ function applyOptimisticMutationToMonthData(prevData, mutation) {
 function isOptimisticMutationResolved(serverData, mutation) {
   if (!serverData || !mutation) return false
   switch (mutation.type) {
-    case 'book_start':
-      return hasRealLessonAtDateTime(
+    case 'book_start': {
+      const realLesson = findRealLessonAtDateTime(
         serverData,
         mutation.monthKey,
         mutation.date,
-        mutation.time,
-        mutation.lesson?.eventID
+        mutation.time
       )
+      if (!realLesson) return false
+      return !isLessonCalendarSyncPending(realLesson)
+    }
     case 'reschedule_start': {
       const sourceMonthKey = findLessonMonthKey(serverData, mutation.sourceEventID)
       const sourceLesson = sourceMonthKey
         ? (serverData[sourceMonthKey]?.lessons || []).find((l) => l.eventID === mutation.sourceEventID)
         : null
-      return !!sourceLesson?.rescheduledTo
+      const sourceRescheduled =
+        !!sourceLesson?.rescheduledTo ||
+        String(sourceLesson?.status || '').toLowerCase() === 'rescheduled'
+      if (!sourceRescheduled) return false
+      const targetLesson = findRealLessonAtDateTime(
+        serverData,
+        mutation.targetMonthKey,
+        mutation.targetDate,
+        mutation.targetTime
+      )
+      if (!targetLesson) return false
+      return !isLessonCalendarSyncPending(targetLesson)
     }
     case 'patch_lesson': {
       const monthKey = findLessonMonthKey(serverData, mutation.eventID)
       const serverLesson = monthKey
         ? (serverData[monthKey]?.lessons || []).find((l) => l.eventID === mutation.eventID)
         : null
-      if (mutation.patch?.transientStatus === 'deleting') return !serverLesson
+      // Keep transient labels visible until remove / confirm flow finishes.
+      if (mutation.patch?.transientStatus === 'deleting') return false
+      if (mutation.patch?.transientStatus === 'confirm_processing') return false
       if (!serverLesson) return mutation.patch?.status === 'unscheduled'
       return Object.entries(mutation.patch || {}).every(([key, value]) => {
         if (key === 'transientStatus' || key === 'optimisticRescheduledTo' || key === 'transientError') return true
@@ -332,7 +438,7 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
   const dow = date && !isNaN(date.getTime()) ? DOW[date.getDay()] : ''
   const dayStr = isUnscheduled ? '--' : (lesson.day && lesson.day !== '--' ? `${parseInt(lesson.day)}日` : '--')
   const timeStr = isUnscheduled ? '--' : (lesson.time ? lesson.time.replace(':', '：') : '--')
-  const styles = CARD_STYLES[displayStatus] || CARD_STYLES.cancelled
+  const styles = CARD_STYLES[displayStatus] || CARD_STYLES.scheduled
   const title = styles.label || (displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1))
   const sz = CARD_SIZES[size] || CARD_SIZES.normal
   const hasNote = !!lesson?.hasNote
@@ -341,13 +447,13 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
     <button
       type="button"
       onClick={() => onClick?.(lesson)}
-      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-0 focus-visible:ring-0 ${styles.hoverRing} cursor-pointer overflow-hidden ${hasNote ? 'ring-1 ring-amber-200' : ''}`}
+      className={`lr-card group relative inline-flex items-center gap-1 rounded-lg border border-gray-200 ${styles.bg} ${sz.pad} w-full h-full min-h-0 max-h-[108px] text-left shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5 focus:outline-none focus:ring-0 focus-visible:ring-0 ${styles.hoverRing} cursor-pointer overflow-hidden ${hasNote ? 'ring-2 ring-red-400' : ''}`}
       data-status={displayStatus}
       aria-label={`Lesson ${dayStr} ${timeStr} (${title})`}
     >
       <span className={`absolute left-0 top-0 h-full ${sz.accent} rounded-l-lg ${styles.accent}`} />
       {hasNote && (
-        <span className="absolute top-1.5 right-1.5 inline-grid h-5 w-5 place-items-center rounded-full border border-amber-300 bg-amber-50 text-[11px] font-bold text-amber-700 shadow-sm">
+        <span className="absolute top-1.5 right-1.5 inline-grid h-5 w-5 place-items-center rounded-full border border-red-500 bg-red-100 text-[11px] font-bold text-red-800 shadow-sm">
           <span className="block leading-[1]">!</span>
         </span>
       )}
@@ -367,7 +473,30 @@ function LessonCard({ lesson, year, monthIndex, onClick, size = 'normal' }) {
 }
 
 const PENDING_SYNC_POLL_MS = 2000
-const PENDING_SYNC_POLL_MAX = 90
+const PENDING_SYNC_POLL_FAST_MS = 500
+const PENDING_SYNC_POLL_FAST_TICKS = 60
+const PENDING_SYNC_POLL_MAX = 120
+
+function normalizePendingEventIds(ids) {
+  if (!Array.isArray(ids)) return []
+  return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))]
+}
+
+function lessonMatchesPendingEventId(lesson, pendingIds) {
+  if (!lesson || pendingIds.length === 0) return false
+  const eventID = String(lesson?.eventID || '').trim()
+  if (!eventID) return false
+  if (pendingIds.includes(eventID)) return true
+  const base = eventID.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/i, '')
+  return pendingIds.some((id) => id.replace(/_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/i, '') === base)
+}
+
+function monthDataHasPendingCalendarSync(monthDataObj) {
+  if (!monthDataObj) return false
+  return Object.values(monthDataObj).some((m) =>
+    (m?.lessons || []).some((l) => isLessonCalendarSyncPending(l))
+  )
+}
 
 /**
  * @param {unknown} refreshTrigger - e.g. calendar poll `lastSynced`; changes trigger a normal refetch.
@@ -444,8 +573,12 @@ export default function LessonsThisMonth({
   sectionClassName,
   onLoadingChange,
   onMonthLessonsUpdated,
+  /** Called after lesson notes are saved/removed so parents (e.g. Dashboard) can refetch server truth. */
+  onLessonNotesChanged,
   optimisticScheduleMutations = [],
   scheduleRefreshKey = 0,
+  pendingCalendarEventIds = [],
+  onPendingCalendarEventIdsChange,
 }) {
   const { success } = useToast()
   const { lastSynced } = useCalendarPollingContext()
@@ -455,14 +588,21 @@ export default function LessonsThisMonth({
     scheduleRefreshKey
   )
   const pendingPollCountRef = useRef(0)
+  const pendingPollFastTicksRef = useRef(0)
   const processedOptimisticMutationCountRef = useRef(0)
+  const unscheduledRemoveQueueRef = useRef(Promise.resolve())
+  const normalizedPendingEventIds = useMemo(
+    () => normalizePendingEventIds(pendingCalendarEventIds),
+    [pendingCalendarEventIds]
+  )
+  const pendingEventIdsKey = normalizedPendingEventIds.join('|')
   const [activeOptimisticMutations, setActiveOptimisticMutations] = useState([])
 
   useEffect(() => {
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
   const [selectedLesson, setSelectedLesson] = useState(null)
-
+  const [confirmingSchedule, setConfirmingSchedule] = useState(false)
   const applyOptimisticMutation = useCallback((mutation) => {
     setActiveOptimisticMutations((prev) => [...prev, mutation])
   }, [])
@@ -471,6 +611,18 @@ export default function LessonsThisMonth({
     processedOptimisticMutationCountRef.current = 0
     setActiveOptimisticMutations([])
   }, [studentId])
+
+  useEffect(() => {
+    if (!scheduleRefreshKey) return
+    setActiveOptimisticMutations([])
+    pendingPollCountRef.current = 0
+    pendingPollFastTicksRef.current = 0
+  }, [scheduleRefreshKey])
+
+  useEffect(() => {
+    pendingPollCountRef.current = 0
+    pendingPollFastTicksRef.current = 0
+  }, [pendingEventIdsKey])
 
   useEffect(() => {
     if (!Array.isArray(optimisticScheduleMutations) || optimisticScheduleMutations.length === 0) return
@@ -496,29 +648,56 @@ export default function LessonsThisMonth({
     for (const mutation of activeOptimisticMutations) {
       next = applyOptimisticMutationToMonthData(next, mutation)
     }
-    return next
+    return stripOptimisticDuplicatesFromMonthData(next)
   }, [serverData, activeOptimisticMutations])
 
-  const hasPendingCalendarSync =
-    !!data &&
-    Object.values(data).some((m) =>
-      (m?.lessons || []).some((l) => String(l.calendarSyncStatus || '').toLowerCase() === 'pending')
-    )
+  const hasPendingCalendarSync = useMemo(() => {
+    if (normalizedPendingEventIds.length > 0) return true
+    return monthDataHasPendingCalendarSync(data)
+  }, [data, normalizedPendingEventIds])
+
+  useEffect(() => {
+    if (!onPendingCalendarEventIdsChange || normalizedPendingEventIds.length === 0 || !serverData) return
+    const stillPending = normalizedPendingEventIds.filter((id) => {
+      const lesson = findLessonInMonthData(serverData, id)
+      if (lesson) return isLessonCalendarSyncPending(lesson)
+      for (const monthKey of Object.keys(serverData)) {
+        for (const l of serverData[monthKey]?.lessons || []) {
+          if (lessonMatchesPendingEventId(l, [id]) && isLessonCalendarSyncPending(l)) return true
+        }
+      }
+      return true
+    })
+    if (stillPending.length !== normalizedPendingEventIds.length) {
+      onPendingCalendarEventIdsChange(stillPending)
+    }
+  }, [serverData, normalizedPendingEventIds, onPendingCalendarEventIdsChange])
 
   useEffect(() => {
     if (!hasPendingCalendarSync || studentId == null) {
       pendingPollCountRef.current = 0
+      pendingPollFastTicksRef.current = 0
       return
     }
+    let cancelled = false
+    let timerId = null
     const tick = () => {
+      if (cancelled) return
       if (pendingPollCountRef.current >= PENDING_SYNC_POLL_MAX) return
       pendingPollCountRef.current += 1
+      const useFast = pendingPollFastTicksRef.current < PENDING_SYNC_POLL_FAST_TICKS
+      if (useFast) pendingPollFastTicksRef.current += 1
       refetchSilent()
+      if (cancelled || pendingPollCountRef.current >= PENDING_SYNC_POLL_MAX) return
+      const delay = useFast ? PENDING_SYNC_POLL_FAST_MS : PENDING_SYNC_POLL_MS
+      timerId = window.setTimeout(tick, delay)
     }
     tick()
-    const id = setInterval(tick, PENDING_SYNC_POLL_MS)
-    return () => clearInterval(id)
-  }, [hasPendingCalendarSync, studentId, refetchSilent])
+    return () => {
+      cancelled = true
+      if (timerId) clearTimeout(timerId)
+    }
+  }, [hasPendingCalendarSync, studentId, refetchSilent, pendingEventIdsKey])
 
   const selectedLessonKey = getLessonIdentityKey(selectedLesson)
 
@@ -539,7 +718,6 @@ export default function LessonsThisMonth({
   }, [data, selectedLessonKey, selectedLesson?.eventID])
   const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
-  const [removing, setRemoving] = useState(false)
   const [actionError, setActionError] = useState(null)
   const [changeCountOpen, setChangeCountOpen] = useState(false)
   const [changeCountMonthKey, setChangeCountMonthKey] = useState(null)
@@ -687,6 +865,7 @@ export default function LessonsThisMonth({
     }
   }
   const openBookingReschedule = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
     if (typeof onBookLesson !== 'function') {
@@ -696,18 +875,26 @@ export default function LessonsThisMonth({
     onBookLesson({ rescheduleSource: lesson })
   }
   const handleOpenRescheduleChoice = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setActionError(null)
     setRescheduleChoiceLesson(lesson)
   }
   const handleSelectRescheduleDate = (lesson) => {
+    if (BOOKING_WIP_DISABLED) return
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setSelectedLesson(null)
     openBookingReschedule(lesson)
   }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
-      setActionError('Cannot remove an unscheduled placeholder.')
+      const monthKey = findLessonMonthKey(serverData, lesson.eventID) || activeMonth
+      if (!monthKey) {
+        setActionError('Could not determine the month for this lesson.')
+        return
+      }
+      setActionError(null)
+      setPendingRemoveLesson({ ...lesson, reduceMonthKey: monthKey })
       return
     }
     setActionError(null)
@@ -758,43 +945,309 @@ export default function LessonsThisMonth({
     }
   }
 
+  const handleConfirmOneWeek = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
+    if (confirmingSchedule) return false
+    setActionError(null)
+    const eventID = String(lesson?.eventID || '').trim()
+    if (!eventID) {
+      setActionError('Missing event id for confirm')
+      return false
+    }
+    const monthKey = findLessonMonthKey(serverData, eventID) || activeMonth
+    if (!monthKey) {
+      setActionError('Could not determine month for confirm')
+      return false
+    }
+    const monthEntry = serverData?.[monthKey]
+    const paidPack = parseInt(monthEntry?.paidLessonsCount, 10)
+    const confirmBody = {
+      confirm_month: monthKey,
+      finalize_series: false,
+      ...(Number.isFinite(paidPack) && paidPack > 0 ? { pack_total: paidPack } : {}),
+    }
+    setConfirmingSchedule(true)
+    try {
+      applyOptimisticMutation({
+        type: 'patch_lesson',
+        eventID,
+        patch: {
+          status: 'reserved',
+          calendarSyncStatus: 'pending',
+          calendarSyncError: null,
+          transientError: null,
+          transientStatus: 'confirm_processing',
+        },
+      })
+      try {
+        await api.confirmReservedSchedule({ event_id: eventID, ...confirmBody })
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'scheduled',
+            calendarSyncStatus: 'synced',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: undefined,
+          },
+        })
+      } catch (e) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'failed',
+            transientStatus: 'sync_failed',
+            calendarSyncError: e.message,
+            transientError: e.message,
+          },
+        })
+        setActionError(e.message)
+        return false
+      }
+      try {
+        await refetchSilent()
+      } catch (refreshErr) {
+        setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+      }
+      setActiveOptimisticMutations((prev) =>
+        prev.filter((m) => !(m.type === 'patch_lesson' && m.eventID === eventID))
+      )
+      success('Week confirmed')
+      return true
+    } finally {
+      setConfirmingSchedule(false)
+    }
+  }
+
+  const handleConfirmAllWeeks = async (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
+    if (confirmingSchedule) return false
+    setActionError(null)
+    const monthKey = findLessonMonthKey(serverData, lesson?.eventID) || activeMonth
+    if (!monthKey) {
+      setActionError('Could not determine month for confirm')
+      return false
+    }
+    const batchEventIds = listReservedBatchEventIds(serverData, monthKey, lesson)
+    if (batchEventIds.length === 0) {
+      setActionError('Could not determine reserved lessons for this month')
+      return false
+    }
+    const monthEntry = serverData?.[monthKey]
+    const paidPack = parseInt(monthEntry?.paidLessonsCount, 10)
+    const confirmBodyBase = {
+      confirm_month: monthKey,
+      ...(Number.isFinite(paidPack) && paidPack > 0 ? { pack_total: paidPack } : {}),
+    }
+    setConfirmingSchedule(true)
+    let confirmedCount = 0
+    try {
+      for (const eventID of batchEventIds) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: undefined,
+          },
+        })
+      }
+      for (let i = 0; i < batchEventIds.length; i++) {
+        const eventID = batchEventIds[i]
+        const isLastWeek = i === batchEventIds.length - 1
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID,
+          patch: {
+            status: 'reserved',
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            transientError: null,
+            transientStatus: 'confirm_processing',
+          },
+        })
+        try {
+          await api.confirmReservedSchedule({
+            event_id: eventID,
+            ...confirmBodyBase,
+            finalize_series: isLastWeek,
+          })
+          applyOptimisticMutation({
+            type: 'patch_lesson',
+            eventID,
+            patch: {
+              status: 'scheduled',
+              calendarSyncStatus: 'synced',
+              calendarSyncError: null,
+              transientError: null,
+              transientStatus: undefined,
+            },
+          })
+          confirmedCount += 1
+        } catch (e) {
+          applyOptimisticMutation({
+            type: 'patch_lesson',
+            eventID,
+            patch: {
+              status: 'reserved',
+              calendarSyncStatus: 'failed',
+              transientStatus: 'sync_failed',
+              calendarSyncError: e.message,
+              transientError: e.message,
+            },
+          })
+          setActionError(e.message)
+          break
+        }
+      }
+      try {
+        await refetchSilent()
+      } catch (refreshErr) {
+        if (confirmedCount > 0) {
+          setActionError(refreshErr?.message || 'Confirmed, but refresh failed')
+        }
+      }
+      setActiveOptimisticMutations((prev) =>
+        prev.filter((m) => !(m.type === 'patch_lesson' && batchEventIds.includes(m.eventID)))
+      )
+      if (confirmedCount === batchEventIds.length) {
+        success('Schedule confirmed')
+        return true
+      }
+      return false
+    } finally {
+      setConfirmingSchedule(false)
+    }
+  }
+
   const confirmRemoveLesson = async () => {
     if (!pendingRemoveLesson?.eventID) return
     const lessonToRemove = pendingRemoveLesson
-    setRemoving(true)
+    const eventId = lessonToRemove.eventID
+    const isUnscheduledRemove = String(lessonToRemove.status || '').toLowerCase() === 'unscheduled'
+    const isReservedRemove = String(lessonToRemove.status || '').toLowerCase() === 'reserved'
+    const monthKeyForOcc =
+      findLessonMonthKey(serverData, eventId) ||
+      String(lessonToRemove.reduceMonthKey || activeMonth || '').trim()
+    const dayRaw = String(lessonToRemove.day || '').trim()
+    const occurrenceDate =
+      /^\d{4}-\d{2}$/.test(monthKeyForOcc) && /^\d{1,2}$/.test(dayRaw)
+        ? `${monthKeyForOcc}-${dayRaw.padStart(2, '0')}`
+        : null
     setPendingRemoveLesson(null)
     setSelectedLesson(null)
+    if (isUnscheduledRemove) {
+      const monthKey = String(lessonToRemove.reduceMonthKey || '').trim()
+      // Accept repeated removals immediately, but serialize the underlying count
+      // updates so concurrent clicks cannot overwrite each other's decrement.
+      const queuedRemove = unscheduledRemoveQueueRef.current.then(async () => {
+        const latest = await api.getStudentLatestByMonth(studentId)
+        const monthEntry = latest?.latestByMonth?.[monthKey] || serverData?.[monthKey]
+        const currentCount = Math.max(0, parseInt(monthEntry?.paidLessonsCount, 10) || 0)
+        const bookedCount = Math.max(0, parseInt(monthEntry?.bookedLessonsCount, 10) || 0)
+        const nextCount = Math.max(bookedCount, currentCount - 1)
+        await api.upsertStudentMonthLessons({
+          student_id: studentId,
+          month: monthKey,
+          lessons: nextCount,
+        })
+        await refetch()
+        onMonthLessonsUpdated?.()
+        return nextCount
+      })
+      unscheduledRemoveQueueRef.current = queuedRemove.catch(() => {})
+      try {
+        const nextCount = await queuedRemove
+        success(`Monthly lesson count reduced to ${nextCount}`)
+      } catch (e) {
+        setActionError(e?.message || 'Failed to reduce monthly lesson count')
+      }
+      return
+    }
     applyOptimisticMutation({
       type: 'patch_lesson',
-      eventID: lessonToRemove.eventID,
+      eventID: eventId,
       patch: {
         transientStatus: 'deleting',
         calendarSyncError: null,
       },
     })
     try {
-      const rmSync = String(lessonToRemove.calendarSyncStatus || '').trim().toLowerCase()
-      const removeLocalOnly = rmSync === 'failed'
-      await api.removeScheduleEvent(lessonToRemove.eventID, { localOnly: removeLocalOnly })
-      applyOptimisticMutation({
-        type: 'replace_with_unscheduled',
-        eventID: lessonToRemove.eventID,
-      })
-      success('Lesson removed')
+      const tryRemove = async (localOnly) =>
+        api.removeScheduleEvent(eventId, { localOnly, occurrenceDate })
+      let removeResult = null
+      try {
+        removeResult = await tryRemove(false)
+      } catch (firstErr) {
+        const msg = String(firstErr?.message || '')
+        const calendarUnreachable = /etimedout|timed out|timeout|econnrefused|did not respond|fetch failed/i.test(
+          msg
+        )
+        if (calendarUnreachable) {
+          try {
+            removeResult = await tryRemove(true)
+          } catch {
+            throw firstErr
+          }
+        } else {
+          throw firstErr
+        }
+      }
       await refetchSilent()
+      const calendarWarning = String(removeResult?.calendar_warning || '').trim()
+      if (!isReservedRemove) {
+        applyOptimisticMutation({
+          type: 'replace_with_unscheduled',
+          eventID: eventId,
+        })
+        success(
+          calendarWarning
+            ? 'Lesson removed from schedule (Google Calendar may still need cleanup)'
+            : 'Lesson removed'
+        )
+      } else {
+        success(
+          calendarWarning
+            ? '予約済みレッスンを削除しました（カレンダーは未反映の可能性があります）'
+            : '予約済みレッスンを削除しました'
+        )
+      }
+      if (
+        calendarWarning &&
+        !/not found|calendar\.events\.delete|calendar api remove failed/i.test(calendarWarning)
+      ) {
+        setActionError(calendarWarning)
+      }
     } catch (e) {
-      applyOptimisticMutation({
-        type: 'patch_lesson',
-        eventID: lessonToRemove.eventID,
-        patch: {
-          transientStatus: 'sync_failed',
-          calendarSyncStatus: 'failed',
-          calendarSyncError: e.message,
-        },
-      })
+      if (!isReservedRemove) {
+        applyOptimisticMutation({
+          type: 'patch_lesson',
+          eventID: eventId,
+          patch: {
+            transientStatus: 'sync_failed',
+            calendarSyncStatus: 'failed',
+            calendarSyncError: e.message,
+          },
+        })
+      }
       setActionError(e.message)
     } finally {
-      setRemoving(false)
+      setActiveOptimisticMutations((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              m.type === 'patch_lesson' &&
+              m.eventID === eventId &&
+              m.patch?.transientStatus === 'deleting'
+            )
+        )
+      )
     }
   }
 
@@ -823,7 +1276,8 @@ export default function LessonsThisMonth({
       if (String(prev.lessonUUID || '') !== String(lessonUUID)) return prev
       return { ...prev, hasNote: !!hasNote, lessonNotes }
     })
-  }, [setData])
+    onLessonNotesChanged?.({ lessonUUID, hasNote, lessonNotes })
+  }, [setData, onLessonNotesChanged])
 
   const openChangeLessonCount = (monthKey) => {
     if (studentId == null || !monthKey) return
@@ -842,10 +1296,16 @@ export default function LessonsThisMonth({
               <button
                 type="button"
                 onClick={onBookLesson}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                disabled={BOOKING_WIP_DISABLED}
+                title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                className={
+                  BOOKING_WIP_DISABLED
+                    ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2.5 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                    : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                }
               >
                 <Calendar className="w-4 h-4" />
-                Book lesson
+                {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
               </button>
             ) : (
               <span className="w-[1px] shrink-0" aria-hidden />
@@ -900,8 +1360,8 @@ export default function LessonsThisMonth({
         initialPackTotal={
           changeCountEntry.paidLessonsCount > 0 ? changeCountEntry.paidLessonsCount : 4
         }
-        description={`${changeCountEntry.label || changeCountMonthKey} の月の回数（保存すると予約タイトルと未設定枠に反映されます）`}
-        confirmLabel="Save"
+        description={`${changeCountEntry.label || changeCountMonthKey} の月の回数を保存し、アプリと Google Calendar のレッスンタイトル（1/N…）を開始時刻順に振り直します`}
+        confirmLabel="Save & renumber"
         onClose={() => {
           setChangeCountOpen(false)
           setChangeCountMonthKey(null)
@@ -913,7 +1373,32 @@ export default function LessonsThisMonth({
               month: changeCountMonthKey,
               lessons: n,
             })
-            success('月の回数を保存しました')
+            const renumberRes = await api.renumberMonthLessonTitles({
+              student_id: studentId,
+              month: changeCountMonthKey,
+              pack_total: n,
+            })
+            const patched = Number(renumberRes?.calendar_patched) || 0
+            const calErrs = Array.isArray(renumberRes?.calendar_errors)
+              ? renumberRes.calendar_errors
+              : []
+            if (calErrs.length > 0) {
+              success(
+                `タイトルを振り直しました（Calendar ${patched}件更新、${calErrs.length}件失敗）`
+              )
+              setActionError(
+                calErrs
+                  .slice(0, 3)
+                  .map((e) => e?.error || 'Calendar update failed')
+                  .join('; ')
+              )
+            } else {
+              success(
+                patched > 0
+                  ? `月の回数を保存し、タイトルを振り直しました（Calendar ${patched}件更新）`
+                  : '月の回数を保存し、タイトルを振り直しました'
+              )
+            }
             setChangeCountOpen(false)
             setChangeCountMonthKey(null)
             await refetch()
@@ -948,6 +1433,9 @@ export default function LessonsThisMonth({
     .trim()
     .toLowerCase()
   const pendingRemoveIsLocalOnly = pendingRemoveSync === 'failed'
+  const pendingRemoveIsReserved = String(pendingRemoveLesson?.status || '').toLowerCase() === 'reserved'
+  const pendingRemoveIsUnscheduled =
+    String(pendingRemoveLesson?.status || '').toLowerCase() === 'unscheduled'
 
   const content = (
     <div className="flex flex-1 flex-col min-h-0">
@@ -977,7 +1465,7 @@ export default function LessonsThisMonth({
                         lesson={lesson}
                         year={year}
                         monthIndex={monthIndex}
-                        onClick={setSelectedLesson}
+                        onClick={confirmingSchedule ? undefined : setSelectedLesson}
                         size={cardSize}
                       />
                     ))}
@@ -1002,7 +1490,21 @@ export default function LessonsThisMonth({
           onOpenRescheduleChoice={handleOpenRescheduleChoice}
           onSelectRescheduleDate={handleSelectRescheduleDate}
           onSyncWithCalendar={handleSyncWithCalendar}
+          onConfirmOneWeek={handleConfirmOneWeek}
+          onConfirmAllWeeks={handleConfirmAllWeeks}
+          confirmScheduleMonthKey={
+            findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
+          }
           onRemove={handleRemove}
+          onBookLesson={
+            onBookLesson
+              ? () => {
+                  setSelectedLesson(null)
+                  setActionError(null)
+                  onBookLesson()
+                }
+              : undefined
+          }
           onLessonNotesChanged={handleLessonNotesChanged}
         />
       )}
@@ -1060,15 +1562,38 @@ export default function LessonsThisMonth({
       )}
       {pendingRemoveLesson && (
         <ConfirmActionModal
-          title={pendingRemoveIsLocalOnly ? 'Remove from schedule only' : 'Remove Lesson'}
-          message={
-            pendingRemoveIsLocalOnly
-              ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
-              : 'Remove this lesson from the schedule?'
+          title={
+            pendingRemoveIsUnscheduled
+              ? 'Reduce Monthly Lesson Count'
+              : pendingRemoveIsReserved
+              ? '予約済みレッスンの削除'
+              : pendingRemoveIsLocalOnly
+                ? 'Remove from schedule only'
+                : 'Remove Lesson'
           }
-          confirmLabel={pendingRemoveIsLocalOnly ? 'Remove locally' : 'Remove'}
+          message={
+            pendingRemoveIsUnscheduled
+              ? 'Remove this unscheduled lesson and reduce the lesson count for this month by 1?'
+              : pendingRemoveIsReserved
+              ? 'この予約済みレッスン（この回のみ）を削除します。他の予約済み回は残ります。Googleカレンダー上のその回も取り消されます。よろしいですか？'
+              : pendingRemoveIsLocalOnly
+                ? 'Calendar sync failed for this lesson. Remove it from the schedule only? Nothing will be deleted from Google Calendar.'
+                : 'Remove this lesson from the schedule?'
+          }
+          confirmLabel={
+            pendingRemoveIsUnscheduled
+              ? 'Reduce by 1'
+              : pendingRemoveIsReserved
+                ? '削除'
+                : pendingRemoveIsLocalOnly
+                  ? 'Remove locally'
+                  : 'Remove'
+          }
+          cancelLabel={pendingRemoveIsReserved ? 'キャンセル' : 'Cancel'}
           destructive
-          confirming={removing}
+          busyConfirmLabel={
+            pendingRemoveIsUnscheduled ? 'Reducing…' : pendingRemoveIsReserved ? '削除中…' : undefined
+          }
           onConfirm={confirmRemoveLesson}
           onClose={() => setPendingRemoveLesson(null)}
         />
@@ -1084,7 +1609,7 @@ export default function LessonsThisMonth({
             <h3 className="font-semibold text-sm">Lessons This Month</h3>
             {monthKeys.length > 0 && monthToggles}
             <div className="flex items-center gap-1 shrink-0">
-              {studentId != null && monthKeys.length > 0 ? (
+              {studentId != null && monthKeys.length > 0 && !studentIsDemo(student) ? (
                 <button
                   type="button"
                   onClick={() => openChangeLessonCount(current)}
@@ -1097,10 +1622,16 @@ export default function LessonsThisMonth({
                 <button
                   type="button"
                   onClick={onBookLesson}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                  disabled={BOOKING_WIP_DISABLED}
+                  title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                  className={
+                    BOOKING_WIP_DISABLED
+                      ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2.5 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                      : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2.5 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                  }
                 >
                   <Calendar className="w-4 h-4" />
-                  Book lesson
+                  {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
                 </button>
               ) : null}
             </div>
@@ -1118,7 +1649,7 @@ export default function LessonsThisMonth({
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-2 py-1.5">
           <div className="flex items-center gap-1 min-w-0">{monthToggles}</div>
           <div className="flex items-center gap-1 shrink-0">
-            {studentId != null && monthKeys.length > 0 ? (
+            {studentId != null && monthKeys.length > 0 && !studentIsDemo(student) ? (
               <button
                 type="button"
                 onClick={() => openChangeLessonCount(current)}
@@ -1131,7 +1662,13 @@ export default function LessonsThisMonth({
               <button
                 type="button"
                 onClick={onBookLesson}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer"
+                disabled={BOOKING_WIP_DISABLED}
+                title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                className={
+                  BOOKING_WIP_DISABLED
+                    ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-2 py-1 text-xs font-semibold line-through cursor-not-allowed'
+                    : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-2 py-1 text-xs font-semibold hover:bg-blue-700 cursor-pointer'
+                }
               >
                 <Calendar className="w-4 h-4" />
                 Book

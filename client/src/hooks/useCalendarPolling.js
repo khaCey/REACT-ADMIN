@@ -1,44 +1,18 @@
 /**
- * useCalendarPolling — React hook for Calendar Webhook polling.
- * Follows POLLING_API_SPEC.md flow:
- * 1. Startup: fetch full data
- * 2. Poll every intervalMs
- * 3. When changed: apply diff
+ * useCalendarPolling — GAS month backfill (current + next JST month) on load and each interval.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  pollCalendarChanges,
-  fetchFullCalendar,
+  fetchCalendarCurrentAndNextMonths,
   isPollingConfigured,
   ensurePollingConfig,
 } from '../api/pollingApi'
 
-function rowKey(row) {
-  return `${row.eventID || ''}|${row.studentName || ''}`
-}
-
-function applyDiff(current, diff) {
-  const map = new Map(current.map((r) => [rowKey(r), r]))
-
-  for (const row of diff.added || []) {
-    map.set(rowKey(row), row)
-  }
-  for (const key of diff.removed || []) {
-    map.delete(key)
-  }
-  for (const row of diff.updated || []) {
-    map.set(rowKey(row), row)
-  }
-
-  return Array.from(map.values())
-}
-
 export function useCalendarPolling(options = {}) {
   const {
-    intervalMs = 300000, // 5 minutes
+    intervalMs = 900000, // 15 min (CalendarPollingProvider overrides default)
     enabled = true,
-    onChanged,
     onError,
   } = options
 
@@ -49,6 +23,7 @@ export function useCalendarPolling(options = {}) {
   const [cacheVersion, setCacheVersion] = useState(null)
   const pollRef = useRef(null)
   const mountedRef = useRef(true)
+  const dataRef = useRef([])
 
   const refetch = useCallback(async () => {
     await ensurePollingConfig()
@@ -60,14 +35,16 @@ export function useCalendarPolling(options = {}) {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchFullCalendar()
+      const result = await fetchCalendarCurrentAndNextMonths()
       if (result._skipped) {
         setData([])
         setLoading(false)
         return
       }
       if (mountedRef.current) {
-        setData(result.data || [])
+        const rows = Array.isArray(result.data) ? result.data : []
+        setData(rows)
+        dataRef.current = rows
         setLastUpdated(result.lastUpdated || null)
         setCacheVersion(result.cacheVersion ?? null)
       }
@@ -78,6 +55,25 @@ export function useCalendarPolling(options = {}) {
       }
     } finally {
       if (mountedRef.current) setLoading(false)
+    }
+  }, [onError])
+
+  const fetchFullSilent = useCallback(async () => {
+    await ensurePollingConfig()
+    if (!isPollingConfigured() || !mountedRef.current) return
+    try {
+      const result = await fetchCalendarCurrentAndNextMonths()
+      if (result._skipped || !mountedRef.current) return
+      const rows = Array.isArray(result.data) ? result.data : []
+      setData(rows)
+      dataRef.current = rows
+      setLastUpdated(result.lastUpdated || null)
+      setCacheVersion(result.cacheVersion ?? null)
+    } catch (e) {
+      if (mountedRef.current) {
+        setError(e.message)
+        onError?.(e)
+      }
     }
   }, [onError])
 
@@ -96,32 +92,18 @@ export function useCalendarPolling(options = {}) {
   }, [enabled, refetch])
 
   useEffect(() => {
-    if (!enabled || loading || !isPollingConfigured()) return
-
-    pollRef.current = setInterval(async () => {
-      try {
-        const result = await pollCalendarChanges()
-        if (result._skipped) return
-        if (result.changed && result.diff && mountedRef.current) {
-          const d = result.diff
-          const addedLen = d.added?.length ?? 0
-          const removedLen = d.removed?.length ?? 0
-          const updatedLen = d.updated?.length ?? 0
-          const useFullSnapshot =
-            addedLen === 0 && removedLen === 0 && updatedLen > 0
-          setData((prev) =>
-            useFullSnapshot ? [...(d.updated || [])] : applyDiff(prev, d)
-          )
-          setLastUpdated(result.diff.lastUpdated || null)
-          setCacheVersion(result.diff.cacheVersion ?? null)
-          onChanged?.(result.diff)
-        }
-      } catch (e) {
-        if (mountedRef.current) {
-          setError(e.message)
-          onError?.(e)
-        }
+    if (!enabled || loading) return
+    if (!isPollingConfigured()) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          '[useCalendarPolling] Not configured: add VITE_CALENDAR_POLL_URL + VITE_CALENDAR_POLL_API_KEY to client/.env (restart Vite), or log in as staff so /api/config/calendar-poll can supply them.'
+        )
       }
+      return
+    }
+
+    pollRef.current = setInterval(() => {
+      fetchFullSilent()
     }, intervalMs)
 
     return () => {
@@ -130,7 +112,7 @@ export function useCalendarPolling(options = {}) {
         pollRef.current = null
       }
     }
-  }, [enabled, intervalMs, loading, onChanged, onError])
+  }, [enabled, intervalMs, loading, fetchFullSilent])
 
   return {
     data,

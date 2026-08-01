@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
-import ExtendShiftModal from './ExtendShiftModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import PreBookLessonModal from './PreBookLessonModal'
-import ConfirmActionModal from './ConfirmActionModal'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
-import { studentIsDemoOrTrial } from '../config/booking'
+import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
+import { studentIsDemo } from '../config/booking'
 
 const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
 /** Matches POST /schedule/book default `duration_minutes` and `/schedule/week` overlap preview. */
@@ -135,29 +134,6 @@ function formatBreakChipLabel(b) {
   return raw
 }
 
-/** Calendar month YYYY-MM in Asia/Tokyo (matches server latest-by-month keys). */
-function getCurrentYyyyMmJst() {
-  const jst = new Date(Date.now() + JST_OFFSET_MS)
-  const y = jst.getUTCFullYear()
-  const m = jst.getUTCMonth() + 1
-  return `${y}-${String(m).padStart(2, '0')}`
-}
-
-/** Next calendar month as YYYY-MM (for showing this + next month cards). */
-function addOneMonthYyyyMm(yyyyMm) {
-  const [ys, ms] = String(yyyyMm).split('-')
-  const y = parseInt(ys, 10)
-  const mo = parseInt(ms, 10)
-  if (!Number.isFinite(y) || !Number.isFinite(mo)) return null
-  let ny = y
-  let nm = mo + 1
-  if (nm > 12) {
-    nm = 1
-    ny += 1
-  }
-  return `${ny}-${String(nm).padStart(2, '0')}`
-}
-
 function toLessonMonthSummary(ym, entry) {
   if (!ym || !entry) return null
   const booked = entry.bookedLessonsCount
@@ -200,10 +176,10 @@ function countSlotsInMonthForKeys(selectedKeys, ym) {
 
 /**
  * POST /book pack_total: override/local, else per selected calendar month from latest-by-month.
- * @returns {{ mode: 'none' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
+ * @returns {{ mode: 'none' } | { mode: 'demo' } | { mode: 'single', value: number } | { mode: 'perMonth', perMonth: Record<string, number> }}
  */
 function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPackOverride, selectedSlotKeys, student) {
-  if (student && studentIsDemoOrTrial(student)) return { mode: 'single', value: 1 }
+  if (student && studentIsDemo(student)) return { mode: 'demo' }
   const loc = Number(localPackOverride)
   if (Number.isFinite(loc) && loc > 0) return { mode: 'single', value: loc }
   const overrideTotal = Number(overridePaidLessons)
@@ -225,7 +201,7 @@ function derivePackTotalForBooking(latestByMonth, overridePaidLessons, localPack
 }
 
 function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth, student) {
-  if (student && studentIsDemoOrTrial(student)) return null
+  if (student && studentIsDemo(student)) return null
   const months = [...new Set(selectedSlotKeys.map((k) => slotMonthFromKey(k)).filter(Boolean))].sort()
   for (const ym of months) {
     const paid = paidPackForMonth(ym, latestByMonth)
@@ -246,6 +222,7 @@ function checkOverQuotaForSelection(selectedSlotKeys, latestByMonth, student) {
 }
 
 function packTotalForSlotDate(packResult, dateStr) {
+  if (packResult.mode === 'demo') return null
   const ym = String(dateStr || '').slice(0, 7)
   if (packResult.mode === 'single') return packResult.value
   if (packResult.mode === 'perMonth' && packResult.perMonth?.[ym]) return packResult.perMonth[ym]
@@ -321,9 +298,25 @@ function resolveBookStudentId(studentIdProp, student) {
 }
 
 function optimisticLessonKindForStudent(student) {
+  if (studentIsDemo(student)) return 'demo'
   const payment = String(student?.Payment || student?.payment || '').toLowerCase()
   if (payment.includes('owner')) return 'owner'
-  return studentIsDemoOrTrial(student) ? 'demo' : 'regular'
+  return 'regular'
+}
+
+/** Await GAS calendar create; treat "already synced" as success (background queue may finish first). */
+async function awaitCalendarSyncForEvent(eventId) {
+  const id = String(eventId || '').trim()
+  if (!id) throw new Error('Missing event id for calendar sync')
+  try {
+    return await api.syncScheduleEvent(id)
+  } catch (e) {
+    const msg = String(e?.message || '')
+    if (/already synced/i.test(msg)) {
+      return { ok: true, event_id: id, calendar_sync_status: 'synced' }
+    }
+    throw e
+  }
 }
 
 export default function BookLessonModal({
@@ -373,11 +366,9 @@ export default function BookLessonModal({
   const [overQuotaModalOpen, setOverQuotaModalOpen] = useState(false)
   /** Slot that triggered click-time over-quota warning (kept pending until pack is updated). */
   const [pendingOverQuotaSlotKey, setPendingOverQuotaSlotKey] = useState(null)
-  const [successModal, setSuccessModal] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   /** Hide the main calendar shell as soon as Submit runs; confirmation shows after the request. */
   const [hideBookingCalendar, setHideBookingCalendar] = useState(false)
-  const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   /** Cache weekStartStr -> week schedule payload for seamless scrolling between weeks. */
   const [weekCache, setWeekCache] = useState({})
   /** Visible month card(s): booked/paid from latest-by-month (see selectVisibleLessonMonthSummaries). */
@@ -389,6 +380,7 @@ export default function BookLessonModal({
   const [lessonBalanceLoaded, setLessonBalanceLoaded] = useState(
     () => preloadedLatestByMonth != null && typeof preloadedLatestByMonth === 'object'
   )
+  const isDemoStudent = studentIsDemo(student)
   const canBookSavedGroup =
     String(student?.Group || '').toLowerCase() === 'group' &&
     Number(studentGroup?.groupId) > 0 &&
@@ -650,7 +642,7 @@ export default function BookLessonModal({
         },
       })
       try {
-        await api.rescheduleLesson({
+        const rescheduleRes = await api.rescheduleLesson({
           source_event_id: rescheduleSource.eventID,
           source_student_name: student?.Name || student?.name || '',
           student_id: sidRaw,
@@ -659,8 +651,12 @@ export default function BookLessonModal({
           duration_minutes: 50,
           location: 'Cafe',
         })
-        success('Lesson rescheduled')
-        onBooked?.()
+        const newEventId = String(rescheduleRes?.new_event_id || '').trim()
+        if (!newEventId) {
+          throw new Error('Reschedule succeeded but no destination event id was returned')
+        }
+        await awaitCalendarSyncForEvent(newEventId)
+        onBooked?.({ eventIds: [] })
         const [weekData, latestRes] = await Promise.all([
           api
             .getWeekSchedule(weekStartStr, {
@@ -686,10 +682,20 @@ export default function BookLessonModal({
           setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
         }
         setSelectedSlotKeys([])
-        setSuccessModal({
-          title: 'Reschedule completed',
-          message: 'The lesson was rescheduled successfully.',
+        const studentLabel = student?.Name || student?.name || 'student'
+        const sid = resolveBookStudentId(studentId, student) ?? sidRaw
+        success(`Lesson rescheduled for ${studentLabel}.`, {
+          durationMs: 0,
+          actionLabel: 'Click to open student details',
+          onClick: () => {
+            window.dispatchEvent(
+              new CustomEvent('student-admin:open-student', {
+                detail: { studentId: sid },
+              }),
+            )
+          },
         })
+        onClose?.()
       } catch (e) {
         onOptimisticScheduleMutation?.({
           type: 'reschedule_failed',
@@ -739,65 +745,80 @@ export default function BookLessonModal({
       const selected = [...(slotKeysOverride ?? selectedSlotKeys)].sort()
       const failed = []
       let successCount = 0
+      const isDemoBooking = studentIsDemo(student)
+      const shouldBookGroup = canBookSavedGroup && !rescheduleSource
+      const seed = Date.now()
 
-      for (const key of selected) {
+      // First pass: validate and show a pending card for every selected slot immediately,
+      // so a multi-slot booking reflects all lessons at once instead of appearing one by one.
+      const jobs = []
+      selected.forEach((key, index) => {
         const [date, time] = key.split('T')
-        if (!date || !time) continue
+        if (!date || !time) return
         const packTotal = packTotalForSlotDate(packResult, date)
-        const tempEventId = `optimistic-book-${date}-${time}-${Date.now()}-${successCount + failed.length}`
-        if (packTotal == null || packTotal <= 0) {
+        const tempEventId = `optimistic-book-${date}-${time}-${seed}-${index}`
+        if (!isDemoBooking && (packTotal == null || packTotal <= 0)) {
           failed.push(`${date} ${time}: Missing lesson pack total for this month.`)
-          continue
+          return
         }
-        try {
-          const shouldBookGroup = canBookSavedGroup && !rescheduleSource
-          onOptimisticScheduleMutation?.({
-            type: 'book_start',
-            monthKey: String(date || '').slice(0, 7),
-            date,
-            time,
-            lesson: {
-              eventID: tempEventId,
-              day: String(date || '').slice(8, 10) || '--',
-              time,
-              status: 'scheduled',
-              calendarSyncStatus: 'pending',
-              calendarSyncError: null,
-              isGroup: shouldBookGroup,
-              lessonKind: optimisticLessonKindForStudent(student),
-              transientStatus: 'sync_pending',
-            },
-          })
-          await api.getBookingWarning(date, time, student_id)
-          await api.bookLesson({
-            student_id,
-            ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
-            date: String(date),
-            time: String(time),
-            duration_minutes: 50,
-            pack_total: packTotal,
-            location: 'Cafe',
-          })
-          successCount += 1
-        } catch (e) {
-          onOptimisticScheduleMutation?.({
-            type: 'book_failed',
+        onOptimisticScheduleMutation?.({
+          type: 'book_start',
+          monthKey: String(date || '').slice(0, 7),
+          date,
+          time,
+          lesson: {
             eventID: tempEventId,
-            error: e?.message || 'Failed to book',
-          })
-          failed.push(`${date} ${time}: ${e?.message || 'Failed to book'}`)
-        }
+            day: String(date || '').slice(8, 10) || '--',
+            time,
+            status: 'scheduled',
+            calendarSyncStatus: 'pending',
+            calendarSyncError: null,
+            isGroup: shouldBookGroup,
+            lessonKind: optimisticLessonKindForStudent(student),
+            transientStatus: 'sync_pending',
+          },
+        })
+        jobs.push({ date, time, packTotal, tempEventId })
+      })
+
+      // Second pass: run the bookings concurrently (each slot is a distinct, non-overlapping
+      // hour) so all pending cards resolve together rather than trickling in one at a time.
+      const results = await Promise.all(
+        jobs.map(async ({ date, time, packTotal, tempEventId }) => {
+          try {
+            await api.getBookingWarning(date, time, student_id)
+            const bookRes = await api.bookLesson({
+              student_id,
+              ...(shouldBookGroup ? { group_id: Number(studentGroup?.groupId) } : {}),
+              date: String(date),
+              time: String(time),
+              duration_minutes: 50,
+              ...(!isDemoBooking ? { pack_total: packTotal } : {}),
+              location: 'Cafe',
+            })
+            const bookedEventId = String(bookRes?.event_id || '').trim()
+            if (!bookedEventId) {
+              throw new Error('Booking succeeded but no event id was returned')
+            }
+            await awaitCalendarSyncForEvent(bookedEventId)
+            return { ok: true }
+          } catch (e) {
+            onOptimisticScheduleMutation?.({
+              type: 'book_failed',
+              eventID: tempEventId,
+              error: e?.message || 'Failed to book',
+            })
+            return { ok: false, error: `${date} ${time}: ${e?.message || 'Failed to book'}` }
+          }
+        })
+      )
+      for (const r of results) {
+        if (r.ok) successCount += 1
+        else failed.push(r.error)
       }
 
       if (successCount > 0) {
-        success(`${successCount} lesson${successCount > 1 ? 's' : ''} confirmed.`)
-        onBooked?.()
-      }
-      if (failed.length > 0) {
-        setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
-        setHideBookingCalendar(false)
-      } else {
-        setSelectedSlotKeys([])
+        onBooked?.({ eventIds: [] })
       }
 
       const [weekData, latestRes] = await Promise.all([
@@ -824,11 +845,32 @@ export default function BookLessonModal({
       if (latestRes?.latestByMonth) {
         setLessonMonthSummaries(selectVisibleLessonMonthSummaries(latestRes.latestByMonth))
       }
-      if (successCount > 0 && failed.length === 0) {
-        setSuccessModal({
-          title: 'Booking Confirmed',
-          message: `${successCount} lesson${successCount > 1 ? 's were' : ' was'} confirmed.`,
-        })
+      if (failed.length > 0) {
+        setError(`Some slots could not be booked. ${failed.slice(0, 2).join(' | ')}${failed.length > 2 ? ' ...' : ''}`)
+        setHideBookingCalendar(false)
+      } else {
+        setSelectedSlotKeys([])
+      }
+      if (successCount > 0) {
+        const studentLabel = student?.Name || student?.name || 'student'
+        const lessonWord = successCount > 1 ? 'lessons' : 'lesson'
+        success(
+          `${successCount} ${lessonWord} confirmed for ${studentLabel}.`,
+          {
+            durationMs: 0,
+            actionLabel: 'Click to open student details',
+            onClick: () => {
+              window.dispatchEvent(
+                new CustomEvent('student-admin:open-student', {
+                  detail: { studentId: student_id },
+                }),
+              )
+            },
+          },
+        )
+        if (failed.length === 0) {
+          onClose?.()
+        }
       }
     } catch (e) {
       setError(e.message)
@@ -899,7 +941,7 @@ export default function BookLessonModal({
 
   /** Compact header corner: booked / paid (not full-width). */
   const lessonBalanceCorner =
-    lessonBalanceLoaded && lessonMonthSummaries.length > 0 ? (
+    isDemoStudent ? null : lessonBalanceLoaded && lessonMonthSummaries.length > 0 ? (
       <div
         className="w-[7.25rem] shrink-0 rounded-md border border-gray-200 bg-gray-50/90 px-1.5 py-1 shadow-sm"
         aria-label="Lessons booked versus paid this period"
@@ -942,7 +984,9 @@ export default function BookLessonModal({
           {modalBusy && <ModalLoadingOverlay />}
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
-              <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">Book a New Lesson</h3>
+              <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">
+                {isDemoStudent ? 'Book a Demo Lesson' : 'Book a New Lesson'}
+              </h3>
               <p className="text-xs text-gray-600 mt-0.5">
                 {studentName} {studentKanji ? `(${studentKanji})` : ''}
               </p>
@@ -950,14 +994,6 @@ export default function BookLessonModal({
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 ml-auto">
               {lessonBalanceCorner}
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setExtendShiftOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                >
-                  <Clock className="w-4 h-4" />
-                  Extend shift
-                </button>
                 <button
                   type="button"
                   onClick={onClose}
@@ -1218,7 +1254,9 @@ export default function BookLessonModal({
                 ? 'Submitting...'
                 : rescheduleSource
                   ? 'Confirm reschedule'
-                  : `Submit selected (${selectedSlotKeys.length})`}
+                  : isDemoStudent
+                    ? `Book demo lesson (${selectedSlotKeys.length})`
+                    : `Submit selected (${selectedSlotKeys.length})`}
             </button>
             <button
               type="button"
@@ -1323,24 +1361,6 @@ export default function BookLessonModal({
             }
           }}
         />
-      )}
-      {successModal && (
-        <ConfirmActionModal
-          title={successModal.title}
-          message={successModal.message}
-          confirmLabel="OK"
-          onClose={() => {
-            setSuccessModal(null)
-            onClose?.()
-          }}
-          onConfirm={() => {
-            setSuccessModal(null)
-            onClose?.()
-          }}
-        />
-      )}
-      {extendShiftOpen && (
-        <ExtendShiftModal onClose={() => setExtendShiftOpen(false)} />
       )}
       {moveBreakModal && (
         <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="moveBreakTitle">

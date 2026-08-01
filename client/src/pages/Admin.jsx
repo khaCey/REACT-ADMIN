@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import { api } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
+import { getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 function formatBackupDate(iso) {
   if (!iso) return '—'
@@ -32,8 +33,13 @@ export default function Admin() {
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupError, setBackupError] = useState('')
-  const [restoreBackupId, setRestoreBackupId] = useState(null)
+  const [restoreTarget, setRestoreTarget] = useState(null)
   const [restoreConfirming, setRestoreConfirming] = useState(false)
+  const [restoreFile, setRestoreFile] = useState(null)
+  const restoreFileInputRef = useRef(null)
+  const [driveBackups, setDriveBackups] = useState([])
+  const [driveBackupsLoading, setDriveBackupsLoading] = useState(true)
+  const [driveBackupsError, setDriveBackupsError] = useState('')
   const [tableToClear, setTableToClear] = useState('monthly_schedule')
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [clearingTable, setClearingTable] = useState(false)
@@ -60,6 +66,12 @@ export default function Admin() {
   const [monthlyTotal, setMonthlyTotal] = useState(0)
   const [pendingMonthlyDelete, setPendingMonthlyDelete] = useState(null)
   const [deletingMonthlyRow, setDeletingMonthlyRow] = useState(false)
+  const [reservedPlaceholderCount, setReservedPlaceholderCount] = useState(null)
+  const [reservedCountLoading, setReservedCountLoading] = useState(true)
+  const [purgeReservedMonth, setPurgeReservedMonth] = useState(() => getCurrentYyyyMmJst())
+  const [purgeReservedConfirmOpen, setPurgeReservedConfirmOpen] = useState(false)
+  const [purgingReserved, setPurgingReserved] = useState(false)
+  const [purgeReservedError, setPurgeReservedError] = useState('')
 
   const clearableTables = [
     { value: 'monthly_schedule', label: 'monthly_schedule' },
@@ -89,13 +101,54 @@ export default function Admin() {
     }
   }, [])
 
+  const fetchDriveBackups = useCallback(async () => {
+    setDriveBackupsLoading(true)
+    setDriveBackupsError('')
+    try {
+      const list = await api.getDriveBackups()
+      setDriveBackups(Array.isArray(list) ? list : [])
+    } catch (err) {
+      setDriveBackups([])
+      setDriveBackupsError(err.message || 'Could not load Drive backups')
+    } finally {
+      setDriveBackupsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchBackups()
-  }, [fetchBackups])
+    fetchDriveBackups()
+  }, [fetchBackups, fetchDriveBackups])
 
   useEffect(() => {
     api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
   }, [])
+
+  const loadReservedPlaceholderCount = useCallback(async () => {
+    if (!/^\d{4}-\d{2}$/.test(purgeReservedMonth)) {
+      setReservedPlaceholderCount(null)
+      setReservedCountLoading(false)
+      return
+    }
+    setReservedCountLoading(true)
+    try {
+      const res = await api.getAdminMonthlyScheduleEntries({
+        status: 'reserved',
+        month: purgeReservedMonth,
+        limit: 1,
+        offset: 0,
+      })
+      setReservedPlaceholderCount(Number(res?.total) || 0)
+    } catch {
+      setReservedPlaceholderCount(null)
+    } finally {
+      setReservedCountLoading(false)
+    }
+  }, [purgeReservedMonth])
+
+  useEffect(() => {
+    loadReservedPlaceholderCount()
+  }, [loadReservedPlaceholderCount])
 
   const loadMonthlyRows = useCallback(async (nextOffset = 0, { silent = false } = {}) => {
     if (silent) setMonthlyRefreshing(true)
@@ -129,13 +182,47 @@ export default function Admin() {
     loadMonthlyRows(0)
   }, [loadMonthlyRows])
 
+  const handlePurgeReservedConfirm = async () => {
+    setPurgingReserved(true)
+    setPurgeReservedError('')
+    try {
+      const result = await api.purgeReservedPlaceholders({
+        month: purgeReservedMonth,
+        localOnly: true,
+      })
+      const purged = result?.batches_purged ?? 0
+      const rows = result?.removed_row_count ?? 0
+      const failed = Array.isArray(result?.errors) ? result.errors.length : 0
+      if (failed > 0) {
+        setPurgeReservedError(
+          `Purged ${purged} batch(es), ${rows} row(s). ${failed} batch(es) failed — check server logs or retry.`
+        )
+        success(`Partial purge: ${purged} batch(es), ${rows} row(s) removed.`)
+      } else {
+        success(
+          rows > 0
+            ? `Purged ${purged} reserved batch(es), ${rows} row(s) removed.`
+            : 'No reserved placeholders to purge.'
+        )
+        setPurgeReservedConfirmOpen(false)
+      }
+      await loadReservedPlaceholderCount()
+      await loadMonthlyRows(monthlyOffset, { silent: true })
+    } catch (err) {
+      setPurgeReservedError(err.message || 'Failed to purge reserved placeholders')
+    } finally {
+      setPurgingReserved(false)
+    }
+  }
+
   const handleCreateBackup = async () => {
     setBackupError('')
     setBackupLoading(true)
     try {
-      const res = await api.createBackup()
+      await api.createBackup()
       success('Backup created')
       await fetchBackups()
+      await fetchDriveBackups()
     } catch (err) {
       setBackupError(err.message || 'Backup failed')
     } finally {
@@ -144,20 +231,37 @@ export default function Admin() {
   }
 
   const handleRestoreConfirm = async () => {
-    if (!restoreBackupId) return
+    if (!restoreTarget) return
     setRestoreConfirming(true)
     setBackupError('')
     try {
-      await api.restoreBackup(restoreBackupId)
+      if (restoreTarget.kind === 'db') {
+        await api.restoreBackup(restoreTarget.id)
+      } else if (restoreTarget.kind === 'drive') {
+        await api.restoreBackupFromDrive(restoreTarget.driveFileId, restoreTarget.fileName)
+      } else if (restoreTarget.kind === 'file') {
+        await api.restoreBackupFile(restoreTarget.file)
+      }
       success('Database restored')
-      setRestoreBackupId(null)
+      setRestoreTarget(null)
+      setRestoreFile(null)
+      if (restoreFileInputRef.current) restoreFileInputRef.current.value = ''
       await fetchBackups()
+      await fetchDriveBackups()
     } catch (err) {
       setBackupError(err.message || 'Restore failed')
     } finally {
       setRestoreConfirming(false)
     }
   }
+
+  const restoreTargetLabel = restoreTarget
+    ? restoreTarget.kind === 'db'
+      ? restoreTarget.fileName
+      : restoreTarget.kind === 'drive'
+        ? restoreTarget.fileName
+        : restoreTarget.file?.name
+    : ''
 
   const handleClearTableConfirm = async () => {
     if (!tableToClear) return
@@ -240,28 +344,111 @@ export default function Admin() {
             {backups.length === 0 ? (
               <p className="text-sm text-gray-500">No backups in the last 30 days. Create one above or wait for the daily run.</p>
             ) : (
-              <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
-                {backups.map((b) => (
-                  <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{b.file_name}</p>
-                      <p className="text-xs text-gray-500">
-                        {formatBackupDate(b.created_at)} · {b.source === 'scheduled' ? 'Scheduled' : 'Manual'}
-                      </p>
-                    </div>
-                    {b.drive_file_id ? (
-                      <button
-                        type="button"
-                        onClick={() => setRestoreBackupId(b.id)}
-                        className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Restore backup
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="max-h-[18rem] overflow-y-auto overscroll-y-contain">
+                  <ul className="divide-y divide-gray-200">
+                    {backups.map((b) => (
+                      <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{b.file_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatBackupDate(b.created_at)} · {b.source === 'scheduled' ? 'Scheduled' : 'Manual'}
+                          </p>
+                        </div>
+                        {b.drive_file_id ? (
+                          <button
+                            type="button"
+                            onClick={() => setRestoreTarget({ kind: 'db', id: b.id, fileName: b.file_name })}
+                            className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            Restore backup
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Restore from file on this computer</h4>
+            <p className="text-sm text-gray-500 mb-3">
+              Choose a <code className="text-xs bg-gray-100 px-1 rounded">.sql</code> dump (for example downloaded from Google Drive on another server).
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={restoreFileInputRef}
+                type="file"
+                accept=".sql"
+                className="hidden"
+                onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => restoreFileInputRef.current?.click()}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Choose file…
+              </button>
+              {restoreFile ? (
+                <span className="text-sm text-gray-600 truncate max-w-xs" title={restoreFile.name}>
+                  {restoreFile.name}
+                </span>
+              ) : (
+                <span className="text-sm text-gray-400">No file selected</span>
+              )}
+              <button
+                type="button"
+                disabled={!restoreFile}
+                onClick={() => restoreFile && setRestoreTarget({ kind: 'file', file: restoreFile })}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4" />
+                Restore from file
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-200" layout>
+            <h4 className="text-sm font-medium text-gray-700 mb-2">All backups in Google Drive folder</h4>
+            <p className="text-sm text-gray-500 mb-3">
+              Includes backups from other servers that are not listed above.
+            </p>
+            {driveBackupsLoading ? (
+              <p className="text-sm text-gray-500">Loading Drive backups…</p>
+            ) : driveBackupsError ? (
+              <p className="text-sm text-amber-700">{driveBackupsError}</p>
+            ) : driveBackups.length === 0 ? (
+              <p className="text-sm text-gray-500">No .sql files in the backup folder.</p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="max-h-[18rem] overflow-y-auto overscroll-y-contain">
+                  <ul className="divide-y divide-gray-200">
+                    {driveBackups.map((b) => (
+                      <li key={b.id} className="px-4 py-3 bg-white flex items-center justify-between gap-3">
+                        <div className="min-w-0" layout>
+                          <p className="text-sm font-medium text-gray-900 truncate">{b.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatBackupDate(b.createdTime)}
+                            {b.size != null ? ` · ${(b.size / 1024 / 1024).toFixed(1)} MB` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRestoreTarget({ kind: 'drive', driveFileId: b.id, fileName: b.name })}
+                          className="shrink-0 text-sm text-green-700 hover:text-green-900 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Restore
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             )}
           </div>
         </section>
@@ -305,7 +492,7 @@ export default function Admin() {
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[180px]"
             >
               <option value="">— Select staff —</option>
-              {staffList.filter((s) => s.calendar_id).map((s) => (
+              {staffList.filter((s) => s.calendar_id && s.active !== false).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
@@ -509,9 +696,9 @@ export default function Admin() {
                 <LoadingSpinner />
               </div>
             ) : (
-              <div className="overflow-auto">
+              <div className="max-h-[18rem] overflow-auto overscroll-y-contain">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                     <tr className="text-left text-gray-700">
                       <th className="px-3 py-2 font-medium">Student</th>
                       <th className="px-3 py-2 font-medium">Event ID</th>
@@ -614,6 +801,66 @@ export default function Admin() {
           </div>
         </section>
 
+        <section className="rounded-lg border border-cyan-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
+            <Trash2 className="w-5 h-5 text-cyan-700" />
+            Purge reserved placeholders
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Remove <code className="bg-gray-100 px-1 rounded">reserved</code> rows from{' '}
+            <code className="bg-gray-100 px-1 rounded">monthly_schedule</code> for the selected month
+            (Japan calendar month) only. Google Calendar is not changed.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <label className="text-sm text-gray-700 inline-flex items-center gap-2">
+              Month
+              <input
+                type="month"
+                value={purgeReservedMonth}
+                onChange={(e) => {
+                  setPurgeReservedError('')
+                  setPurgeReservedMonth(e.target.value)
+                }}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-sm"
+              />
+            </label>
+            <span className="text-sm text-gray-700">
+              {reservedCountLoading
+                ? 'Counting reserved rows…'
+                : reservedPlaceholderCount == null
+                  ? 'Could not load reserved count'
+                  : `${reservedPlaceholderCount} reserved row(s) in ${purgeReservedMonth}`}
+            </span>
+            <button
+              type="button"
+              onClick={loadReservedPlaceholderCount}
+              disabled={reservedCountLoading || !/^\d{4}-\d{2}$/.test(purgeReservedMonth)}
+              className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              {reservedCountLoading ? <LoadingSpinner size="xs" /> : <RefreshCw className="w-4 h-4" />}
+              Refresh count
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPurgeReservedError('')
+                setPurgeReservedConfirmOpen(true)
+              }}
+              disabled={
+                purgingReserved ||
+                reservedCountLoading ||
+                reservedPlaceholderCount === 0 ||
+                !/^\d{4}-\d{2}$/.test(purgeReservedMonth)
+              }
+              className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {purgingReserved ? <LoadingSpinner size="xs" /> : <Trash2 className="w-4 h-4" />}
+              {purgingReserved ? 'Purging…' : `Purge reserved (${purgeReservedMonth})`}
+            </button>
+          </div>
+          {purgeReservedError && <p className="text-sm text-red-600">{purgeReservedError}</p>}
+        </section>
+
         <section className="rounded-lg border border-rose-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
             <Trash2 className="w-5 h-5 text-rose-600" />
@@ -650,15 +897,15 @@ export default function Admin() {
       {showBackfillModal && (
         <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
       )}
-      {restoreBackupId != null && (
+      {restoreTarget != null && (
         <ConfirmActionModal
           title="Restore database"
-          message="This will overwrite the current database with the selected backup. All current data will be replaced. Continue?"
+          message={`This will overwrite the current database with "${restoreTargetLabel || 'the selected backup'}". All current data will be replaced. Continue?`}
           confirmLabel="Restore"
           destructive
           confirming={restoreConfirming}
           onConfirm={handleRestoreConfirm}
-          onClose={() => !restoreConfirming && setRestoreBackupId(null)}
+          onClose={() => !restoreConfirming && setRestoreTarget(null)}
         />
       )}
       {clearConfirmOpen && (
@@ -681,6 +928,17 @@ export default function Admin() {
           confirming={deletingMonthlyRow}
           onConfirm={handleMonthlyDeleteConfirm}
           onClose={() => !deletingMonthlyRow && setPendingMonthlyDelete(null)}
+        />
+      )}
+      {purgeReservedConfirmOpen && (
+        <ConfirmActionModal
+          title="Purge reserved placeholders"
+          message={`This will delete reserved rows from monthly_schedule for ${purgeReservedMonth} only (database only — Google Calendar is not changed). ${reservedPlaceholderCount ?? 'Unknown'} row(s) currently. Continue?`}
+          confirmLabel={`Purge reserved (${purgeReservedMonth})`}
+          destructive
+          confirming={purgingReserved}
+          onConfirm={handlePurgeReservedConfirm}
+          onClose={() => !purgingReserved && setPurgeReservedConfirmOpen(false)}
         />
       )}
     </div>

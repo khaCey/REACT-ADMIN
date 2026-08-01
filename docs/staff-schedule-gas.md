@@ -60,7 +60,20 @@ If the GAS returns an **object** (e.g. `{ "events": [...] }`), the backend will 
 - **Calendar has no events** in the requested 31-day window.
 - **Calendar ID** – The staff row’s `calendar_id` must be the correct Google Calendar ID (e.g. from Calendar settings > Integrate calendar).
 
-## 4. Test GAS and server logs
+## 4. Extend shift (app only, not Google Calendar)
+
+English teachers’ **base** shift times come from **Fetch schedule** (GAS → `teacher_schedules`). Google Calendar is not updated when staff extend a shift.
+
+- **Staff → Teacher calendar → Extend shift (app only)** writes `teacher_shift_extensions` (up to 120 minutes before/after the base shift).
+- **Booking** uses base shift ± extension when counting teachers on shift (`GET /api/schedule/week`, book validation).
+- **Re-fetching** a teacher’s Calendar refreshes `teacher_schedules` only; extension rows are kept until changed in the app.
+- **Sham / owner course:** Sham’s Calendar blocks often cannot be extended in Google; use app extensions so owner students can book in extra hours while Sham is effectively on shift.
+
+Dashed amber bands on the Staff teacher timeline show extension windows (not on Calendar).
+
+API: `GET/PUT /api/shifts/extend`, `GET /api/shifts/teachers?date=`.
+
+## 5. Test GAS and server logs
 
 On the **Admin** page, use **Test GAS** to call the staff-schedule URL with a staff calendar ID. You’ll see the response keys (e.g. `changed, diff` = student schedule; an array or `events` = teacher calendar). Set **`STAFF_SCHEDULE_GAS_URL`** to the GAS that returns teacher events.
 

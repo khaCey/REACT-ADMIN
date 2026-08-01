@@ -75,11 +75,22 @@ router.patch('/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
       idx++;
     }
 
-    const validColorIds = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']);
     if (calendar_color_id !== undefined) {
       const raw = calendar_color_id == null ? '' : String(calendar_color_id).trim();
+      let normalizedColor = null;
+      if (raw !== '') {
+        if (/^([1-9]|10|11)$/.test(raw)) {
+          normalizedColor = raw;
+        } else if (/^#[0-9A-Fa-f]{6}$/.test(raw)) {
+          normalizedColor = `#${raw.slice(1).toLowerCase()}`;
+        } else {
+          return res.status(400).json({
+            error: 'calendar_color_id must be empty, a Google Calendar color id (1–11), or #RRGGBB hex',
+          });
+        }
+      }
       updates.push(`calendar_color_id = $${idx}`);
-      values.push(raw === '' || !validColorIds.has(raw) ? null : raw);
+      values.push(normalizedColor);
       idx++;
     }
 

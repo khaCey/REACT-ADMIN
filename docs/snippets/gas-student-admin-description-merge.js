@@ -1,6 +1,6 @@
 /**
  * Paste into your deployed Calendar Web App (same project as lesson_book_update).
- * Mirrors Calendar API/Code.js — use when Calendar API/ is not the deployed source.
+ * Mirrors calendarAPI/Code.js — use when calendarAPI/ is not the deployed source.
  *
  * In doPost → lesson_book_update, after title/color handling and before cacheMonthlyEventsForBothMonths():
  *

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Trash2, Calendar } from 'lucide-react'
 import { api } from '../api'
@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext'
 import ConfirmActionModal from './ConfirmActionModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import StaffScheduleColorPicker from './StaffScheduleColorPicker'
+import { isCalendarHexColor, parseScheduleHexInput } from '../constants/googleCalendarColors'
 
 const STAFF_TYPE_OPTIONS = [
   { value: 'japanese_staff', label: 'Japanese Staff' },
@@ -28,6 +29,8 @@ function normalizeColorIdForSelect(raw) {
 
 export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
   const { success } = useToast()
+  /** Direct ref to custom hex input — submit reads live DOM value (same as controlled state). */
+  const scheduleHexInputRef = useRef(null)
   const [calendar_id, setCalendarId] = useState(staff?.calendar_id ?? '')
   const [calendar_color_id, setCalendarColorId] = useState(() =>
     normalizeColorIdForSelect(staff?.calendar_color_id)
@@ -59,7 +62,19 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     setError('')
     setSubmitting(true)
     try {
-      const colorTrim = String(calendar_color_id ?? '').trim()
+      /** Prefer ref so we always read the mounted hex input (portal + submit timing safe). */
+      const formEl = e.currentTarget
+      const hexEl = scheduleHexInputRef.current || formEl.querySelector('input[name="schedule_color_hex"]')
+      const typed = hexEl ? String(hexEl.value ?? '').trim() : ''
+      const parsedHex = parseScheduleHexInput(typed)
+      const stateColor = String(calendar_color_id ?? '').trim()
+      let colorTrim = stateColor
+      if (parsedHex) {
+        colorTrim = parsedHex
+      } else if (typed === '' && isCalendarHexColor(stateColor)) {
+        // Cleared custom hex without blur — controlled input is empty but state still had hex
+        colorTrim = ''
+      }
       const payload = {
         calendar_id: String(calendar_id ?? '').trim() || null,
         calendar_color_id: colorTrim === '' ? null : colorTrim,
@@ -188,6 +203,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
               Click a block — same palette as Google Calendar events. Used on the shift grid and English teacher week view.
             </p>
             <StaffScheduleColorPicker
+              hexInputRef={scheduleHexInputRef}
               value={calendar_color_id}
               onChange={setCalendarColorId}
               idPrefix={`edit-staff-${staff.id}-color`}

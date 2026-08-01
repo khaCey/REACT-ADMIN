@@ -6,13 +6,15 @@ import { useToast } from '../context/ToastContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
+import ExtendShiftModal from '../components/ExtendShiftModal'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
 import {
   GOOGLE_CALENDAR_EVENT_COLORS,
   googleCalendarColorLabel,
-  staffScheduleCellTintClass,
-  staffScheduleColorChipClass,
+  isCalendarHexColor,
+  staffScheduleCellTintPresentation,
+  staffScheduleColorChipPresentation,
 } from '../constants/googleCalendarColors'
 
 function formatShiftTime(iso) {
@@ -99,6 +101,8 @@ const TEACHER_CALENDAR_START_HOUR = 10
 const TEACHER_CALENDAR_END_HOUR = 21
 const TEACHER_CALENDAR_TOTAL_MINUTES = (TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR) * 60
 const TEACHER_CALENDAR_ROW_HEIGHT = 24
+/** Tailwind `w-14`; shift table row labels use the same width as timeline hour gutter so columns align. */
+const STAFF_WEEK_TIMELINE_GUTTER = '3.5rem'
 
 /** Match schedule/API teacher_name to Staff list despite extra spaces or casing. */
 function teacherNameMatchKey(name) {
@@ -126,6 +130,16 @@ function minutesFromTimelineStart(timeStr) {
   const minutes = parseInt(match[1], 10) * 60 + parseInt(match[2], 10)
   const fromStart = minutes - TEACHER_CALENDAR_START_HOUR * 60
   return Math.max(0, Math.min(TEACHER_CALENDAR_TOTAL_MINUTES, fromStart))
+}
+
+function addMinutesToHHMM(hhmm, deltaMinutes) {
+  const match = String(hhmm || '').trim().match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return hhmm
+  let total = parseInt(match[1], 10) * 60 + parseInt(match[2], 10) + deltaMinutes
+  total = Math.max(0, Math.min(24 * 60 - 1, total))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 /** Horizontal cascade index for overlapping blocks (same day). */
@@ -187,6 +201,8 @@ function isShiftRosterEligibleStaff(s) {
 function getStaffCalendarSwatchHex(staff, fallbackIndex = 0) {
   const raw = staff?.calendar_color_id
   const id = raw != null && String(raw).trim() !== '' ? String(raw).trim() : null
+
+  if (id && isCalendarHexColor(id)) return id
 
   if (id) {
     const found = GOOGLE_CALENDAR_EVENT_COLORS.find((c) => c.id === id)
@@ -275,6 +291,7 @@ export default function Staff() {
   const { staff: authStaff } = useAuth()
   const { success } = useToast()
   const isAdmin = !!authStaff?.is_admin || String(authStaff?.name || '').trim().toLowerCase() === 'khacey'
+  const canManageShifts = isAdmin || !!authStaff?.is_operator
 
   const [staffList, setStaffList] = useState([])
   const [fetchScheduleStaffId, setFetchScheduleStaffId] = useState('')
@@ -295,6 +312,7 @@ export default function Staff() {
   const [showAddStaffModal, setShowAddStaffModal] = useState(false)
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [adjustSlot, setAdjustSlot] = useState(null)
+  const [extendShiftOpen, setExtendShiftOpen] = useState(false)
   const [teacherCalendarEvents, setTeacherCalendarEvents] = useState([])
   const [teacherCalendarLoading, setTeacherCalendarLoading] = useState(false)
   const [breakPresets, setBreakPresets] = useState([])
@@ -458,6 +476,21 @@ export default function Staff() {
   const calendarStaffOptions = staffList.filter(
     (x) => (x.staff_type === 'japanese_staff' || !x.staff_type) && x.active !== false
   )
+  const englishTeachersForSync = useMemo(
+    () =>
+      staffList
+        .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
+        .sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+        ),
+    [staffList]
+  )
+  const selectedSyncStaff = useMemo(
+    () => englishTeachersForSync.find((s) => String(s.id) === String(fetchScheduleStaffId)) || null,
+    [englishTeachersForSync, fetchScheduleStaffId]
+  )
+  const selectedSyncHasCalendar =
+    !!selectedSyncStaff && String(selectedSyncStaff.calendar_id || '').trim() !== ''
   const shiftRosterBlocks = useMemo(() => {
     const raw = Array.isArray(teacherCalendarEvents)
       ? teacherCalendarEvents
@@ -518,15 +551,8 @@ export default function Staff() {
 
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-y-auto">
-      <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
+      <div className="flex items-center pt-3 pb-3 mb-4 border-b border-gray-200">
         <h2 className="text-2xl font-bold text-gray-900">Staff</h2>
-        <button
-          type="button"
-          onClick={() => setShowAddStaffModal(true)}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg cursor-pointer"
-        >
-          Add Staff
-        </button>
       </div>
 
       {error && (
@@ -534,94 +560,35 @@ export default function Staff() {
       )}
 
       <>
-          <section className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Staff list</h3>
-            <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
-              <table className="min-w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Name</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Color</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Calendar ID</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Type</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Role</th>
-                    <th className="px-4 py-2 text-center text-sm font-semibold text-gray-700">Active</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {staffList.map((s) => (
-                    <tr
-                      key={s.id}
-                      onClick={() => setSelectedStaff({ ...s, canEditRole: isAdmin })}
-                      className="hover:bg-gray-100 cursor-pointer"
-                    >
-                      <td className="px-4 py-2 font-medium text-gray-900">{s.name}</td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${staffScheduleColorChipClass(s, s.id)}`}
-                          title={
-                            s.calendar_color_id
-                              ? `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
-                              : 'Auto (set in Edit Staff)'
-                          }
-                        >
-                          {s.calendar_color_id
-                            ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
-                            : 'Auto'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-600 truncate max-w-[200px]">
-                        {s.calendar_id || '—'}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">
-                        {STAFF_TYPE_LABELS[s.staff_type] ?? s.staff_type ?? '—'}
-                      </td>
-                      <td className="px-4 py-2">
-                        {s.is_admin ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                            Admin
-                          </span>
-                        ) : s.is_operator ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-800">
-                            Operator
-                          </span>
-                        ) : (
-                          <span className="text-gray-600">Staff</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-center text-sm">
-                        {s.active !== false ? 'Yes' : 'No'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="mb-8">
-            <div className="flex items-center gap-2 mb-4">
+          <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Weekly roster</h3>
+                <p className="text-xs font-medium text-gray-500">Japanese staff</p>
+              </div>
+              <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setWeekStart(addDaysJapan(weekStart, -7))
                 }}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Previous week"
               >
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
-              <span className="font-medium text-gray-700 min-w-[220px] text-center">
+              <span className="min-w-[190px] text-center text-sm font-semibold text-gray-800">
                 {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
                 onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Next week"
               >
                 <ChevronRight className="w-5 h-5 text-gray-600" />
               </button>
+              </div>
             </div>
 
             {shiftLoadError && (
@@ -637,14 +604,9 @@ export default function Staff() {
               </div>
             ) : (
               <>
-                <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift roster (week)</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Read-only view of staff on shift (same people as the assignment table: Japanese staff and legacy
-                    rows, not English teachers). Colors match each person&apos;s schedule color from Edit Staff.
-                  </p>
+                <div className="mb-6">
                   {isAdmin && (
-                    <div className="flex flex-wrap items-center gap-3 mb-3">
+                    <div className="flex flex-wrap items-center gap-3 mb-4">
                       <button
                         type="button"
                         onClick={async () => {
@@ -669,15 +631,11 @@ export default function Staff() {
                           }
                         }}
                         disabled={fetchJapaneseBulkLoading}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {fetchJapaneseBulkLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-                        {fetchJapaneseBulkLoading ? 'Fetching…' : 'Fetch Japanese staff from Google (all)'}
+                        {fetchJapaneseBulkLoading ? 'Syncing…' : 'Sync roster'}
                       </button>
-                      <span className="text-xs text-gray-500">
-                        Same as Admin → uses calendar IDs on Japanese / legacy staff rows. Refreshes this week&apos;s
-                        roster and the teacher calendar below.
-                      </span>
                       {fetchJapaneseBulkError && (
                         <span className="text-sm text-red-600">{fetchJapaneseBulkError}</span>
                       )}
@@ -703,7 +661,7 @@ export default function Staff() {
                         rosterLegendNames.forEach((name, idx) => {
                           const st = findStaffMemberForRosterName(staffList, name)
                           const listIdx = st ? staffList.findIndex((s) => s.id === st.id) : -1
-                          rosterColorIndex[name] = staffScheduleColorChipClass(
+                          rosterColorIndex[name] = staffScheduleColorChipPresentation(
                             st || {},
                             listIdx >= 0 ? listIdx : idx
                           )
@@ -717,31 +675,41 @@ export default function Staff() {
                         return (
                           <>
                             <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
-                              {rosterLegendNames.map((name) => (
-                                <span
-                                  key={name}
-                                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${rosterColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
-                                >
-                                  {name}
-                                </span>
-                              ))}
+                              {rosterLegendNames.map((name) => {
+                                const pres = rosterColorIndex[name] || {
+                                  className: 'bg-gray-100 border-gray-300',
+                                  style: undefined,
+                                }
+                                return (
+                                  <span
+                                    key={name}
+                                    className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${pres.className}`}
+                                    style={pres.style}
+                                  >
+                                    {name}
+                                  </span>
+                                )
+                              })}
                             </div>
-                            <div className="flex min-w-[600px] border-b border-gray-200">
-                              <div className="w-14 shrink-0" />
-                              {dateList.map((date) => (
+                            <div
+                              className="grid w-full min-w-[600px]"
+                              style={{
+                                gridTemplateColumns: `${STAFF_WEEK_TIMELINE_GUTTER} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                                gridTemplateRows: `auto ${timelineHeight}px`,
+                              }}
+                            >
+                              <div className="border-b border-gray-200 border-r border-gray-100" aria-hidden />
+                              {dateList.map((date, i) => (
                                 <div
-                                  key={date}
-                                  className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                                  key={`hdr-${date}-${i}`}
+                                  className={`min-w-0 border-b border-gray-200 py-1.5 text-center text-xs font-semibold text-gray-700 ${
+                                    i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                  }`}
                                 >
                                   {formatDayHeaderJapan(date)}
                                 </div>
                               ))}
-                            </div>
-                            <div className="flex min-w-[600px]">
-                              <div
-                                className="w-14 shrink-0 flex flex-col border-r border-gray-100"
-                                style={{ height: timelineHeight }}
-                              >
+                              <div className="flex min-w-0 flex-col border-r border-gray-100">
                                 {hourLabels.map((label) => (
                                   <div
                                     key={label}
@@ -752,16 +720,17 @@ export default function Staff() {
                                   </div>
                                 ))}
                               </div>
-                              {dateList.map((date) => {
+                              {dateList.map((date, i) => {
                                 const blocks = rosterByDate[date] || []
                                 const cascadeIndices = cascadeIndicesForBlocks(blocks)
                                 return (
                                   <div
-                                    key={date}
-                                    className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
-                                    style={{ height: timelineHeight }}
+                                    key={`c-${date}-${i}`}
+                                    className={`relative min-w-0 overflow-visible ${
+                                      i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                    }`}
                                   >
-                                    {blocks.map((block, i) => {
+                                    {blocks.map((block, j) => {
                                       const startMin = minutesFromTimelineStart(block.start_time)
                                       const endMin = minutesFromTimelineStart(block.end_time)
                                       const duration = Math.max(1, endMin - startMin)
@@ -773,15 +742,17 @@ export default function Staff() {
                                         TEACHER_CALENDAR_TOTAL_MINUTES > 0
                                           ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100
                                           : 0
-                                      const colorClass =
-                                        rosterColorIndex[block.staff_name] ||
-                                        'bg-gray-100 border-gray-300 text-gray-800'
-                                      const cascadeIndex = cascadeIndices[i] ?? 0
+                                      const pres = rosterColorIndex[block.staff_name] || {
+                                        className: 'bg-gray-100 border-gray-300 text-gray-800',
+                                        style: undefined,
+                                      }
+                                      const cascadeIndex = cascadeIndices[j] ?? 0
                                       return (
                                         <div
-                                          key={`${block.staff_name}-${block.start_time}-${i}`}
-                                          className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                          key={`${block.staff_name}-${block.start_time}-${j}`}
+                                          className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${pres.className}`}
                                           style={{
+                                            ...(pres.style || {}),
                                             top: `${topPct}%`,
                                             height: `${heightPct}%`,
                                             minHeight: 20,
@@ -813,18 +784,33 @@ export default function Staff() {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Shift management (week view)</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Cell tint follows each staff member&apos;s Google Calendar color (set in Edit Staff). Unassigned
-                    slots stay white.
-                  </p>
-              <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white">
-                <table className="min-w-full border-collapse">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-gray-900">Shift assignments</h3>
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">AM / PM</span>
+                  </div>
+              <div className="rounded-xl border border-gray-200 overflow-x-auto bg-gray-50/40">
+                <table className="w-full table-fixed border-collapse min-w-[600px]">
+                  <colgroup>
+                    <col className="w-14 max-w-[3.5rem]" />
+                    {dates.map((date) => (
+                      <col
+                        key={date}
+                        style={{
+                          width:
+                            dates.length > 0
+                              ? `calc((100% - ${STAFF_WEEK_TIMELINE_GUTTER}) / ${dates.length})`
+                              : undefined,
+                        }}
+                      />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr className="bg-gray-50">
-                      <th className="px-2 py-2 text-left text-sm font-semibold text-gray-700 w-40">Shift</th>
+                      <th className="w-14 max-w-[3.5rem] px-1 py-2 text-center text-xs font-semibold text-gray-700">
+                        Shift
+                      </th>
                       {dates.map((date) => (
-                          <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-[140px]">
+                          <th key={date} className="px-2 py-2 text-center text-sm font-semibold text-gray-700 min-w-0">
                             {formatDayHeaderJapan(date)}
                           </th>
                         ))}
@@ -836,7 +822,7 @@ export default function Staff() {
                       { row: 'pm', label: 'PM' },
                     ].map(({ row, label }) => (
                       <tr key={row}>
-                        <td className="px-2 py-2 text-sm text-gray-600 align-top border-r border-gray-100">
+                        <td className="w-14 max-w-[3.5rem] px-1 py-2 text-center text-xs font-medium text-gray-600 align-top border-r border-gray-100">
                           {label}
                         </td>
                         {dates.map((date) => {
@@ -878,8 +864,8 @@ export default function Staff() {
                             : (primaryCalendarMatchIdx >= 0 ? primaryCalendarMatchIdx : 0)
                           const shiftCellTint =
                             tintStaff != null
-                              ? staffScheduleCellTintClass(tintStaff, tintStaffIdx)
-                              : 'bg-white border-gray-100'
+                              ? staffScheduleCellTintPresentation(tintStaff, tintStaffIdx)
+                              : { className: 'bg-white border-gray-100', style: undefined }
                           const selectStyle = getStaffSelectStyle(
                             assignedStaff || primaryCalendarMatch,
                             assignedStaff != null
@@ -889,15 +875,18 @@ export default function Staff() {
 
                           if (!shiftType) {
                             return (
-                              <td key={date} className="px-2 py-2 min-w-[140px] bg-gray-50/50 align-top">
+                              <td key={date} className="px-2 py-2 min-w-0 bg-gray-50/50 align-top">
                                 <span className="text-gray-300 text-xs">—</span>
                               </td>
                             )
                           }
 
                           return (
-                            <td key={date} className="px-2 py-2 min-w-[140px] align-top">
-                              <div className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint}`}>
+                            <td key={date} className="px-2 py-2 min-w-0 align-top">
+                              <div
+                                className={`space-y-1 rounded-lg border p-1.5 ${shiftCellTint.className}`}
+                                style={shiftCellTint.style}
+                              >
                                 <select
                                   value={slot?.staff_name ?? ''}
                                   onChange={(e) => {
@@ -947,13 +936,15 @@ export default function Staff() {
                                       const matchStaffIdx = matchStaff
                                         ? calendarStaffOptions.findIndex((x) => x.id === matchStaff.id)
                                         : matchIdx
+                                      const matchChip = staffScheduleColorChipPresentation(
+                                        matchStaff || {},
+                                        matchStaffIdx >= 0 ? matchStaffIdx : matchIdx
+                                      )
                                       return (
                                         <span
                                           key={`${match.staff_name}-${match.start_time}-${match.end_time}-${matchIdx}`}
-                                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${staffScheduleColorChipClass(
-                                            matchStaff || {},
-                                            matchStaffIdx >= 0 ? matchStaffIdx : matchIdx
-                                          )}`}
+                                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${matchChip.className}`}
+                                          style={matchChip.style}
                                           title={`${match.staff_name}: ${match.start_time}–${match.end_time}`}
                                         >
                                           {match.staff_name}
@@ -996,97 +987,118 @@ export default function Staff() {
             )}
           </section>
 
-          <section className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Teacher calendar</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Time blocks from teacher_schedules for this week (English teachers only; from Google Calendar fetch or shift assignment).
-              Legend colors use each teacher&apos;s Schedule color from Edit Staff (Google Calendar palette).
-            </p>
-            <div className="flex items-center gap-2 mb-4">
+          <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Teacher calendar</h3>
+                <p className="text-xs font-medium text-gray-500">English teachers</p>
+              </div>
+              <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setWeekStart(addDaysJapan(weekStart, -7))
                 }}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Previous week"
               >
                 <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
-              <span className="font-medium text-gray-700 min-w-[220px] text-center">
+              <span className="min-w-[190px] text-center text-sm font-semibold text-gray-800">
                 {formatWeekLabelJapan(weekStart)}
               </span>
               <button
                 type="button"
                 onClick={() => setWeekStart(addDaysJapan(weekStart, 7))}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 cursor-pointer"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 cursor-pointer"
                 aria-label="Next week"
               >
                 <ChevronRight className="w-5 h-5 text-gray-600" />
               </button>
+              </div>
             </div>
             {isAdmin && (
-              <div className="flex flex-wrap items-center gap-3 mb-4">
-                <label className="text-sm font-medium text-gray-700">Fetch from Google Calendar:</label>
-                <select
-                  value={fetchScheduleStaffId}
-                  onChange={(e) => {
-                    setFetchScheduleStaffId(e.target.value)
-                    setFetchScheduleError('')
-                  }}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-[200px]"
-                >
-                  <option value="">— Select staff —</option>
-                  {staffList
-                    .filter((s) => s.active !== false && String(s.calendar_id || '').trim() !== '')
-                    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                        {s.staff_type === 'english_teacher'
-                          ? ' (English)'
-                          : s.staff_type === 'japanese_staff'
-                            ? ' (Japanese)'
-                            : ''}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const id = fetchScheduleStaffId ? parseInt(fetchScheduleStaffId, 10) : null
-                    if (!id || fetchScheduleLoading) return
-                    setFetchScheduleError('')
-                    setFetchScheduleLoading(true)
-                    try {
-                      const res = await api.fetchStaffScheduleForStaff(id)
-                      const msg =
-                        res.eventsStored != null
-                          ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
-                          : 'Schedule fetched.'
-                      success(msg)
-                      await Promise.all([loadTeacherCalendar(), loadWeek()])
-                    } catch (err) {
-                      setFetchScheduleError(err.message || 'Failed to fetch schedule')
-                    } finally {
-                      setFetchScheduleLoading(false)
+              <div className="mb-4 flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={fetchScheduleStaffId}
+                    onChange={(e) => {
+                      setFetchScheduleStaffId(e.target.value)
+                      setFetchScheduleError('')
+                    }}
+                    className="min-w-[200px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">— Select staff —</option>
+                    {englishTeachersForSync.map((s) => {
+                      const hasCalendar = String(s.calendar_id || '').trim() !== ''
+                      return (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {hasCalendar ? '' : ' (no calendar)'}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const id = fetchScheduleStaffId ? parseInt(fetchScheduleStaffId, 10) : null
+                      if (!id || fetchScheduleLoading || !selectedSyncHasCalendar) return
+                      setFetchScheduleError('')
+                      setFetchScheduleLoading(true)
+                      try {
+                        const res = await api.fetchStaffScheduleForStaff(id)
+                        const msg =
+                          res.eventsStored != null
+                            ? `Fetched ${res.eventsStored} events for ${res.teacherName ?? staffList.find((s) => s.id === id)?.name}.`
+                            : 'Schedule fetched.'
+                        success(msg)
+                        await Promise.all([loadTeacherCalendar(), loadWeek()])
+                      } catch (err) {
+                        setFetchScheduleError(err.message || 'Failed to fetch schedule')
+                      } finally {
+                        setFetchScheduleLoading(false)
+                      }
+                    }}
+                    disabled={!fetchScheduleStaffId || !selectedSyncHasCalendar || fetchScheduleLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={
+                      fetchScheduleStaffId && !selectedSyncHasCalendar
+                        ? 'Set Calendar ID on this teacher in Edit staff before syncing'
+                        : undefined
                     }
-                  }}
-                  disabled={!fetchScheduleStaffId || fetchScheduleLoading}
-                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
-                  {fetchScheduleLoading ? 'Fetching…' : 'Fetch schedule'}
-                </button>
-                {fetchScheduleError && (
-                  <span className="text-sm text-red-600">{fetchScheduleError}</span>
-                )}
+                  >
+                    {fetchScheduleLoading ? <LoadingSpinner size="xs" /> : <Calendar className="w-4 h-4" />}
+                    {fetchScheduleLoading ? 'Syncing…' : 'Sync teacher'}
+                  </button>
+                  {fetchScheduleError && (
+                    <span className="text-sm text-red-600">{fetchScheduleError}</span>
+                  )}
+                  {canManageShifts && (
+                    <button
+                      type="button"
+                      onClick={() => setExtendShiftOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+                      title="Widen bookable hours in the app only (does not edit Google Calendar)"
+                    >
+                      <Clock className="w-4 h-4" />
+                      Extend shift
+                    </button>
+                  )}
+                </div>
+                {englishTeachersForSync.length === 0 ? (
+                  <p className="text-xs text-gray-500">
+                    No active English teachers in the staff list. Set type to &quot;English Teacher&quot; on a staff row.
+                  </p>
+                ) : fetchScheduleStaffId && !selectedSyncHasCalendar ? (
+                  <p className="text-xs text-amber-800">
+                    This teacher has no Calendar ID. Open Edit staff and set Calendar ID before Sync teacher.
+                  </p>
+                ) : null}
               </div>
             )}
-            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 mb-4">
-              <p className="text-xs text-gray-600 mb-2">
-                Recurring break presets (1 hour from start time) are applied to booking capacity and shown in this calendar.
-              </p>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Break presets</p>
               <div className="flex flex-wrap items-end gap-2">
                 <select
                   value={newBreakPreset.teacher_name}
@@ -1095,7 +1107,7 @@ export default function Staff() {
                 >
                   <option value="">Teacher</option>
                   {staffList
-                    .filter((s) => s?.staff_type === 'english_teacher')
+                    .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
                     .map((s) => (
                       <option key={s.id} value={s.name}>{s.name}</option>
                     ))}
@@ -1191,12 +1203,41 @@ export default function Staff() {
                       const d = ev.date != null ? String(ev.date).slice(0, 10) : ''
                       if (!d) continue
                       if (!byDate[d]) byDate[d] = []
+                      const startTime = ev.start_time != null ? String(ev.start_time) : ''
+                      const endTime = ev.end_time != null ? String(ev.end_time) : ''
+                      const kind = ev.kind != null ? String(ev.kind) : 'shift'
                       byDate[d].push({
                         teacher: t,
-                        start_time: ev.start_time != null ? String(ev.start_time) : '',
-                        end_time: ev.end_time != null ? String(ev.end_time) : '',
-                        kind: ev.kind != null ? String(ev.kind) : 'shift',
+                        start_time: startTime,
+                        end_time: endTime,
+                        kind,
                       })
+                      if (kind === 'shift') {
+                        const extendBefore = Math.min(
+                          120,
+                          Math.max(0, parseInt(ev.extend_before_minutes, 10) || 0)
+                        )
+                        const extendAfter = Math.min(
+                          120,
+                          Math.max(0, parseInt(ev.extend_after_minutes, 10) || 0)
+                        )
+                        if (extendBefore > 0 && startTime) {
+                          byDate[d].push({
+                            teacher: t,
+                            start_time: addMinutesToHHMM(startTime, -extendBefore),
+                            end_time: startTime,
+                            kind: 'shift_extension',
+                          })
+                        }
+                        if (extendAfter > 0 && endTime) {
+                          byDate[d].push({
+                            teacher: t,
+                            start_time: endTime,
+                            end_time: addMinutesToHHMM(endTime, extendAfter),
+                            kind: 'shift_extension',
+                          })
+                        }
+                      }
                     }
                     const dateList = Array.isArray(dates) ? dates : []
                     if (englishTeachers.length === 0) {
@@ -1209,7 +1250,7 @@ export default function Staff() {
                     const teacherColorIndex = {}
                     englishTeachers.forEach((name, idx) => {
                       const st = staffList.find((s) => s.name === name)
-                      teacherColorIndex[name] = staffScheduleColorChipClass(st || {}, idx)
+                      teacherColorIndex[name] = staffScheduleColorChipPresentation(st || {}, idx)
                     })
                     const hourLabels = Array.from(
                       { length: TEACHER_CALENDAR_END_HOUR - TEACHER_CALENDAR_START_HOUR + 1 },
@@ -1219,31 +1260,41 @@ export default function Staff() {
                     return (
                       <>
                         <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2 mb-2 border-b border-gray-100">
-                          {englishTeachers.map((name) => (
-                            <span
-                              key={name}
-                              className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${teacherColorIndex[name] || 'bg-gray-100 border-gray-300'}`}
-                            >
-                              {name}
-                            </span>
-                          ))}
+                          {englishTeachers.map((name) => {
+                            const tpres = teacherColorIndex[name] || {
+                              className: 'bg-gray-100 border-gray-300',
+                              style: undefined,
+                            }
+                            return (
+                              <span
+                                key={name}
+                                className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border ${tpres.className}`}
+                                style={tpres.style}
+                              >
+                                {name}
+                              </span>
+                            )
+                          })}
                         </div>
-                        <div className="flex min-w-[600px] border-b border-gray-200">
-                          <div className="w-14 shrink-0" />
-                          {dateList.map((date) => (
+                        <div
+                          className="grid w-full min-w-[600px]"
+                          style={{
+                            gridTemplateColumns: `${STAFF_WEEK_TIMELINE_GUTTER} repeat(${Math.max(dateList.length, 1)}, minmax(0, 1fr))`,
+                            gridTemplateRows: `auto ${timelineHeight}px`,
+                          }}
+                        >
+                          <div className="border-b border-gray-200 border-r border-gray-100" aria-hidden />
+                          {dateList.map((date, i) => (
                             <div
-                              key={date}
-                              className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 py-1.5 text-center text-xs font-semibold text-gray-700"
+                              key={`th-${date}-${i}`}
+                              className={`min-w-0 border-b border-gray-200 py-1.5 text-center text-xs font-semibold text-gray-700 ${
+                                i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                              }`}
                             >
                               {formatDayHeaderJapan(date)}
                             </div>
                           ))}
-                        </div>
-                        <div className="flex min-w-[600px]">
-                          <div
-                            className="w-14 shrink-0 flex flex-col border-r border-gray-100"
-                            style={{ height: timelineHeight }}
-                          >
+                          <div className="flex min-w-0 flex-col border-r border-gray-100">
                             {hourLabels.map((label) => (
                               <div
                                 key={label}
@@ -1254,30 +1305,45 @@ export default function Staff() {
                               </div>
                             ))}
                           </div>
-                          {dateList.map((date) => {
+                          {dateList.map((date, i) => {
                             const blocks = byDate[date] || []
                             const cascadeIndices = cascadeIndicesForBlocks(blocks)
                             return (
                               <div
-                                key={date}
-                                className="flex-1 min-w-[80px] border-r border-gray-100 last:border-r-0 relative overflow-visible"
-                                style={{ height: timelineHeight }}
+                                key={`tc-${date}-${i}`}
+                                className={`relative min-w-0 overflow-visible ${
+                                  i < dateList.length - 1 ? 'border-r border-gray-100' : ''
+                                }`}
                               >
-                                {blocks.map((block, i) => {
+                                {blocks.map((block, j) => {
                                   const startMin = minutesFromTimelineStart(block.start_time)
                                   const endMin = minutesFromTimelineStart(block.end_time)
                                   const duration = Math.max(1, endMin - startMin)
                                   const topPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (startMin / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
                                   const heightPct = TEACHER_CALENDAR_TOTAL_MINUTES > 0 ? (duration / TEACHER_CALENDAR_TOTAL_MINUTES) * 100 : 0
-                                  const colorClass = block.kind === 'preset_break'
-                                    ? 'bg-slate-100 border-slate-300 text-slate-700'
-                                    : (teacherColorIndex[block.teacher] || 'bg-gray-100 border-gray-300 text-gray-800')
-                                  const cascadeIndex = cascadeIndices[i] ?? 0
+                                  const blockPres =
+                                    block.kind === 'preset_break'
+                                      ? {
+                                          className: 'bg-slate-100 border-slate-300 text-slate-700',
+                                          style: undefined,
+                                        }
+                                      : block.kind === 'shift_extension'
+                                        ? {
+                                            className:
+                                              'bg-transparent border-dashed border-2 border-amber-500/70 text-amber-900',
+                                            style: undefined,
+                                          }
+                                        : teacherColorIndex[block.teacher] || {
+                                            className: 'bg-gray-100 border-gray-300 text-gray-800',
+                                            style: undefined,
+                                          }
+                                  const cascadeIndex = cascadeIndices[j] ?? 0
                                   return (
                                     <div
-                                      key={i}
-                                      className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${colorClass}`}
+                                      key={j}
+                                      className={`absolute rounded border overflow-hidden flex flex-col items-center justify-center ${blockPres.className}`}
                                       style={{
+                                        ...(blockPres.style || {}),
                                         top: `${topPct}%`,
                                         height: `${heightPct}%`,
                                         minHeight: 20,
@@ -1289,16 +1355,20 @@ export default function Staff() {
                                       title={
                                         block.kind === 'preset_break'
                                           ? `${block.teacher} · ${block.start_time} (1h)`
-                                          : `${block.teacher}: ${block.start_time} – ${block.end_time}`
+                                          : block.kind === 'shift_extension'
+                                            ? `${block.teacher} · app extension (+bookable, not on Google Calendar) ${block.start_time}–${block.end_time}`
+                                            : `${block.teacher}: ${block.start_time} – ${block.end_time}`
                                       }
                                     >
                                       <span className="text-[9px] font-semibold truncate w-full text-center px-0.5">
-                                        {block.teacher}
+                                        {block.kind === 'shift_extension' ? `${block.teacher} +ext` : block.teacher}
                                       </span>
                                       <span className="text-[9px] opacity-90 truncate w-full text-center px-0.5">
                                         {block.kind === 'preset_break'
                                           ? `${block.start_time} (1h)`
-                                          : `${block.start_time}–${block.end_time}`}
+                                          : block.kind === 'shift_extension'
+                                            ? `${block.start_time}–${block.end_time}`
+                                            : `${block.start_time}–${block.end_time}`}
                                       </span>
                                     </div>
                                   )
@@ -1351,6 +1421,96 @@ export default function Staff() {
         </div>
             </details>
           </section>
+
+          <section className="mb-4 rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Staff directory</h3>
+                <p className="text-xs font-medium text-gray-500">{staffList.length} staff members</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddStaffModal(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                Add staff
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Color</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Type</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Role</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar</th>
+                    <th className="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {staffList.map((s) => (
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedStaff({ ...s, canEditRole: isAdmin })}
+                      className="cursor-pointer transition-colors hover:bg-green-50/50"
+                    >
+                      <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const chip = staffScheduleColorChipPresentation(s, s.id)
+                          return (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${chip.className}`}
+                              style={chip.style}
+                              title={
+                                s.calendar_color_id
+                                  ? isCalendarHexColor(s.calendar_color_id)
+                                    ? `Custom color ${s.calendar_color_id}`
+                                    : `Google Calendar: ${googleCalendarColorLabel(s.calendar_color_id)}`
+                                  : 'Auto'
+                              }
+                            >
+                              {s.calendar_color_id
+                                ? googleCalendarColorLabel(s.calendar_color_id) || s.calendar_color_id
+                                : 'Auto'}
+                            </span>
+                          )
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {STAFF_TYPE_LABELS[s.staff_type] ?? s.staff_type ?? '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {s.is_admin ? (
+                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">Admin</span>
+                        ) : s.is_operator ? (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">Operator</span>
+                        ) : (
+                          <span className="text-sm text-gray-600">Staff</span>
+                        )}
+                      </td>
+                      <td className="max-w-[220px] truncate px-4 py-3 text-xs text-gray-500" title={s.calendar_id || ''}>
+                        {s.calendar_id || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            s.active !== false
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {s.active !== false ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
 
       {showAddStaffModal && (
@@ -1389,6 +1549,15 @@ export default function Staff() {
             handleAssignShift(adjustSlot, adjustSlot.staff_name, start, end)
           }}
           onClose={() => setAdjustSlot(null)}
+        />
+      )}
+
+      {extendShiftOpen && (
+        <ExtendShiftModal
+          initialDate={weekStart}
+          defaultTeacherName="Sham"
+          onClose={() => setExtendShiftOpen(false)}
+          onSaved={() => loadTeacherCalendar()}
         />
       )}
     </div>

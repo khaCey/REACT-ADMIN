@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, AlertCircle, Calendar, LogOut, Bell } from 'lucide-react'
+import { Menu, LogOut, Bell } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNotificationsPolling } from '../hooks/useNotificationsPolling'
 import CreateNotificationModal from './CreateNotificationModal'
@@ -9,10 +9,10 @@ import EditNotificationModal from './EditNotificationModal'
 import { useToast } from '../context/ToastContext'
 import { useGuideTour } from '../context/GuideTourContext'
 import { resolveGuideSlug } from '../guides/resolveGuideSlug'
-import { NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
+import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED, areGuidesAvailable } from '../guides/wipFlags'
 import LoadingSpinner from './LoadingSpinner'
 
-export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnscheduled }) {
+export default function Navbar({ onToggleSidebar }) {
   const { staff, logout } = useAuth()
   const { success } = useToast()
   const { startGuideBySlug } = useGuideTour()
@@ -25,6 +25,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   const dropdownRef = useRef(null)
   const guideStartedFromNotificationIdRef = useRef(null)
   const notificationsDisabled = NOTIFICATIONS_WIP_DISABLED
+  const messagesDisabled = MESSAGES_WIP_DISABLED
   const guidesOn = areGuidesAvailable()
   const {
     unreadCount,
@@ -39,12 +40,49 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
   })
   const isAdminUser = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
 
+  const getMessageConversationIdFromNotification = (notification) => {
+    if (!notification || notification.kind !== 'message') return null
+    const slug = String(notification.slug || '')
+    const match = slug.match(/^message-thread:([^:]+):staff:\d+$/)
+    return match?.[1] || null
+  }
+
+  const openThreadFromNotification = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : notifications.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    if (!notification) return false
+    const conversationId = getMessageConversationIdFromNotification(notification)
+    if (!conversationId) return false
+    setReadingId(notification.id)
+    try {
+      await markAsRead(notification.id)
+      await refreshUnread()
+      setIsNotificationOpen(false)
+      setSelectedNotification(null)
+      if (messagesDisabled) {
+        success('Marked as read')
+        return true
+      }
+      navigate('/messages', { state: { conversationId } })
+      return true
+    } finally {
+      setReadingId(null)
+    }
+  }
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
   }
 
-  const handleRead = async (id) => {
+  const handleRead = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : notifications.find((n) => n.id === notificationOrId) || (selectedNotification?.id === notificationOrId ? selectedNotification : null)
+    const id = Number(notification?.id || notificationOrId)
+    const opened = await openThreadFromNotification(notification || id)
+    if (opened) return
     setReadingId(id)
     try {
       await markAsRead(id)
@@ -147,26 +185,6 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
               </button>
             </>
           )}
-          {onOpenUnpaid && (
-            <button
-              type="button"
-              onClick={onOpenUnpaid}
-              className="px-4 py-2 border border-white text-white rounded-lg hover:bg-white hover:text-green-600 transition-colors flex items-center space-x-2 cursor-pointer"
-            >
-              <AlertCircle className="w-4 h-4" />
-              <span>未納</span>
-            </button>
-          )}
-          {onOpenUnscheduled && (
-            <button
-              type="button"
-              onClick={onOpenUnscheduled}
-              className="px-4 py-2 border border-white text-white rounded-lg hover:bg-white hover:text-green-600 transition-colors flex items-center space-x-2 cursor-pointer"
-            >
-              <Calendar className="w-4 h-4" />
-              <span>未定</span>
-            </button>
-          )}
           {staff && (
             !notificationsDisabled && (
             <button
@@ -245,10 +263,12 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
                       <button
                         type="button"
                         className="text-xs text-green-700 hover:text-green-900 font-medium cursor-pointer disabled:opacity-50"
-                        onClick={() => handleRead(item.id)}
+                        onClick={() => handleRead(item)}
                         disabled={readingId === item.id}
                       >
-                        {readingId === item.id ? '処理中…' : '既読する'}
+                        {readingId === item.id
+                          ? '処理中…'
+                          : (item.kind === 'message' ? 'Open Message' : '既読する')}
                       </button>
                     </div>
                   </div>
@@ -272,6 +292,7 @@ export default function Navbar({ onToggleSidebar, onOpenUnpaid, onOpenUnschedule
           notification={selectedNotification}
           onClose={() => setSelectedNotification(null)}
           onMarkRead={handleRead}
+          markReadLabel={selectedNotification?.kind === 'message' ? 'Open Message' : '既読にする'}
           markingRead={readingId === selectedNotification.id}
           canEdit={isAdminUser || (staff?.id === selectedNotification.created_by_staff_id && !selectedNotification.is_system && selectedNotification.kind !== 'guide')}
           onEdit={(id) => {

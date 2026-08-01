@@ -24,10 +24,14 @@ async function fetchApi(path, options = {}) {
 
 export const api = {
   getStudents: () => fetchApi('/students'),
+  getHiatusStudents: () => fetchApi('/students/hiatus'),
+  patchStudentHiatus: (id, body) =>
+    fetchApi(`/students/${id}/hiatus`, { method: 'PATCH', body: JSON.stringify(body) }),
   getStudent: (id) => fetchApi(`/students/${id}`),
   getStudentGroup: (id) => fetchApi(`/students/${id}/group`),
   saveStudentGroup: (id, body) =>
     fetchApi(`/students/${id}/group`, { method: 'PUT', body: JSON.stringify(body) }),
+  unlinkStudentGroup: (id) => fetchApi(`/students/${id}/group`, { method: 'DELETE' }),
   getStudentLatestByMonth: (id) => fetchApi(`/students/${id}/latest-by-month`),
   addStudent: (data) => fetchApi('/students', { method: 'POST', body: JSON.stringify(data) }),
   updateStudent: (id, data) => fetchApi(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -72,15 +76,39 @@ export const api = {
   getCalendarPollConfigured: () => fetchApi('/config/calendar-poll-configured'),
   createBackup: () => fetchApi('/admin/backup', { method: 'POST' }),
   getBackups: () => fetchApi('/admin/backups'),
+  getDriveBackups: () => fetchApi('/admin/backups/drive'),
   restoreBackup: (backupId) =>
     fetchApi('/admin/restore', { method: 'POST', body: JSON.stringify({ backupId }) }),
+  restoreBackupFromDrive: (driveFileId, fileName) =>
+    fetchApi('/admin/restore', {
+      method: 'POST',
+      body: JSON.stringify({ driveFileId, fileName: fileName || undefined }),
+    }),
+  restoreBackupFile: async (file) => {
+    const url = `${API_BASE}/admin/restore/upload`;
+    const token = getStoredToken();
+    const form = new FormData();
+    form.append('file', file);
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'POST', headers, body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      if (res.status === 401) clearStoredSession();
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  },
   clearTable: (table) =>
     fetchApi('/admin/clear-table', { method: 'POST', body: JSON.stringify({ table }) }),
-  getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', q = '', limit = 100, offset = 0 } = {}) => {
+  purgeReservedPlaceholders: (body = {}) =>
+    fetchApi('/admin/purge-reserved-placeholders', { method: 'POST', body: JSON.stringify(body) }),
+  getAdminMonthlyScheduleEntries: ({ studentId = '', syncStatus = '', status = '', month = '', q = '', limit = 100, offset = 0 } = {}) => {
     const params = new URLSearchParams()
     if (studentId !== '' && studentId != null) params.set('studentId', String(studentId))
     if (syncStatus) params.set('syncStatus', String(syncStatus))
     if (status) params.set('status', String(status))
+    if (month) params.set('month', String(month))
     if (q) params.set('q', String(q))
     params.set('limit', String(limit))
     params.set('offset', String(offset))
@@ -149,6 +177,34 @@ export const api = {
   deleteNotification: (id) =>
     fetchApi(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  getMessageStaff: () => fetchApi('/messages/staff'),
+  getMessageConversations: ({ limit = 50, offset = 0 } = {}) => {
+    const q = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    })
+    return fetchApi(`/messages/conversations?${q}`)
+  },
+  createMessageConversation: (data) =>
+    fetchApi('/messages/conversations', { method: 'POST', body: JSON.stringify(data) }),
+  getMessageConversation: (conversationId) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}`),
+  getMessageItems: (conversationId, { limit = 50, before = null } = {}) => {
+    const q = new URLSearchParams({ limit: String(limit) })
+    if (before != null && before !== '') q.set('before', String(before))
+    return fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/items?${q.toString()}`)
+  },
+  sendMessageItem: (conversationId, body) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  markMessageConversationRead: (conversationId, lastReadMessageId = null) =>
+    fetchApi(`/messages/conversations/${encodeURIComponent(conversationId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ last_read_message_id: lastReadMessageId }),
+    }),
+
   getUnpaidStudents: (month) =>
     fetchApi(month ? `/dashboard/unpaid?month=${encodeURIComponent(month)}` : '/dashboard/unpaid'),
   getUnscheduledLessonsStudents: () => fetchApi('/dashboard/unscheduled-lessons'),
@@ -179,6 +235,13 @@ export const api = {
   },
   bookLesson: (body) =>
     fetchApi('/schedule/book', { method: 'POST', body: JSON.stringify(body) }),
+  /**
+   * Confirm one reserved week.
+   * Pass finalize_series: true only on the last week of a Confirm-all loop
+   * (series shell delete + next-month hold). Confirm-one always uses false.
+   */
+  confirmReservedSchedule: (body) =>
+    fetchApi('/schedule/confirm-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
   renumberMonthLessonTitles: (body) =>
     fetchApi('/schedule/renumber-month-titles', { method: 'POST', body: JSON.stringify(body) }),
@@ -197,18 +260,34 @@ export const api = {
     fetchApi('/schedule/reschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
   unrescheduleLinkedLesson: (body) =>
     fetchApi('/schedule/unreschedule-linked', { method: 'POST', body: JSON.stringify(body) }),
-  /** @param {{ localOnly?: boolean }} [opts] — when true, server skips Google Calendar (GAS) delete */
-  removeScheduleEvent: (eventId, { localOnly = false } = {}) => {
-    const q = localOnly ? '?localOnly=1' : ''
+  /** @param {{ localOnly?: boolean, occurrenceDate?: string|null }} [opts] — occurrenceDate YYYY-MM-DD pins reserved single-occurrence delete */
+  removeScheduleEvent: (eventId, { localOnly = false, occurrenceDate = null } = {}) => {
+    const params = new URLSearchParams()
+    if (localOnly) params.set('localOnly', '1')
+    const date = String(occurrenceDate || '').trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) params.set('occurrenceDate', date)
+    const q = params.toString() ? `?${params.toString()}` : ''
     return fetchApi(`/schedule/${encodeURIComponent(eventId)}${q}`, { method: 'DELETE' })
   },
 
   getScheduleTeachers: (date) =>
     fetchApi(`/schedule/teachers?date=${encodeURIComponent(date)}`),
+  getShiftTeachers: (date) =>
+    fetchApi(`/shifts/teachers?date=${encodeURIComponent(date)}`),
+  getShiftExtend: (date, teacherName) =>
+    fetchApi(
+      `/shifts/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`
+    ),
+  updateShiftExtend: (body) =>
+    fetchApi('/shifts/extend', { method: 'PUT', body: JSON.stringify(body) }),
+  /** @deprecated use getShiftExtend */
   getScheduleExtend: (date, teacherName) =>
-    fetchApi(`/schedule/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`),
+    fetchApi(
+      `/shifts/extend?date=${encodeURIComponent(date)}&teacher_name=${encodeURIComponent(teacherName)}`
+    ),
+  /** @deprecated use updateShiftExtend */
   updateScheduleExtend: (body) =>
-    fetchApi('/schedule/extend', { method: 'PUT', body: JSON.stringify(body) }),
+    fetchApi('/shifts/extend', { method: 'PUT', body: JSON.stringify(body) }),
 
   syncCalendarPoll: ({ data = [], removed = [] } = {}) =>
     fetchApi('/calendar-poll/sync', {

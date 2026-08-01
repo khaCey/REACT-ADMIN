@@ -11,8 +11,8 @@ student-admin-*.json
 # Temp / askpass
 .tmp_askpass.cmd
 
-# Separate GAS project (local copy only; deploy from Apps Script)
-Calendar API/
+# Separate GAS project (clone: github.com/khaCey/calendarAPI → calendarAPI/; deploy via clasp or Apps Script)
+calendarAPI/
 
 # Migration data CSVs
 migration-data/**/*.csv

@@ -228,10 +228,14 @@ router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req,
     }
     const [result, presetsResult] = await Promise.all([
       query(
-        `SELECT date, teacher_name, start_time, end_time
-         FROM teacher_schedules
-         WHERE date >= $1::date AND date < $1::date + interval '7 days'
-         ORDER BY teacher_name, date, start_time`,
+        `SELECT t.date, t.teacher_name, t.start_time, t.end_time,
+                COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
+                COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
+         FROM teacher_schedules t
+         LEFT JOIN teacher_shift_extensions e
+           ON e.date = t.date AND e.teacher_name = t.teacher_name
+         WHERE t.date >= $1::date AND t.date < $1::date + interval '7 days'
+         ORDER BY t.teacher_name, t.date, t.start_time`,
         [weekStart]
       ),
       query(
@@ -244,11 +248,29 @@ router.get('/teacher-calendar', requireAuth, requireAdminOrOperator, async (req,
       const date = toDateStr(r.date);
       const start0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
       const end0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      const extendBefore = Math.min(120, Math.max(0, parseInt(r.extend_before_minutes, 10) || 0));
+      const extendAfter = Math.min(120, Math.max(0, parseInt(r.extend_after_minutes, 10) || 0));
       if (!start0 || !end0) {
-        return { date, teacher_name: r.teacher_name, start_time: start0, end_time: end0, kind: 'shift' };
+        return {
+          date,
+          teacher_name: r.teacher_name,
+          start_time: start0,
+          end_time: end0,
+          kind: 'shift',
+          extend_before_minutes: extendBefore,
+          extend_after_minutes: extendAfter,
+        };
       }
       const { start_time, end_time } = roundTeacherShiftStartEnd(start0, end0);
-      return { date, teacher_name: r.teacher_name, start_time, end_time, kind: 'shift' };
+      return {
+        date,
+        teacher_name: r.teacher_name,
+        start_time,
+        end_time,
+        kind: 'shift',
+        extend_before_minutes: extendBefore,
+        extend_after_minutes: extendAfter,
+      };
     });
     const breakEvents = expandBreakPresetsForWeek(weekStart, presetsResult.rows, result.rows);
     const events = [...shiftEvents, ...breakEvents];
@@ -529,6 +551,93 @@ router.put('/assign', requireAuth, requireAdminOrOperator, async (req, res) => {
     }
 
     res.json({ ok: true, date: dateStr, shift_type: shiftType, staff_name: teacherName, start_time: startTime, end_time: endTime });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/shifts/teachers?date=YYYY-MM-DD - teachers with shifts and extension minutes for a date. */
+router.get('/teachers', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const dateStr = req.query.date;
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ error: 'Query date required (YYYY-MM-DD)' });
+    }
+    const shifts = await query(
+      `SELECT t.teacher_name, t.start_time, t.end_time,
+              COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
+              COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
+       FROM teacher_schedules t
+       LEFT JOIN teacher_shift_extensions e ON e.date = t.date AND e.teacher_name = t.teacher_name
+       WHERE t.date = $1::date
+       ORDER BY t.teacher_name, t.start_time`,
+      [dateStr]
+    );
+    const teachers = shifts.rows.map((r) => {
+      const st0 = r.start_time ? String(r.start_time).slice(0, 5) : '';
+      const et0 = r.end_time ? String(r.end_time).slice(0, 5) : '';
+      const base = {
+        teacher_name: r.teacher_name,
+        extend_before_minutes: r.extend_before_minutes,
+        extend_after_minutes: r.extend_after_minutes,
+      };
+      if (!st0 || !et0) return { ...base, start_time: st0, end_time: et0 };
+      const rounded = roundTeacherShiftStartEnd(st0, et0);
+      return { ...base, start_time: rounded.start_time, end_time: rounded.end_time };
+    });
+    res.json({ teachers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/shifts/extend?date=YYYY-MM-DD&teacher_name= */
+router.get('/extend', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const { date: dateStr, teacher_name: teacherName } = req.query || {};
+    if (!dateStr || !teacherName) {
+      return res.status(400).json({ error: 'Query date and teacher_name required' });
+    }
+    const r = await query(
+      'SELECT extend_before_minutes, extend_after_minutes FROM teacher_shift_extensions WHERE date = $1::date AND teacher_name = $2',
+      [dateStr, teacherName]
+    );
+    if (r.rows.length === 0) {
+      return res.json({ extend_before_minutes: 0, extend_after_minutes: 0 });
+    }
+    const row = r.rows[0];
+    res.json({
+      extend_before_minutes: parseInt(row.extend_before_minutes, 10) || 0,
+      extend_after_minutes: parseInt(row.extend_after_minutes, 10) || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** PUT /api/shifts/extend - app-only bookable window extension (not Google Calendar). */
+router.put('/extend', requireAuth, requireAdminOrOperator, async (req, res) => {
+  try {
+    const { date: dateStr, teacher_name: teacherName, extend_before_minutes, extend_after_minutes } = req.body || {};
+    if (!dateStr || !teacherName) {
+      return res.status(400).json({ error: 'Body date and teacher_name required' });
+    }
+    const before = Math.min(120, Math.max(0, parseInt(extend_before_minutes, 10) || 0));
+    const after = Math.min(120, Math.max(0, parseInt(extend_after_minutes, 10) || 0));
+    const hasShift = await query(
+      'SELECT 1 FROM teacher_schedules WHERE date = $1::date AND teacher_name = $2 LIMIT 1',
+      [dateStr, teacherName]
+    );
+    if (hasShift.rows.length === 0) {
+      return res.status(400).json({ error: 'No shift found for this teacher on this date. Add a base shift first.' });
+    }
+    await query(
+      `INSERT INTO teacher_shift_extensions (date, teacher_name, extend_before_minutes, extend_after_minutes)
+       VALUES ($1::date, $2, $3, $4)
+       ON CONFLICT (date, teacher_name) DO UPDATE SET extend_before_minutes = $3, extend_after_minutes = $4`,
+      [dateStr, teacherName, before, after]
+    );
+    res.json({ ok: true, extend_before_minutes: before, extend_after_minutes: after });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

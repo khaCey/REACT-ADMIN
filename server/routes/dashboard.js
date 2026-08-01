@@ -122,9 +122,17 @@ router.get('/metrics', async (req, res) => {
     const fromStart = from + '-01';
     const months = monthRange(from, to);
 
-    const [regularResult, demoResult, joinedResult] = await Promise.all([
+    const [regularStudentsResult, regularLessonsResult, demoResult, joinedResult] = await Promise.all([
       query(
         `SELECT to_char(date, 'YYYY-MM') as month, COUNT(DISTINCT student_name)::int as count
+         FROM monthly_schedule
+         WHERE lesson_kind = 'regular' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
+         AND date >= $1::date AND date < $2::date
+         GROUP BY to_char(date, 'YYYY-MM')`,
+        [fromStart, toEnd]
+      ),
+      query(
+        `SELECT to_char(date, 'YYYY-MM') as month, COUNT(*)::int as count
          FROM monthly_schedule
          WHERE lesson_kind = 'regular' AND (status IS NULL OR lower(trim(status)) NOT IN ('cancelled', 'rescheduled')) AND date IS NOT NULL
          AND date >= $1::date AND date < $2::date
@@ -161,7 +169,8 @@ router.get('/metrics', async (req, res) => {
     };
 
     res.json({
-      regularStudentsPerMonth: byMonth(regularResult.rows, 'count'),
+      regularStudentsPerMonth: byMonth(regularStudentsResult.rows, 'count'),
+      regularLessonsPerMonth: byMonth(regularLessonsResult.rows, 'count'),
       demoLessonsPerMonth: byMonth(demoResult.rows, 'count'),
       studentsJoinedPerMonth: byMonth(joinedResult.rows, 'count'),
     });
@@ -174,7 +183,50 @@ router.get('/metrics', async (req, res) => {
 router.get('/today-lessons', async (_req, res) => {
   try {
     const result = await query(
-      `SELECT
+      `WITH jst AS (
+         SELECT
+           (now() AT TIME ZONE 'Asia/Tokyo')::date AS today,
+           to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM') AS ym
+       ),
+       month_sched AS (
+         SELECT
+           ms.lesson_uuid,
+           ms.event_id,
+           ms.student_name,
+           ms.date,
+           ms.start,
+           ms.title,
+           ms.lesson_kind,
+           COALESCE(ms.student_id, sm_ms.id) AS resolved_sid,
+           REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g') AS norm_name
+         FROM monthly_schedule ms
+         LEFT JOIN LATERAL (
+           SELECT s.id
+           FROM students s
+           WHERE REGEXP_REPLACE(TRIM(s.name), '\\s+', ' ', 'g') = REGEXP_REPLACE(TRIM(ms.student_name), '\\s+', ' ', 'g')
+           ORDER BY s.id
+           LIMIT 1
+         ) sm_ms ON ms.student_id IS NULL
+         CROSS JOIN jst j
+         WHERE to_char(ms.date, 'YYYY-MM') = j.ym
+           AND (ms.status IS NULL OR lower(trim(ms.status)) NOT IN ('cancelled', 'rescheduled'))
+       ),
+       ranked AS (
+         SELECT
+           ms.*,
+           ROW_NUMBER() OVER (
+             PARTITION BY COALESCE(ms.resolved_sid::text, ms.norm_name)
+             ORDER BY ms.date, ms.start NULLS LAST
+           ) AS rn_month
+         FROM month_sched ms
+       ),
+       pack_sizes AS (
+         SELECT l.student_id, GREATEST(l.lessons::int, 0) AS pack_n
+         FROM lessons l
+         CROSS JOIN jst j
+         WHERE l.month = j.ym AND l.lessons IS NOT NULL AND l.lessons > 0
+       )
+       SELECT
          m.event_id,
          m.student_name,
          COALESCE(m.student_id, sm.id) AS student_id,
@@ -215,13 +267,27 @@ router.get('/today-lessons', async (_req, res) => {
                )
              )
          ) AS paid_this_month,
-         NOT EXISTS (
-           SELECT 1 FROM monthly_schedule m2
-           WHERE m2.student_name = m.student_name
-             AND to_char(m2.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
-            AND (m2.status IS NULL OR lower(trim(m2.status)) NOT IN ('cancelled', 'rescheduled'))
-             AND (m2.date > m.date OR (m2.date = m.date AND m2.start > m.start))
-         ) AS is_last_lesson_of_month
+         EXISTS (
+           SELECT 1
+           FROM lesson_notes ln
+           WHERE ln.lesson_uuid = m.lesson_uuid
+         ) AS has_note,
+         CASE
+           WHEN lower(trim(COALESCE(m.lesson_kind, ''))) = 'demo' THEN false
+           WHEN regexp_match(COALESCE(m.title, ''), '(\\d+)\\s*/\\s*(\\d+)\\s*$') IS NOT NULL THEN
+             (regexp_match(COALESCE(m.title, ''), '(\\d+)\\s*/\\s*(\\d+)\\s*$'))[1]::int
+             = (regexp_match(COALESCE(m.title, ''), '(\\d+)\\s*/\\s*(\\d+)\\s*$'))[2]::int
+           WHEN ps.pack_n IS NOT NULL AND ps.pack_n > 0 AND r.rn_month IS NOT NULL THEN
+             r.rn_month = ps.pack_n
+           WHEN ps.pack_n IS NOT NULL AND ps.pack_n > 0 THEN false
+           ELSE NOT EXISTS (
+             SELECT 1 FROM monthly_schedule m2
+             WHERE m2.student_name = m.student_name
+               AND to_char(m2.date, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Tokyo')::date, 'YYYY-MM')
+               AND (m2.status IS NULL OR lower(trim(m2.status)) NOT IN ('cancelled', 'rescheduled'))
+               AND (m2.date > m.date OR (m2.date = m.date AND m2.start > m.start))
+           )
+         END AS is_last_lesson_of_month
        FROM monthly_schedule m
        LEFT JOIN LATERAL (
          SELECT s.id
@@ -231,6 +297,25 @@ router.get('/today-lessons', async (_req, res) => {
          LIMIT 1
        ) sm ON m.student_id IS NULL
        LEFT JOIN students sg ON sg.id = COALESCE(m.student_id, sm.id)
+       LEFT JOIN ranked r ON (
+         (
+           m.lesson_uuid IS NOT NULL
+           AND r.lesson_uuid = m.lesson_uuid
+           AND REGEXP_REPLACE(TRIM(r.student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+           AND r.date = m.date
+           AND r.start IS NOT DISTINCT FROM m.start
+         )
+         OR (
+           m.lesson_uuid IS NULL
+           AND r.event_id = m.event_id
+           AND REGEXP_REPLACE(TRIM(r.student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM(m.student_name), '\\s+', ' ', 'g')
+           AND r.date = m.date
+           AND r.start IS NOT DISTINCT FROM m.start
+         )
+       )
+       LEFT JOIN pack_sizes ps ON ps.student_id = COALESCE(m.student_id, sm.id)
        WHERE m.date = (now() AT TIME ZONE 'Asia/Tokyo')::date
         AND (m.status IS NULL OR lower(trim(m.status)) NOT IN ('cancelled', 'rescheduled'))
        ORDER BY m.start NULLS LAST, m.student_name`

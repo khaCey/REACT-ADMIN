@@ -3,11 +3,15 @@ import { createPortal } from 'react-dom'
 import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
+import { studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
   scheduled: { color: 'bg-emerald-600', text: 'Scheduled' },
-  calendar_pending: { color: 'bg-sky-600', text: 'Calendar pending' },
+  reserved: { color: 'bg-cyan-600', text: 'Reserved' },
+  calendar_pending: { color: 'bg-sky-600', text: 'Pending' },
+  confirm_processing: { color: 'bg-violet-600', text: 'Processing' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
   reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },
   rescheduled: { color: 'bg-amber-600', text: 'Rescheduled' },
@@ -28,11 +32,17 @@ export default function LessonDetailsModal({
   onOpenRescheduleChoice,
   onSelectRescheduleDate,
   onSyncWithCalendar,
+  onConfirmOneWeek,
+  onConfirmAllWeeks,
+  confirmScheduleMonthKey,
   onRemove,
+  onBookLesson,
   onLessonNotesChanged,
 }) {
   const { success } = useToast()
   const [syncing, setSyncing] = useState(false)
+  const [confirmOneOpen, setConfirmOneOpen] = useState(false)
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [uncancelConfirmOpen, setUncancelConfirmOpen] = useState(false)
   const [unrescheduleConfirmOpen, setUnrescheduleConfirmOpen] = useState(false)
@@ -53,6 +63,8 @@ export default function LessonDetailsModal({
 
   useEffect(() => {
     setSyncing(false)
+    setConfirmOneOpen(false)
+    setConfirmAllOpen(false)
     setCancelConfirmOpen(false)
     setUncancelConfirmOpen(false)
     setUnrescheduleConfirmOpen(false)
@@ -95,11 +107,29 @@ export default function LessonDetailsModal({
   useEffect(() => {
     if (!lesson) return
     const onKey = (e) => {
-      if (e.key === 'Escape' && !cancelConfirmOpen && !uncancelConfirmOpen && !unrescheduleConfirmOpen && !lessonNoteModalOpen) onClose()
+      if (
+        e.key === 'Escape' &&
+        !cancelConfirmOpen &&
+        !uncancelConfirmOpen &&
+        !unrescheduleConfirmOpen &&
+        !confirmOneOpen &&
+        !confirmAllOpen &&
+        !lessonNoteModalOpen
+      )
+        onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [lesson, onClose, cancelConfirmOpen, uncancelConfirmOpen, unrescheduleConfirmOpen, lessonNoteModalOpen])
+  }, [
+    lesson,
+    onClose,
+    cancelConfirmOpen,
+    uncancelConfirmOpen,
+    unrescheduleConfirmOpen,
+    confirmOneOpen,
+    confirmAllOpen,
+    lessonNoteModalOpen,
+  ])
 
   const lessonNoteCount = lessonNotes.length
 
@@ -117,7 +147,7 @@ export default function LessonDetailsModal({
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
   const transientStatus = String(lesson.transientStatus || '').toLowerCase()
-  const isAwaitingRescheduleDate = status === 'rescheduled' && !!lesson.awaitingRescheduleDate
+  const isAwaitingRescheduleDate = !!lesson.awaitingRescheduleDate
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   const displayStatus =
@@ -129,6 +159,8 @@ export default function LessonDetailsModal({
           ? 'rescheduled'
           : transientStatus === 'sync_pending'
             ? 'sync_pending'
+            : transientStatus === 'confirm_processing'
+              ? 'confirm_processing'
     : status === 'unscheduled'
       ? 'unscheduled'
       : isAwaitingRescheduleDate
@@ -141,21 +173,44 @@ export default function LessonDetailsModal({
             ? 'cancelled'
             : calendarSyncStatus === 'failed'
               ? 'sync_failed'
-              : calendarSyncStatus === 'pending' && status === 'scheduled'
+              : calendarSyncStatus === 'pending' && (status === 'scheduled' || status === 'reserved')
                 ? 'calendar_pending'
                 : isDemoLesson
                     ? 'demo'
                     : status
   const style = STATUS_STYLES[displayStatus] || STATUS_STYLES.scheduled
+  const isReservedLesson = status === 'reserved'
   const isUnscheduled = status === 'unscheduled'
   const isCancelled = status === 'cancelled'
   const isRescheduled = status === 'rescheduled'
   const hasRescheduledTo = !!(lesson?.optimisticRescheduledTo || lesson?.rescheduledTo)
-  const isTransientBusy = transientStatus === 'sync_pending' || transientStatus === 'deleting'
-  const canSyncWithCalendar = !isTransientBusy && !isUnscheduled && !isCancelled && !isRescheduled && calendarSyncStatus !== 'synced'
+  const isTransientBusy =
+    transientStatus === 'sync_pending' ||
+    transientStatus === 'confirm_processing' ||
+    transientStatus === 'deleting'
+  const canSyncWithCalendar =
+    !isReservedLesson &&
+    !isTransientBusy &&
+    !isUnscheduled &&
+    !isCancelled &&
+    !isRescheduled &&
+    calendarSyncStatus !== 'synced'
+  const canConfirmSchedule =
+    (typeof onConfirmOneWeek === 'function' || typeof onConfirmAllWeeks === 'function') &&
+    !isTransientBusy &&
+    !isUnscheduled &&
+    !isCancelled &&
+    !isRescheduled &&
+    status === 'reserved' &&
+    calendarSyncStatus === 'synced'
   const canReschedule =
-    !isTransientBusy && !isUnscheduled && !isCancelled && !isRescheduled && calendarSyncStatus === 'synced'
-  const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate && calendarSyncStatus === 'synced'
+    !isReservedLesson &&
+    !isTransientBusy &&
+    !isUnscheduled &&
+    !isCancelled &&
+    !isRescheduled &&
+    calendarSyncStatus === 'synced'
+  const canSelectRescheduleDate = !isTransientBusy && isAwaitingRescheduleDate
   const canUnreschedule =
     !isTransientBusy &&
     isRescheduled &&
@@ -178,7 +233,12 @@ export default function LessonDetailsModal({
     ? lesson.time.replace(':', '：')
     : 'Not specified'
 
-  const confirmDialogOpen = cancelConfirmOpen || uncancelConfirmOpen || unrescheduleConfirmOpen
+  const confirmDialogOpen =
+    cancelConfirmOpen ||
+    uncancelConfirmOpen ||
+    unrescheduleConfirmOpen ||
+    confirmOneOpen ||
+    confirmAllOpen
   const hasBlockingDialog = confirmDialogOpen || lessonNoteModalOpen
 
   const handleBackdropClick = (e) => {
@@ -199,9 +259,11 @@ export default function LessonDetailsModal({
     }
   }
   const handleOpenRescheduleChoice = () => {
+    if (BOOKING_WIP_DISABLED) return
     onOpenRescheduleChoice?.(lesson, student)
   }
   const handleSelectRescheduleDate = () => {
+    if (BOOKING_WIP_DISABLED) return
     onSelectRescheduleDate?.(lesson, student)
   }
   const runUncancel = async () => {
@@ -240,6 +302,18 @@ export default function LessonDetailsModal({
     } finally {
       setSyncing(false)
     }
+  }
+
+  const runConfirmOneWeek = () => {
+    setConfirmOneOpen(false)
+    onClose()
+    void onConfirmOneWeek?.(lesson, student)
+  }
+
+  const runConfirmAllWeeks = () => {
+    setConfirmAllOpen(false)
+    onClose()
+    void onConfirmAllWeeks?.(lesson, student)
   }
 
   const saveLessonNote = async () => {
@@ -321,54 +395,56 @@ export default function LessonDetailsModal({
             </div>
           </div>
 
-          <div>
-            <div className="mb-1 flex items-center gap-1 text-gray-700">
-              <StickyNote className="h-4 w-4" />
-              <label className="block text-sm font-medium">{noteHeader}</label>
+          {!isReservedLesson && (
+            <div>
+              <div className="mb-1 flex items-center gap-1 text-gray-700">
+                <StickyNote className="h-4 w-4" />
+                <label className="block text-sm font-medium">{noteHeader}</label>
+              </div>
+              <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px] space-y-2">
+                {!hasLessonIdentity && (
+                  <div className="text-amber-700">This lesson does not have a stable lesson UUID yet, so lesson notes cannot be saved.</div>
+                )}
+                {lessonNotesLoading && <div>Loading lesson notes…</div>}
+                {!lessonNotesLoading && hasLessonIdentity && lessonNotes.length === 0 && (
+                  <div className="text-gray-500">No lesson notes yet.</div>
+                )}
+                {!lessonNotesLoading && lessonNotes.length > 0 && (
+                  <ul className="space-y-2">
+                    {lessonNotes.map((n) => (
+                      <li key={n.id} className="rounded border border-gray-200 bg-white p-2">
+                        <div className="whitespace-pre-wrap break-words">{n.note}</div>
+                        <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                          <span>{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</span>
+                          <button
+                            type="button"
+                            disabled={deletingLessonNoteId === n.id}
+                            onClick={() => removeLessonNote(n.id)}
+                            className="rounded border border-red-300 px-2 py-0.5 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            {deletingLessonNoteId === n.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {hasLessonIdentity && (
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setLessonNoteModalOpen(true)}
+                      disabled={savingLessonNote}
+                      className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Add note
+                    </button>
+                  </div>
+                )}
+                {lessonNotesError && <div className="text-red-600">{lessonNotesError}</div>}
+              </div>
             </div>
-            <div className="text-sm text-gray-700 bg-gray-50 rounded-md p-3 min-h-[60px] space-y-2">
-              {!hasLessonIdentity && (
-                <div className="text-amber-700">This lesson does not have a stable lesson UUID yet, so lesson notes cannot be saved.</div>
-              )}
-              {lessonNotesLoading && <div>Loading lesson notes…</div>}
-              {!lessonNotesLoading && hasLessonIdentity && lessonNotes.length === 0 && (
-                <div className="text-gray-500">No lesson notes yet.</div>
-              )}
-              {!lessonNotesLoading && lessonNotes.length > 0 && (
-                <ul className="space-y-2">
-                  {lessonNotes.map((n) => (
-                    <li key={n.id} className="rounded border border-gray-200 bg-white p-2">
-                      <div className="whitespace-pre-wrap break-words">{n.note}</div>
-                      <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                        <span>{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</span>
-                        <button
-                          type="button"
-                          disabled={deletingLessonNoteId === n.id}
-                          onClick={() => removeLessonNote(n.id)}
-                          className="rounded border border-red-300 px-2 py-0.5 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                        >
-                          {deletingLessonNoteId === n.id ? 'Deleting…' : 'Delete'}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {hasLessonIdentity && (
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setLessonNoteModalOpen(true)}
-                    disabled={savingLessonNote}
-                    className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    Add note
-                  </button>
-                </div>
-              )}
-              {lessonNotesError && <div className="text-red-600">{lessonNotesError}</div>}
-            </div>
-          </div>
+          )}
 
           <div>
             <label className="block text-gray-600 mb-1">System Notes</label>
@@ -378,6 +454,9 @@ export default function LessonDetailsModal({
               )}
               {lesson?.rescheduledTo && (
                 <div>Moved to: {lesson.rescheduledTo.date || '--'} {lesson.rescheduledTo.time || '--'}</div>
+              )}
+              {isAwaitingRescheduleDate && !lesson?.rescheduledTo && !lesson?.optimisticRescheduledTo && (
+                <div className="text-amber-900 font-medium">Moved to: ???</div>
               )}
               {lesson?.rescheduledFrom && (
                 <div>Moved from: {lesson.rescheduledFrom.date || '--'} {lesson.rescheduledFrom.time || '--'}</div>
@@ -389,7 +468,7 @@ export default function LessonDetailsModal({
                 <div>Calendar sync error: {lesson.calendarSyncError}</div>
               )}
               {isAwaitingRescheduleDate && (
-                <div className="text-amber-900">Awaiting a new date (rescheduled; shown in graphite in Google Calendar).</div>
+                <div className="text-amber-800 text-xs mt-1">Awaiting a new date (graphite in Google Calendar).</div>
               )}
               {!hasSystemNotes && 'No system notes.'}
             </div>
@@ -397,81 +476,143 @@ export default function LessonDetailsModal({
         </div>
         <footer className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-200">
           <div className="flex flex-wrap gap-2">
-            {!isCancelled && !isRescheduled && !isUnscheduled && (
-              <button
-                type="button"
-                onClick={() => setCancelConfirmOpen(true)}
-                disabled={confirmDialogOpen || isTransientBusy}
-                className="rounded-md border border-amber-600 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Cancel
-              </button>
+            {isReservedLesson ? (
+              <>
+                {canConfirmSchedule && typeof onConfirmOneWeek === 'function' && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmOneOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-cyan-600 bg-white px-3 py-1.5 text-sm font-medium text-cyan-800 hover:bg-cyan-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Confirm one
+                  </button>
+                )}
+                {canConfirmSchedule && typeof onConfirmAllWeeks === 'function' && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAllOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-cyan-700 bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Confirm all
+                  </button>
+                )}
+                {typeof onRemove === 'function' && (
+                  <button
+                    type="button"
+                    onClick={handleRemove}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Remove
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                {isUnscheduled && typeof onBookLesson === 'function' && (
+                  <button
+                    type="button"
+                    onClick={() => onBookLesson(lesson, student)}
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'inline-flex items-center gap-1.5 rounded-md bg-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
+                        : 'inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
+                  >
+                    {studentIsDemo(student) ? 'Book Demo Lesson' : 'Book Lesson'}
+                  </button>
+                )}
+                {!isCancelled && !isRescheduled && !isUnscheduled && (
+                  <button
+                    type="button"
+                    onClick={() => setCancelConfirmOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-amber-600 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {isCancelled && !hasRescheduledTo && (
+                  <button
+                    type="button"
+                    onClick={() => setUncancelConfirmOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Uncancel
+                  </button>
+                )}
+                {canReschedule && (
+                  <button
+                    type="button"
+                    onClick={handleOpenRescheduleChoice}
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
+                  >
+                    Reschedule
+                  </button>
+                )}
+                {canSelectRescheduleDate && (
+                  <button
+                    type="button"
+                    onClick={handleSelectRescheduleDate}
+                    disabled={BOOKING_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'rounded-md bg-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
+                  >
+                    Set date
+                  </button>
+                )}
+                {canUnreschedule && (
+                  <button
+                    type="button"
+                    onClick={() => setUnrescheduleConfirmOpen(true)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-violet-600 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Unreschedule
+                  </button>
+                )}
+                {canSyncWithCalendar && (
+                  <button
+                    type="button"
+                    onClick={handleSyncWithCalendar}
+                    disabled={syncing || confirmDialogOpen}
+                    aria-busy={syncing}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-white"
+                  >
+                    {syncing && <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+                    {syncing ? 'Syncing…' : 'Sync with Calendar'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRemove}
+                  disabled={confirmDialogOpen || isTransientBusy}
+                  title={
+                    isLocalOnlyRemove
+                      ? 'Removes this lesson from the schedule only; does not delete from Google Calendar.'
+                      : undefined
+                  }
+                  className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isLocalOnlyRemove ? 'Remove locally' : 'Remove'}
+                </button>
+              </>
             )}
-            {isCancelled && !hasRescheduledTo && (
-              <button
-                type="button"
-                onClick={() => setUncancelConfirmOpen(true)}
-                disabled={confirmDialogOpen || isTransientBusy}
-                className="rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Uncancel
-              </button>
-            )}
-            {canReschedule && (
-              <button
-                type="button"
-                onClick={handleOpenRescheduleChoice}
-                disabled={confirmDialogOpen || isTransientBusy}
-                className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Reschedule
-              </button>
-            )}
-            {canSelectRescheduleDate && (
-              <button
-                type="button"
-                onClick={handleSelectRescheduleDate}
-                disabled={confirmDialogOpen || isTransientBusy}
-                className="rounded-md border border-green-600 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Select date…
-              </button>
-            )}
-            {canUnreschedule && (
-              <button
-                type="button"
-                onClick={() => setUnrescheduleConfirmOpen(true)}
-                disabled={confirmDialogOpen || isTransientBusy}
-                className="rounded-md border border-violet-600 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Unreschedule
-              </button>
-            )}
-            {canSyncWithCalendar && (
-              <button
-                type="button"
-                onClick={handleSyncWithCalendar}
-                disabled={syncing || confirmDialogOpen}
-                aria-busy={syncing}
-                className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-white"
-              >
-                {syncing && <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />}
-                {syncing ? 'Syncing…' : 'Sync with Calendar'}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleRemove}
-              disabled={confirmDialogOpen || isTransientBusy}
-              title={
-                isLocalOnlyRemove
-                  ? 'Removes this lesson from the schedule only; does not delete from Google Calendar.'
-                  : undefined
-              }
-              className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isLocalOnlyRemove ? 'Remove locally' : 'Remove'}
-            </button>
           </div>
           <button
             type="button"
@@ -562,6 +703,26 @@ export default function LessonDetailsModal({
         onClose={() => {
           if (!unrescheduling) setUnrescheduleConfirmOpen(false)
         }}
+      />
+    )}
+    {confirmOneOpen && (
+      <ConfirmActionModal
+        title="Confirm one"
+        message={`${confirmScheduleMonthKey || 'This month'} のこの週だけを確定します。他の固定（予約済み）週はそのまま残り、次月の予約ホールドは作成しません。よろしいですか？`}
+        confirmLabel="Confirm one"
+        cancelLabel="Back"
+        onConfirm={runConfirmOneWeek}
+        onClose={() => setConfirmOneOpen(false)}
+      />
+    )}
+    {confirmAllOpen && (
+      <ConfirmActionModal
+        title="Confirm all"
+        message={`${confirmScheduleMonthKey || 'This month'} の固定（予約済み）スケジュールを週ごとに順番にすべて確定します。最後の週のあと、空のシリーズを削除し次月の予約ホールドを作成します。よろしいですか？`}
+        confirmLabel="Confirm all"
+        cancelLabel="Back"
+        onConfirm={runConfirmAllWeeks}
+        onClose={() => setConfirmAllOpen(false)}
       />
     )}
     </>,

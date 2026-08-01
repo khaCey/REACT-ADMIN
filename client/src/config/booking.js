@@ -17,9 +17,9 @@ export function isStudentExcludedFromBooking(studentIdProp, student) {
   return false
 }
 
-/** Matches server deriveLessonKindFromStudent: demo/trial → single-lesson booking, D/L titles. */
-export function studentIsDemoOrTrial(student) {
+/** Matches server deriveLessonKindFromStudent: only the explicit DEMO status uses demo booking. */
+export function studentIsDemo(student) {
   if (!student) return false
-  const s = String(student.Status ?? student.status ?? '').toLowerCase()
-  return s.includes('demo') || s.includes('trial')
+  const status = String(student.Status ?? student.status ?? '').trim().toUpperCase()
+  return status === 'DEMO'
 }

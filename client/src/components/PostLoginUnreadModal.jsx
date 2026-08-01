@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { X, Bell } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
-import { areGuidesAvailable } from '../guides/wipFlags'
+import { areGuidesAvailable, MESSAGES_WIP_DISABLED } from '../guides/wipFlags'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 
 const UNREAD_LIMIT = 20
@@ -32,6 +32,13 @@ export default function PostLoginUnreadModal({ open, onClose }) {
   const [error, setError] = useState(null)
   const [visible, setVisible] = useState(false)
   const [readingId, setReadingId] = useState(null)
+
+  const getMessageConversationIdFromNotification = (notification) => {
+    if (!notification || notification.kind !== 'message') return null
+    const slug = String(notification.slug || '')
+    const match = slug.match(/^message-thread:([^:]+):staff:\d+$/)
+    return match?.[1] || null
+  }
 
   const handleClose = useCallback(() => {
     setVisible(false)
@@ -80,12 +87,26 @@ export default function PostLoginUnreadModal({ open, onClose }) {
     }
   }, [open, onClose])
 
-  const handleMarkRead = async (id) => {
+  const handleMarkRead = async (notificationOrId) => {
+    const notification = typeof notificationOrId === 'object'
+      ? notificationOrId
+      : items.find((n) => n.id === notificationOrId) || null
+    const id = Number(notification?.id || notificationOrId)
+    if (!id) return
+    const conversationId = getMessageConversationIdFromNotification(notification)
     setReadingId(id)
     try {
       await api.markNotificationRead(id)
-      success('Notification marked as read')
+      if (conversationId) {
+        success(MESSAGES_WIP_DISABLED ? 'Marked as read' : 'Opening message thread')
+      } else {
+        success('Notification marked as read')
+      }
       setItems((prev) => prev.filter((n) => n.id !== id))
+      if (conversationId && !MESSAGES_WIP_DISABLED) {
+        handleClose()
+        navigate('/messages', { state: { conversationId } })
+      }
     } catch {
       // keep row
     } finally {
@@ -182,10 +203,10 @@ export default function PostLoginUnreadModal({ open, onClose }) {
                     <button
                       type="button"
                       className="text-xs text-green-700 hover:text-green-900 font-medium cursor-pointer shrink-0 disabled:opacity-50"
-                      onClick={() => handleMarkRead(item.id)}
+                      onClick={() => handleMarkRead(item)}
                       disabled={readingId === item.id}
                     >
-                      {readingId === item.id ? '…' : '既読する'}
+                      {readingId === item.id ? '…' : (item.kind === 'message' ? 'Open Message' : '既読する')}
                     </button>
                   </div>
                 </div>

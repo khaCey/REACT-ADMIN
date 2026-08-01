@@ -7,15 +7,7 @@ import StudentDetailsModal from '../components/StudentDetailsModal'
 import AddStudentModal from '../components/AddStudentModal'
 import FullPageLoading from '../components/FullPageLoading'
 
-function StatusBadge({ status }) {
-  const cls =
-    status === 'Active'
-      ? 'badge-status-active'
-      : status === 'Dormant'
-        ? 'badge-status-dormant'
-        : 'badge-status-demo'
-  return <span className={`badge ${cls}`}>{status || 'Active'}</span>
-}
+import StudentStatusBadge from '../components/StudentStatusBadge'
 
 function PaymentBadge({ payment }) {
   const normalized = String(payment || 'NEO')
@@ -265,7 +257,7 @@ export default function Students() {
                 </td>
                 <td className="text-center px-3 py-2">{s.当日}</td>
                 <td className="text-center px-3 py-2">
-                  <StatusBadge status={s.Status} />
+                  <StudentStatusBadge status={s.Status} />
                 </td>
                 <td className="text-center px-3 py-2">
                   <PaymentBadge payment={s.Payment} />

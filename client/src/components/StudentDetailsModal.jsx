@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Calendar } from 'lucide-react'
 import { api } from '../api'
-import { isStudentExcludedFromBooking, studentIsDemoOrTrial } from '../config/booking'
+import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
 import { useToast } from '../context/ToastContext'
 import PaymentModal from './PaymentModal'
@@ -13,16 +14,8 @@ import BookLessonModal from './BookLessonModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import GroupLinkModal from './GroupLinkModal'
-
-function StatusBadge({ status }) {
-  const cls =
-    status === 'Active'
-      ? 'badge-status-active'
-      : status === 'Dormant'
-        ? 'badge-status-dormant'
-        : 'badge-status-demo'
-  return <span className={`badge ${cls}`}>{status || 'Active'}</span>
-}
+import StudentStatusBadge from './StudentStatusBadge'
+import MarkHiatusModal from './MarkHiatusModal'
 
 class ModalErrorBoundary extends Component {
   state = { hasError: false, error: null }
@@ -41,7 +34,16 @@ class ModalErrorBoundary extends Component {
   }
 }
 
-export default function StudentDetailsModal({ studentId, onClose, onStudentDeleted, onStudentUpdated, guideAction = null, onGuideActionHandled }) {
+export default function StudentDetailsModal({
+  studentId,
+  onClose,
+  onStudentDeleted,
+  onStudentUpdated,
+  /** Optional: e.g. Dashboard refetches today-lessons when lesson notes change (has-note badge). */
+  onLessonNotesChanged,
+  guideAction = null,
+  onGuideActionHandled,
+}) {
   const { success } = useToast()
   const [student, setStudent] = useState(null)
   const [payments, setPayments] = useState([])
@@ -62,10 +64,14 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const [studentGroup, setStudentGroup] = useState(null)
   /** Bumped after a successful book so LessonsThisMonth refetches (independent of calendar poll). */
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
+  /** Event IDs awaiting GAS calendar sync (drives faster polling in LessonsThisMonth). */
+  const [pendingCalendarEventIds, setPendingCalendarEventIds] = useState([])
   /** Queue of optimistic lesson-card mutations consumed by LessonsThisMonth. */
   const [optimisticScheduleMutations, setOptimisticScheduleMutations] = useState([])
   const [noteSearch, setNoteSearch] = useState('')
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
+  const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
+  const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -75,12 +81,16 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   const bookingExcluded = isStudentExcludedFromBooking(studentId, student)
 
   useEffect(() => {
-    if (bookingExcluded) setBookLessonModal(false)
+    if (bookingExcluded || BOOKING_WIP_DISABLED) {
+      setBookLessonModal(false)
+      setPreBookLessonModal(false)
+    }
   }, [bookingExcluded])
 
   useEffect(() => {
     setScheduleRefreshKey(0)
     setOptimisticScheduleMutations([])
+    setPendingCalendarEventIds([])
   }, [studentId])
 
   const handleOptimisticScheduleMutation = useCallback((mutation) => {
@@ -117,6 +127,29 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         if (!silent) setLoading(false)
       })
   }, [studentId])
+
+  const handleBooked = useCallback(
+    (opts = {}) => {
+      const eventIds = Array.isArray(opts?.eventIds)
+        ? opts.eventIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : []
+      setOptimisticScheduleMutations([])
+      if (eventIds.length > 0) {
+        setPendingCalendarEventIds((prev) => [...new Set([...prev, ...eventIds])])
+      }
+      fetchData({ silent: true })
+      setScheduleRefreshKey((k) => k + 1)
+    },
+    [fetchData]
+  )
+
+  const handlePendingCalendarEventIdsChange = useCallback((ids) => {
+    if (!Array.isArray(ids)) {
+      setPendingCalendarEventIds([])
+      return
+    }
+    setPendingCalendarEventIds([...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -220,6 +253,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
   }
 
   const openBookingFlow = (opts = {}) => {
+    if (BOOKING_WIP_DISABLED) return
     const source = opts?.rescheduleSource || null
     setGuideFocusKey(null)
     setRescheduleSourceLesson(source)
@@ -228,7 +262,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
       setBookLessonModal(true)
       return
     }
-    if (student && studentIsDemoOrTrial(student)) {
+    if (student && studentIsDemo(student)) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
       return
@@ -262,6 +296,32 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
     setGroupLinkModalOpen(false)
     await fetchData({ silent: true })
   }, [fetchData, student, studentGroup, studentId, success])
+
+  const handleUnlinkGroupLesson = useCallback(async () => {
+    const unlinked = await api.unlinkStudentGroup(studentId)
+    setStudentGroup(unlinked || null)
+    success('Group link removed')
+    setGroupLinkModalOpen(false)
+    await fetchData({ silent: true })
+  }, [fetchData, studentId, success])
+
+  const handleMarkHiatusConfirm = useCallback(async (expectedReturn) => {
+    setMarkHiatusSubmitting(true)
+    try {
+      await api.patchStudentHiatus(studentId, {
+        action: 'start',
+        ...(expectedReturn ? { expected_return: expectedReturn } : {}),
+      })
+      success('Student marked on break (休会中)')
+      setMarkHiatusOpen(false)
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to mark on break')
+    } finally {
+      setMarkHiatusSubmitting(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
 
   useEffect(() => {
     if (studentId == null) return
@@ -327,7 +387,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
               <div className="flex items-center gap-2 shrink-0">
                 {student.Group === 'Group' && <span className="badge bg-purple-600 text-white">Group</span>}
                 {(student.Payment || '').toLowerCase().includes('owner') && <span className="badge bg-black text-white">Owner</span>}
-                <StatusBadge status={student.Status} />
+                <StudentStatusBadge status={student.Status} />
                 <button
                   onClick={onClose}
                   className="p-1 rounded hover:bg-white/20 cursor-pointer"
@@ -345,9 +405,12 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   student={student}
                   onBookLesson={bookingExcluded ? undefined : openBookingFlow}
                   onMonthLessonsUpdated={() => fetchData({ silent: true })}
+                  onLessonNotesChanged={onLessonNotesChanged}
                   onLoadingChange={setLessonsLoading}
                   optimisticScheduleMutations={optimisticScheduleMutations}
                   scheduleRefreshKey={scheduleRefreshKey}
+                  pendingCalendarEventIds={pendingCalendarEventIds}
+                  onPendingCalendarEventIdsChange={handlePendingCalendarEventIdsChange}
                   sectionClassName="hidden xl:flex rounded-xl border border-gray-200 bg-white shadow-card h-[200px] flex-col overflow-hidden w-[576px]"
                 />
 
@@ -517,10 +580,16 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                   <button
                     type="button"
                     onClick={openBookingFlow}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
+                    disabled={BOOKING_WIP_DISABLED}
+                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
+                    className={
+                      BOOKING_WIP_DISABLED
+                        ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-3 py-1.5 text-sm font-semibold line-through cursor-not-allowed'
+                        : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer'
+                    }
                   >
                     <Calendar className="w-4 h-4" />
-                    Book lesson
+                    {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
                   </button>
                 )}
                 {student?.Group === 'Group' && (
@@ -530,6 +599,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
                     className="inline-flex items-center gap-1.5 rounded-lg border border-purple-600 bg-white px-3 py-1.5 text-sm font-semibold text-purple-700 hover:bg-purple-50 cursor-pointer"
                   >
                     Manage Group Members
+                  </button>
+                )}
+                {(student?.Status === 'Active' || student?.Status === 'Dormant') && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkHiatusOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-green-600 bg-white px-3 py-1.5 text-sm font-semibold text-green-700 hover:bg-green-50 cursor-pointer"
+                  >
+                    Mark on break (休会中)
                   </button>
                 )}
                 <button
@@ -599,7 +677,7 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
         }}
       />
     )}
-    {bookLessonModal && !bookingExcluded && (
+    {bookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
       <BookLessonModal
         studentId={studentId}
         student={student}
@@ -611,15 +689,12 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
         }}
-        onBooked={() => {
-          fetchData({ silent: true })
-          setScheduleRefreshKey((k) => k + 1)
-        }}
+        onBooked={handleBooked}
         onOptimisticScheduleMutation={handleOptimisticScheduleMutation}
         rescheduleSource={rescheduleSourceLesson}
       />
     )}
-    {preBookLessonModal && !bookingExcluded && (
+    {preBookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
       <PreBookLessonModal
         onClose={() => {
           setPreBookLessonModal(false)
@@ -651,6 +726,15 @@ export default function StudentDetailsModal({ studentId, onClose, onStudentDelet
           setGroupLinkModalOpen(false)
         }}
         onSave={handleSaveGroupLesson}
+        onUnlink={handleUnlinkGroupLesson}
+      />
+    )}
+    {markHiatusOpen && student && (
+      <MarkHiatusModal
+        studentName={student.Name}
+        submitting={markHiatusSubmitting}
+        onClose={() => !markHiatusSubmitting && setMarkHiatusOpen(false)}
+        onConfirm={handleMarkHiatusConfirm}
       />
     )}
     </>,

@@ -20,10 +20,14 @@ function getSessionExpiryUtcDate() {
   return new Date(Date.UTC(y, m, d, 14, 59, 59, 999));
 }
 
-/** GET /api/auth/staff-list - staff names for login dropdown (no auth required) */
+/** GET /api/auth/staff-list - active staff names for login dropdown (no auth required) */
 router.get('/staff-list', async (req, res) => {
   try {
-    const result = await query('SELECT id, name FROM staff ORDER BY name ASC');
+    const result = await query(
+      `SELECT id, name FROM staff
+        WHERE active = TRUE
+        ORDER BY name ASC`
+    );
     res.json({ staff: result.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -65,13 +69,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Name required' });
     }
     const result = await query(
-      'SELECT id, name, is_admin, is_operator FROM staff WHERE name = $1',
+      'SELECT id, name, is_admin, is_operator, active FROM staff WHERE name = $1',
       [String(name).trim()]
     );
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid staff' });
     }
     const staff = result.rows[0];
+    if (staff.active === false) {
+      return res.status(403).json({ error: 'Account inactive' });
+    }
     await query(
       'INSERT INTO staff_shifts (staff_id, started_at) VALUES ($1, NOW())',
       [staff.id]
