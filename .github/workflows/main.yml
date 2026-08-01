@@ -5,6 +5,8 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 concurrency:
   group: production-deploy
   cancel-in-progress: true
@@ -15,7 +17,7 @@ jobs:
 
     defaults:
       run:
-        shell: powershell
+        shell: cmd
         working-directory: C:\github\react-admin
 
     steps:
