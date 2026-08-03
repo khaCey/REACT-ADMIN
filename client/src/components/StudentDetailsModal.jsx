@@ -61,6 +61,8 @@ export default function StudentDetailsModal({
   const [groupLinkModalOpen, setGroupLinkModalOpen] = useState(false)
   const [overridePaidLessons, setOverridePaidLessons] = useState(null)
   const [rescheduleSourceLesson, setRescheduleSourceLesson] = useState(null)
+  /** Pick-only booking calendar for Change date on one 固定 week. */
+  const [moveReservedSourceLesson, setMoveReservedSourceLesson] = useState(null)
   /** Preload for BookLessonModal (latest-by-month) to avoid layout shift when opening booking. */
   const [bookingLatestByMonth, setBookingLatestByMonth] = useState(null)
   const [studentGroup, setStudentGroup] = useState(null)
@@ -85,11 +87,17 @@ export default function StudentDetailsModal({
   const bookingExcluded = isStudentExcludedFromBooking(studentId, student)
 
   useEffect(() => {
-    if (bookingExcluded || BOOKING_WIP_DISABLED) {
+    if (bookingExcluded) {
+      setBookLessonModal(false)
+      setPreBookLessonModal(false)
+      setMoveReservedSourceLesson(null)
+      return
+    }
+    if (BOOKING_WIP_DISABLED && !moveReservedSourceLesson) {
       setBookLessonModal(false)
       setPreBookLessonModal(false)
     }
-  }, [bookingExcluded])
+  }, [bookingExcluded, moveReservedSourceLesson])
 
   useEffect(() => {
     setScheduleRefreshKey(0)
@@ -260,10 +268,20 @@ export default function StudentDetailsModal({
   }
 
   const openBookingFlow = (opts = {}) => {
+    const moveSource = opts?.moveReservedSource || null
+    if (moveSource) {
+      setGuideFocusKey(null)
+      setRescheduleSourceLesson(null)
+      setMoveReservedSourceLesson(moveSource)
+      setOverridePaidLessons(null)
+      setBookLessonModal(true)
+      return
+    }
     if (BOOKING_WIP_DISABLED) return
     const source = opts?.rescheduleSource || null
     setGuideFocusKey(null)
     setRescheduleSourceLesson(source)
+    setMoveReservedSourceLesson(null)
     if (source) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
@@ -651,7 +669,7 @@ export default function StudentDetailsModal({
         }}
       />
     )}
-    {bookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
+    {bookLessonModal && !bookingExcluded && (!BOOKING_WIP_DISABLED || moveReservedSourceLesson) && (
       <BookLessonModal
         studentId={studentId}
         student={student}
@@ -662,10 +680,12 @@ export default function StudentDetailsModal({
           setBookLessonModal(false)
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
+          setMoveReservedSourceLesson(null)
         }}
         onBooked={handleBooked}
         onOptimisticScheduleMutation={handleOptimisticScheduleMutation}
         rescheduleSource={rescheduleSourceLesson}
+        moveReservedSource={moveReservedSourceLesson}
       />
     )}
     {preBookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (

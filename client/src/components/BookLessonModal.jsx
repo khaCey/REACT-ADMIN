@@ -47,6 +47,26 @@ function getYyyyMmFromDateStr(dateStr) {
   return dateStr.slice(0, 7)
 }
 
+/** Monday (JST) of the week containing YYYY-MM-DD. */
+function getMondayOfDateStr(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return getMondayJstStr()
+  const day = new Date(`${dateStr}T12:00:00+09:00`).getUTCDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  return addDaysToDateStr(dateStr, mondayOffset)
+}
+
+/** Best-effort YYYY-MM-DD from a lesson / schedule row. */
+function lessonDateYyyyMmDd(lesson) {
+  const raw = String(lesson?.date || lesson?.fullDate || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  const d = String(lesson?.day || '').trim()
+  const ym = String(lesson?.monthKey || lesson?.month || '').trim()
+  if (/^\d{4}-\d{2}$/.test(ym) && /^\d{1,2}$/.test(d)) {
+    return `${ym}-${String(d).padStart(2, '0')}`
+  }
+  return ''
+}
+
 function getNextYyyyMm(yyyyMm) {
   if (!yyyyMm || typeof yyyyMm !== 'string') return null
   const m = yyyyMm.match(/^(\d{4})-(\d{2})$/)
@@ -327,6 +347,8 @@ export default function BookLessonModal({
   studentGroup = null,
   overridePaidLessons = null,
   rescheduleSource = null,
+  /** When set, calendar is pick-only: one slot → move this 固定 week (no book/reschedule). */
+  moveReservedSource = null,
   onClose,
   onBooked,
   onOptimisticScheduleMutation,
@@ -335,7 +357,12 @@ export default function BookLessonModal({
   const { lastSynced } = useCalendarPollingContext()
   const [moveBreakModal, setMoveBreakModal] = useState(null)
   const [moveBreakSaving, setMoveBreakSaving] = useState(false)
-  const [weekStartStr, setWeekStartStr] = useState(getMondayJstStr)
+  const isMoveReservedPick = Boolean(moveReservedSource)
+  const isSingleSlotPick = Boolean(rescheduleSource || moveReservedSource)
+  const [weekStartStr, setWeekStartStr] = useState(() => {
+    const seed = lessonDateYyyyMmDd(moveReservedSource || rescheduleSource)
+    return seed ? getMondayOfDateStr(seed) : getMondayJstStr()
+  })
   const [slots, setSlots] = useState({})
   const [teachersBySlot, setTeachersBySlot] = useState({})
   const [slotTypes, setSlotTypes] = useState({})
@@ -588,7 +615,7 @@ export default function BookLessonModal({
     if (breakRuleBlocked[key]) return
     if (ownerShamBlocked[key]) return
     if (ownerCourseConflictBlocked[key]) return
-    if (rescheduleSource) {
+    if (isSingleSlotPick) {
       setSelectedSlotKeys([key])
       return
     }
@@ -611,6 +638,43 @@ export default function BookLessonModal({
     }
     if (selectedSlotKeys.length === 0) {
       setError('Please select one or more slots first.')
+      return
+    }
+    if (isMoveReservedPick) {
+      if (selectedSlotKeys.length !== 1) {
+        setError('Select exactly one available slot for the new 固定 date.')
+        return
+      }
+      const eventId = String(moveReservedSource?.eventID || moveReservedSource?.event_id || '').trim()
+      if (!eventId) {
+        setError('Missing reserved event id')
+        return
+      }
+      const [date, time] = selectedSlotKeys[0].split('T')
+      const currentDate = lessonDateYyyyMmDd(moveReservedSource)
+      const currentTime = String(moveReservedSource?.time || '').trim().slice(0, 5)
+      if (date === currentDate && time === currentTime) {
+        setError('Pick a different date or time')
+        return
+      }
+      setSubmitting(true)
+      setError(null)
+      setHideBookingCalendar(true)
+      try {
+        await api.moveReservedSchedule({
+          event_id: eventId,
+          date,
+          time,
+        })
+        onBooked?.({ eventIds: [] })
+        success('固定 date updated')
+        onClose?.()
+      } catch (e) {
+        setError(e?.message || 'Failed to change 固定 date')
+        setHideBookingCalendar(false)
+      } finally {
+        setSubmitting(false)
+      }
       return
     }
     if (rescheduleSource) {
@@ -997,10 +1061,18 @@ export default function BookLessonModal({
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
               <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">
-                {isDemoStudent ? 'Book a Demo Lesson' : 'Book a New Lesson'}
+                {isMoveReservedPick
+                  ? 'Change date (固定)'
+                  : rescheduleSource
+                    ? 'Reschedule lesson'
+                    : isDemoStudent
+                      ? 'Book a Demo Lesson'
+                      : 'Book a New Lesson'}
               </h3>
               <p className="text-xs text-gray-600 mt-0.5">
-                {studentName} {studentKanji ? `(${studentKanji})` : ''}
+                {isMoveReservedPick
+                  ? `${studentName}${studentKanji ? ` (${studentKanji})` : ''} — pick an available slot. This moves the reserved week only (does not book a new lesson).`
+                  : `${studentName} ${studentKanji ? `(${studentKanji})` : ''}`}
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 ml-auto">
@@ -1262,11 +1334,13 @@ export default function BookLessonModal({
             >
               {submitting
                 ? 'Submitting...'
-                : rescheduleSource
-                  ? 'Confirm reschedule'
-                  : isDemoStudent
-                    ? `Book demo lesson (${selectedSlotKeys.length})`
-                    : `Submit selected (${selectedSlotKeys.length})`}
+                : isMoveReservedPick
+                  ? 'Change date'
+                  : rescheduleSource
+                    ? 'Confirm reschedule'
+                    : isDemoStudent
+                      ? `Book demo lesson (${selectedSlotKeys.length})`
+                      : `Submit selected (${selectedSlotKeys.length})`}
             </button>
             <button
               type="button"
