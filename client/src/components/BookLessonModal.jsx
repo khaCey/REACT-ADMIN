@@ -333,7 +333,10 @@ export default function BookLessonModal({
   const { success } = useToast()
   const { staff } = useAuth()
   const { lastSynced } = useCalendarPollingContext()
-  const canEditBreakPresets = !!(staff?.is_admin || staff?.is_operator)
+  const canEditBreakPresets =
+    !!staff?.is_admin ||
+    !!staff?.is_operator ||
+    String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const [moveBreakModal, setMoveBreakModal] = useState(null)
   const [moveBreakSaving, setMoveBreakSaving] = useState(false)
   const [weekStartStr, setWeekStartStr] = useState(getMondayJstStr)
@@ -1061,7 +1064,7 @@ export default function BookLessonModal({
                     className="booking-week-grid grid w-full min-w-0"
                     style={{
                       gridTemplateColumns: `3.5rem repeat(${weekDates.length}, minmax(0, 1fr))`,
-                      gridAutoRows: 'minmax(56px, auto)',
+                      gridAutoRows: 'minmax(56px, max-content)',
                     }}
                   >
                     {TIME_SLOTS.map((timeStr) => (
@@ -1145,7 +1148,7 @@ export default function BookLessonModal({
                           return (
                             <div
                               key={key}
-                              className="isolate min-h-0 min-w-0 overflow-hidden flex flex-col gap-0.5 border-t border-dashed border-gray-400/85 border-b border-gray-100 py-1 px-0.5"
+                              className="relative z-0 min-w-0 flex flex-col gap-0.5 border-t border-dashed border-gray-400/85 border-b border-gray-100 py-1 px-0.5"
                             >
                               <button
                                 type="button"
@@ -1162,7 +1165,7 @@ export default function BookLessonModal({
                                   )
                                 }
                                 onClick={() => handleSlotClick(dateStr, timeStr)}
-                                className={`booking-slot-btn flex-1 min-h-0 min-w-0 w-full px-2 rounded-sm transition-colors ${
+                                className={`booking-slot-btn w-full min-h-[2.75rem] min-w-0 px-2 rounded-sm transition-colors ${
                                   isSelected
                                     ? 'bg-green-100 text-green-900 ring-2 ring-green-500 ring-inset cursor-pointer'
                                     : bookingUnavailable
@@ -1190,7 +1193,7 @@ export default function BookLessonModal({
                                 </span>
                               </button>
                               {staffBreaks.length > 0 && (
-                                <div className="flex flex-col gap-px shrink-0 w-full min-w-0">
+                                <div className="relative z-10 flex flex-col gap-px shrink-0 w-full min-w-0 pointer-events-auto">
                                   {staffBreaks.map((b, bi) => {
                                     const label = formatBreakChipLabel(b)
                                     const isPreset =
@@ -1200,9 +1203,10 @@ export default function BookLessonModal({
                                         <button
                                           key={`preset-${b.preset_id}-${bi}`}
                                           type="button"
-                                          className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-px text-center text-[8px] font-medium leading-tight text-slate-700 hover:bg-slate-100 cursor-pointer select-none w-full"
+                                          className="booking-slot-break-chip relative z-10 rounded border border-slate-200/70 bg-slate-50/95 px-1 py-0.5 text-center text-[8px] font-medium leading-tight text-slate-700 hover:bg-slate-100 cursor-pointer select-none w-full pointer-events-auto"
                                           title="Move recurring break preset"
                                           onClick={(e) => {
+                                            e.preventDefault()
                                             e.stopPropagation()
                                             setMoveBreakModal({
                                               preset_id: Number(b.preset_id),
@@ -1220,11 +1224,13 @@ export default function BookLessonModal({
                                     return (
                                       <div
                                         key={`${b.teacher_name}-${bi}-${b.break_source || 'x'}`}
-                                        className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-px text-center text-[8px] font-medium leading-tight text-slate-600 pointer-events-none select-none"
+                                        className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-0.5 text-center text-[8px] font-medium leading-tight text-slate-600 select-none"
                                         title={
                                           b.break_source === 'schedule'
                                             ? 'Calendar break (edit in Google Calendar)'
-                                            : b.title || undefined
+                                            : !canEditBreakPresets && isPreset
+                                              ? 'Admin/operator can move this break'
+                                              : b.title || undefined
                                         }
                                       >
                                         {label}

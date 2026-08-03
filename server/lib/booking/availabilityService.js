@@ -318,9 +318,13 @@ export async function handleGetWeek(req, res) {
       }
     }
     for (const [key, breaks] of Object.entries(presetBreakBySlot)) {
-      const breakTeacherSet = new Set(breaks.map((b) => b.teacher_name));
+      const breakTeacherSet = new Set(
+        breaks.map((b) => normalizeTeacherNameKey(b.teacher_name)).filter(Boolean)
+      );
       if (teachersBySlot[key]) {
-        teachersBySlot[key] = teachersBySlot[key].filter((t) => !breakTeacherSet.has(t));
+        teachersBySlot[key] = teachersBySlot[key].filter(
+          (t) => !breakTeacherSet.has(normalizeTeacherNameKey(t))
+        );
       }
       if (!staffBreakBySlot[key]) staffBreakBySlot[key] = [];
       staffBreakBySlot[key].push(...breaks);
