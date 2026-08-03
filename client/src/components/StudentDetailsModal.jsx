@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Plus, Calendar } from 'lucide-react'
+import { X, Plus, Settings } from 'lucide-react'
 import { api } from '../api'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
@@ -17,6 +17,7 @@ import GroupLinkModal from './GroupLinkModal'
 import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
 import CreateReservedModal from './CreateReservedModal'
+import StudentSettingsModal from './StudentSettingsModal'
 
 class ModalErrorBoundary extends Component {
   state = { hasError: false, error: null }
@@ -74,6 +75,7 @@ export default function StudentDetailsModal({
   const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
   const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
   const [createReservedOpen, setCreateReservedOpen] = useState(false)
+  const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -216,6 +218,9 @@ export default function StudentDetailsModal({
 
   useEffect(() => {
     if (!guideFocusKey) return
+    if (guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete') {
+      setStudentSettingsOpen(true)
+    }
     const t = setTimeout(() => setGuideFocusKey(null), 7000)
     return () => clearTimeout(t)
   }, [guideFocusKey])
@@ -320,6 +325,21 @@ export default function StudentDetailsModal({
       onStudentUpdated?.()
     } catch (e) {
       setError(e.message || 'Failed to mark on break')
+    } finally {
+      setMarkHiatusSubmitting(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
+
+  const handleMarkActiveFromHiatus = useCallback(async () => {
+    setMarkHiatusSubmitting(true)
+    try {
+      await api.patchStudentHiatus(studentId, { action: 'returned' })
+      success('Student set to Active (再開)')
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to set Active')
+      throw e
     } finally {
       setMarkHiatusSubmitting(false)
     }
@@ -564,84 +584,27 @@ export default function StudentDetailsModal({
               </section>
             </div>
 
-            <div className="flex items-center justify-between px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
-              <div />
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSyncGoogleContact}
-                  disabled={syncingGoogleContact}
-                  className={`inline-flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-3 py-1.5 text-sm font-semibold ${
-                    syncingGoogleContact ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 cursor-pointer'
-                  }`}
-                  title="Create or resync this student's Google Contact"
-                >
-                  {syncingGoogleContact ? 'Syncing...' : 'Create/Resync Google Contact'}
-                </button>
-                {!bookingExcluded && (
-                  <button
-                    type="button"
-                    onClick={openBookingFlow}
-                    disabled={BOOKING_WIP_DISABLED}
-                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
-                    className={
-                      BOOKING_WIP_DISABLED
-                        ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-3 py-1.5 text-sm font-semibold line-through cursor-not-allowed'
-                        : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer'
-                    }
-                  >
-                    <Calendar className="w-4 h-4" />
-                    {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
-                  </button>
-                )}
-                {!bookingExcluded && (
-                  <button
-                    type="button"
-                    onClick={() => setCreateReservedOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-600 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 cursor-pointer"
-                  >
-                    Create 固定
-                  </button>
-                )}
-                {student?.Group === 'Group' && (
-                  <button
-                    type="button"
-                    onClick={handleOpenGroupLinkLesson}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-600 bg-white px-3 py-1.5 text-sm font-semibold text-purple-700 hover:bg-purple-50 cursor-pointer"
-                  >
-                    Manage Group Members
-                  </button>
-                )}
-                {(student?.Status === 'Active' || student?.Status === 'Dormant') && (
-                  <button
-                    type="button"
-                    onClick={() => setMarkHiatusOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-green-600 bg-white px-3 py-1.5 text-sm font-semibold text-green-700 hover:bg-green-50 cursor-pointer"
-                  >
-                    Mark on break (休会中)
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
-                    setGuideFocusKey(null)
-                    setEditStudentModal(true)
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-gray-50 cursor-pointer ${
-                    guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'
-                      ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
-                      : ''
-                  }`}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={onClose}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 text-white px-3 py-1.5 text-sm font-semibold hover:bg-black cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
+            <div className="flex items-center justify-end gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setStudentSettingsOpen(true)}
+                className={`inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 cursor-pointer ${
+                  guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'
+                    ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
+                    : ''
+                }`}
+                title="Student settings"
+                aria-label="Student settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 text-white px-3 py-1.5 text-sm font-semibold hover:bg-black cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </>
           </ModalErrorBoundary>
@@ -757,6 +720,33 @@ export default function StudentDetailsModal({
           setScheduleRefreshKey((k) => k + 1)
           success('固定 hold created')
         }}
+      />
+    )}
+    {studentSettingsOpen && student && (
+      <StudentSettingsModal
+        studentName={student.Name}
+        syncingGoogleContact={syncingGoogleContact}
+        showBookLesson={!bookingExcluded}
+        bookLessonDisabled={BOOKING_WIP_DISABLED}
+        bookLessonLabel={studentIsDemo(student) ? 'Book Demo Lesson' : 'Book Lesson'}
+        showCreateReserved={!bookingExcluded}
+        showManageGroup={student.Group === 'Group'}
+        showMarkHiatus={student.Status === 'Active' || student.Status === 'Dormant'}
+        showMarkActive={student.Status === '休会中'}
+        markActiveBusy={markHiatusSubmitting}
+        highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
+        onBookLesson={openBookingFlow}
+        onCreateReserved={() => setCreateReservedOpen(true)}
+        onSyncGoogleContact={handleSyncGoogleContact}
+        onManageGroup={handleOpenGroupLinkLesson}
+        onMarkHiatus={() => setMarkHiatusOpen(true)}
+        onMarkActive={handleMarkActiveFromHiatus}
+        onEdit={() => {
+          setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
+          setGuideFocusKey(null)
+          setEditStudentModal(true)
+        }}
+        onClose={() => !syncingGoogleContact && setStudentSettingsOpen(false)}
       />
     )}
     </>,

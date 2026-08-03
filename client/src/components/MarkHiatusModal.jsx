@@ -43,7 +43,7 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
         onClick={(e) => e.stopPropagation()}
       >
         <header className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Mark on break (休会中)</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Mark on Break (休会中)</h3>
           <p className="text-sm text-gray-600 mt-1">
             {studentName ? `${studentName} will be listed under 休会中.` : 'Student will be listed under 休会中.'}
           </p>
@@ -95,7 +95,7 @@ export default function MarkHiatusModal({ studentName, onConfirm, onClose, submi
             onClick={handleConfirm}
             className="rounded-md bg-green-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-green-700 cursor-pointer disabled:opacity-50"
           >
-            {submitting ? 'Saving…' : 'Mark on break'}
+            {submitting ? 'Saving…' : 'Mark on Break'}
           </button>
         </footer>
       </div>
