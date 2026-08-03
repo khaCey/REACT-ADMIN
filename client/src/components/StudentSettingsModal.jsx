@@ -1,11 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil, Info } from 'lucide-react'
+import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil, Info, UserCheck } from 'lucide-react'
+import ToggleSwitch from './ToggleSwitch'
 
 const ROW =
   'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 hover:border-gray-300 cursor-pointer transition-colors'
 const ROW_DISABLED =
   'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left text-sm font-medium text-gray-400 line-through cursor-not-allowed'
+const ROW_STATIC =
+  'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800'
 
 function InfoTip({ text }) {
   return (
@@ -54,6 +57,31 @@ function ActionRow({
   )
 }
 
+function ToggleRow({
+  icon: Icon,
+  label,
+  tip,
+  checked,
+  disabled = false,
+  onChange,
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <div className={ROW_STATIC}>
+        <Icon className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+        <span className="truncate flex-1">{label}</span>
+        <ToggleSwitch
+          checked={checked}
+          disabled={disabled}
+          onChange={onChange}
+          aria-label={label}
+        />
+      </div>
+      <InfoTip text={tip} />
+    </div>
+  )
+}
+
 /**
  * Student actions opened from the footer settings gear.
  */
@@ -62,29 +90,38 @@ export default function StudentSettingsModal({
   syncingGoogleContact = false,
   showBookLesson = false,
   bookLessonDisabled = false,
-  bookLessonLabel = 'Book lesson',
+  bookLessonLabel = 'Book Lesson',
   showCreateReserved = false,
   showManageGroup = false,
   showMarkHiatus = false,
+  showMarkActive = false,
+  markActiveBusy = false,
   highlightEdit = false,
   onBookLesson,
   onCreateReserved,
   onSyncGoogleContact,
   onManageGroup,
   onMarkHiatus,
+  onMarkActive,
   onEdit,
   onClose,
 }) {
+  const [markActiveOn, setMarkActiveOn] = useState(false)
+
+  useEffect(() => {
+    setMarkActiveOn(false)
+  }, [showMarkActive, studentName])
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape' && !syncingGoogleContact) onClose()
+      if (e.key === 'Escape' && !syncingGoogleContact && !markActiveBusy) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, syncingGoogleContact])
+  }, [onClose, syncingGoogleContact, markActiveBusy])
 
   const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !syncingGoogleContact) onClose()
+    if (e.target === e.currentTarget && !syncingGoogleContact && !markActiveBusy) onClose()
   }
 
   const runAndClose = (fn) => {
@@ -97,6 +134,17 @@ export default function StudentSettingsModal({
     if (typeof onSyncGoogleContact !== 'function' || syncingGoogleContact) return
     await onSyncGoogleContact()
     onClose()
+  }
+
+  const handleMarkActiveToggle = async (next) => {
+    if (!next || markActiveBusy || typeof onMarkActive !== 'function') return
+    setMarkActiveOn(true)
+    try {
+      await onMarkActive()
+      onClose()
+    } catch {
+      setMarkActiveOn(false)
+    }
   }
 
   return createPortal(
@@ -122,7 +170,7 @@ export default function StudentSettingsModal({
           <button
             type="button"
             onClick={onClose}
-            disabled={syncingGoogleContact}
+            disabled={syncingGoogleContact || markActiveBusy}
             className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
             aria-label="Close settings"
           >
@@ -172,9 +220,19 @@ export default function StudentSettingsModal({
           {showMarkHiatus && (
             <ActionRow
               icon={Coffee}
-              label="Mark on break (休会中)"
+              label="Mark on Break (休会中)"
               tip="この生徒を休会中にします"
               onClick={() => runAndClose(onMarkHiatus)}
+            />
+          )}
+          {showMarkActive && (
+            <ToggleRow
+              icon={UserCheck}
+              label="Mark Active"
+              tip="休会中の生徒を Active（再開）に戻します"
+              checked={markActiveOn}
+              disabled={markActiveBusy}
+              onChange={handleMarkActiveToggle}
             />
           )}
           <ActionRow
