@@ -7,7 +7,9 @@ const _NOTIFICATIONS_WIP_DISABLED = true
 /** When true, hide Messages (sidebar link, /messages) and skip deep-links from notifications. */
 const _MESSAGES_WIP_DISABLED = true
 /** When true, grey out + strikethrough booking CTAs and block the booking calendar. */
-const _BOOKING_WIP_DISABLED = true
+const _BOOKING_WIP_DISABLED = false
+/** When true, grey out Confirm one / Confirm all for 固定 (reserved) lessons. */
+const _RESERVED_CONFIRM_WIP_DISABLED = true
 
 // When set, only these guide slugs are enabled. Enables them even in production.
 // Use null to allow all guides (subject to GUIDES_WIP_HIDDEN).
@@ -42,4 +44,10 @@ export const MESSAGES_WIP_DISABLED = forceEnableMessages ? false : _MESSAGES_WIP
 // Optional: VITE_BOOKING_ENABLED=true in client/.env re-enables booking (restart Vite).
 const forceEnableBooking = import.meta.env.VITE_BOOKING_ENABLED === 'true'
 export const BOOKING_WIP_DISABLED = forceEnableBooking ? false : _BOOKING_WIP_DISABLED
+
+// Optional: VITE_RESERVED_CONFIRM_ENABLED=true in client/.env re-enables 固定 confirm (restart Vite).
+const forceEnableReservedConfirm = import.meta.env.VITE_RESERVED_CONFIRM_ENABLED === 'true'
+export const RESERVED_CONFIRM_WIP_DISABLED = forceEnableReservedConfirm
+  ? false
+  : _RESERVED_CONFIRM_WIP_DISABLED
 

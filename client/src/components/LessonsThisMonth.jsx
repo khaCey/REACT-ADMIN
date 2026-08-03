@@ -9,7 +9,7 @@ import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemo } from '../config/booking'
-import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
+import { BOOKING_WIP_DISABLED, RESERVED_CONFIRM_WIP_DISABLED } from '../guides/wipFlags'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
 
@@ -946,6 +946,7 @@ export default function LessonsThisMonth({
   }
 
   const handleConfirmOneWeek = async (lesson) => {
+    if (RESERVED_CONFIRM_WIP_DISABLED) return false
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
     if (confirmingSchedule) return false
     setActionError(null)
@@ -1023,6 +1024,7 @@ export default function LessonsThisMonth({
   }
 
   const handleConfirmAllWeeks = async (lesson) => {
+    if (RESERVED_CONFIRM_WIP_DISABLED) return false
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return false
     if (confirmingSchedule) return false
     setActionError(null)
