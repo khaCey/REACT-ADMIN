@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { handleGetWeek } from '../lib/booking/availabilityService.js';
 import { handleBookLesson } from '../lib/booking/bookLessonService.js';
 import { handleConfirmReserved } from '../lib/booking/confirmReservedService.js';
+import { handleMoveReserved } from '../lib/booking/moveReservedService.js';
+import { handleCreateReserved } from '../lib/booking/createReservedService.js';
 import {
   handleRenumberMonthTitles,
   renumberMonthLessonTitlesForStudent,
@@ -36,6 +38,8 @@ router.get('/booking-warning', async (req, res) => {
 router.get('/teachers', handleGetTeachers);
 router.post('/book', handleBookLesson);
 router.post('/confirm-reserved', handleConfirmReserved);
+router.post('/move-reserved', handleMoveReserved);
+router.post('/create-reserved', handleCreateReserved);
 router.post('/sync', handleSync);
 router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, handleRescheduleAwaitingDate);
 router.patch(/^\/(.+)\/cancel\/?$/, handleCancel);

@@ -26,6 +26,28 @@ function joinHumanNames(items) {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }
 
+/** True when any student is marked as a child / kids lesson. */
+export function studentsIncludeKids(students) {
+  return (students || []).some((student) => {
+    if (!student || typeof student === 'string') return false;
+    return !!(
+      student.is_child ||
+      student.is_kids_lesson ||
+      student.isKidsLesson ||
+      student.子 === '子'
+    );
+  });
+}
+
+/** Ensure a leading `子 ` prefix for kids titles (idempotent). */
+export function applyKidsTitlePrefix(title, students) {
+  const core = normalizeSpace(title);
+  if (!core) return core;
+  if (!studentsIncludeKids(students)) return core;
+  const without = core.replace(/^子\s+/, '').trim();
+  return without ? `子 ${without}` : '子';
+}
+
 export function formatOrderedStudentNames(students) {
   const parsed = (students || [])
     .map((student) =>
@@ -63,29 +85,36 @@ export function buildLessonTitleForOrderedStudents({
 }) {
   const names = formatOrderedStudentNames(students);
   const kind = String(lessonKind || '').trim().toLowerCase();
+  let title;
   if (kind === 'demo') {
-    return names ? `${names} D/L` : 'D/L';
+    title = names ? `${names} D/L` : 'D/L';
+  } else {
+    const location = normalizeSpace(locationLabel) || 'Cafe';
+    const number = Number.isFinite(Number(lessonNumber)) ? Number(lessonNumber) : 1;
+    const total = Number.isFinite(Number(totalLessons)) ? Number(totalLessons) : 1;
+    title = `${names} (${location}) ${number}/${total}`.trim();
   }
-  const location = normalizeSpace(locationLabel) || 'Cafe';
-  const number = Number.isFinite(Number(lessonNumber)) ? Number(lessonNumber) : 1;
-  const total = Number.isFinite(Number(totalLessons)) ? Number(totalLessons) : 1;
-  return `${names} (${location}) ${number}/${total}`.trim();
+  return applyKidsTitlePrefix(title, students);
 }
 
 export function rewriteLessonTitleStudentNames(existingCoreTitle, students) {
   const core = normalizeSpace(existingCoreTitle);
   const names = formatOrderedStudentNames(students);
-  if (!core) return names;
-  if (!names) return core;
+  if (!core) return applyKidsTitlePrefix(names, students);
+  if (!names) return applyKidsTitlePrefix(core, students);
 
-  if (/D\/L$/i.test(core)) {
-    return `${names} D/L`;
+  const coreWithoutKids = core.replace(/^子\s+/, '').trim();
+
+  let rewritten;
+  if (/D\/L$/i.test(coreWithoutKids)) {
+    rewritten = `${names} D/L`;
+  } else {
+    const numbered = coreWithoutKids.match(/\(([^)]+)\)\s+(\d+)\s*\/\s*(\d+)\s*$/);
+    if (numbered) {
+      rewritten = `${names} (${normalizeSpace(numbered[1]) || 'Cafe'}) ${numbered[2]}/${numbered[3]}`;
+    } else {
+      rewritten = names;
+    }
   }
-
-  const numbered = core.match(/\(([^)]+)\)\s+(\d+)\s*\/\s*(\d+)\s*$/);
-  if (numbered) {
-    return `${names} (${normalizeSpace(numbered[1]) || 'Cafe'}) ${numbered[2]}/${numbered[3]}`;
-  }
-
-  return names;
+  return applyKidsTitlePrefix(rewritten, students);
 }

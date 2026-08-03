@@ -6,6 +6,7 @@ import LessonDetailsModal from './LessonDetailsModal'
 import ConfirmActionModal from './ConfirmActionModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import RescheduleChoiceModal from './RescheduleChoiceModal'
+import MoveReservedModal from './MoveReservedModal'
 import { useToast } from '../context/ToastContext'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemo } from '../config/booking'
@@ -717,6 +718,7 @@ export default function LessonsThisMonth({
     }
   }, [data, selectedLessonKey, selectedLesson?.eventID])
   const [rescheduleChoiceLesson, setRescheduleChoiceLesson] = useState(null)
+  const [moveReservedLesson, setMoveReservedLesson] = useState(null)
   const [pendingRemoveLesson, setPendingRemoveLesson] = useState(null)
   const [actionError, setActionError] = useState(null)
   const [changeCountOpen, setChangeCountOpen] = useState(false)
@@ -885,6 +887,12 @@ export default function LessonsThisMonth({
     if ((lesson?.eventID || '').startsWith('unscheduled-')) return
     setSelectedLesson(null)
     openBookingReschedule(lesson)
+  }
+  const handleOpenMoveReservedDate = (lesson) => {
+    if ((lesson?.eventID || '').startsWith('unscheduled-')) return
+    const monthKey = findLessonMonthKey(serverData, lesson?.eventID) || activeMonth || ''
+    setActionError(null)
+    setMoveReservedLesson({ ...lesson, monthKey })
   }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
@@ -1498,6 +1506,7 @@ export default function LessonsThisMonth({
             findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
           }
           onRemove={handleRemove}
+          onMoveReservedDate={handleOpenMoveReservedDate}
           onBookLesson={
             onBookLesson
               ? () => {
@@ -1508,6 +1517,19 @@ export default function LessonsThisMonth({
               : undefined
           }
           onLessonNotesChanged={handleLessonNotesChanged}
+        />
+      )}
+      {moveReservedLesson && (
+        <MoveReservedModal
+          lesson={moveReservedLesson}
+          student={student}
+          onClose={() => setMoveReservedLesson(null)}
+          onMoved={async () => {
+            setMoveReservedLesson(null)
+            setSelectedLesson(null)
+            success('固定 date updated')
+            await refetchSilent()
+          }}
         />
       )}
       {rescheduleChoiceLesson && (

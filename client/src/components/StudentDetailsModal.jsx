@@ -16,6 +16,7 @@ import ModalLoadingOverlay from './ModalLoadingOverlay'
 import GroupLinkModal from './GroupLinkModal'
 import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
+import CreateReservedModal from './CreateReservedModal'
 
 class ModalErrorBoundary extends Component {
   state = { hasError: false, error: null }
@@ -72,6 +73,7 @@ export default function StudentDetailsModal({
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
   const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
+  const [createReservedOpen, setCreateReservedOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -592,6 +594,15 @@ export default function StudentDetailsModal({
                     {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
                   </button>
                 )}
+                {!bookingExcluded && (
+                  <button
+                    type="button"
+                    onClick={() => setCreateReservedOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-600 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 cursor-pointer"
+                  >
+                    Create 固定
+                  </button>
+                )}
                 {student?.Group === 'Group' && (
                   <button
                     type="button"
@@ -735,6 +746,17 @@ export default function StudentDetailsModal({
         submitting={markHiatusSubmitting}
         onClose={() => !markHiatusSubmitting && setMarkHiatusOpen(false)}
         onConfirm={handleMarkHiatusConfirm}
+      />
+    )}
+    {createReservedOpen && !bookingExcluded && (
+      <CreateReservedModal
+        studentId={studentId}
+        student={student}
+        onClose={() => setCreateReservedOpen(false)}
+        onCreated={() => {
+          setScheduleRefreshKey((k) => k + 1)
+          success('固定 hold created')
+        }}
       />
     )}
     </>,

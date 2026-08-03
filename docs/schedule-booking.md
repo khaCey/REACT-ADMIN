@@ -117,6 +117,41 @@ Each request confirms **one** reserved week (`event_id` = that occurrence’s ro
 
 **Implementation reference (do not regress):** [weekly-confirm-schedule-reference.md](./weekly-confirm-schedule-reference.md) — full algorithm, invariants, GAS flags, and “what not to revert” checklist.
 
+## Change date (one 固定 week)
+
+When a student cannot attend **one** reserved week, staff use **Change date** on that reserved lesson (not Reschedule). Status stays **`reserved`**.
+
+### `POST /api/schedule/move-reserved`
+
+| Field | Detail |
+|--------|--------|
+| Body | `event_id`, `date` (`YYYY-MM-DD`), `time` (`HH:MM`), optional `duration_minutes`, `location` |
+| Calendar | Create Banana (`colorId` 5) single event at new datetime → delete old yellow occurrence (`excludeEventIds`) → update DB row (new ids/date/time, still `reserved`) |
+| UI | `MoveReservedModal` from Lessons This Month; works while Book lesson WIP is disabled |
+
+## Create 固定
+
+### `POST /api/schedule/create-reserved`
+
+| Field | Detail |
+|--------|--------|
+| Body | `student_id`, `month` (`YYYY-MM`), `weekday` (1=Mon…7=Sun or 0=Sun) **or** `date`, `time`, optional `duration_minutes`, `location`, `teacher_name` |
+| Calendar | `reserved_hold_recurring_create` weekly until end of month |
+| DB | Inserts `reserved` rows for each occurrence (group members share `event_id` when linked) |
+| UI | **Create 固定** on student details → `CreateReservedModal` |
+
+## Kids title prefix (`子`)
+
+Lesson titles for child students are built with a leading **`子 `** in [`server/lib/groupLessonTitle.js`](../server/lib/groupLessonTitle.js) (book, confirm, renumber, create/move reserved). Example: `子 Ada (Cafe) 1/4`.
+
+## Manual QA (固定)
+
+1. **Create 固定** → yellow weeks appear for that weekday/time.
+2. **Change date** on one week → new date/time, still Reserved; other weeks unchanged.
+3. **Confirm one** on moved week → green at new datetime.
+4. **Confirm all** / **Remove** still follow the Confirm Schedule rules above.
+5. Kids confirm/create → Calendar title starts with `子`.
+
 ## Related code
 
 - Week data: `server/routes/schedule.js` → `GET /week`
