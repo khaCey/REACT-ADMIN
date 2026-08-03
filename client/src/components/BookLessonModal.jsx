@@ -1213,8 +1213,7 @@ export default function BookLessonModal({
                                           key={`preset-${b.preset_id}-${bi}`}
                                           type="button"
                                           className="booking-slot-break-chip relative z-10 rounded border border-amber-200/90 bg-amber-50/95 px-1 py-0.5 text-center text-[8px] font-semibold leading-tight text-amber-900 hover:bg-amber-100 hover:border-amber-300 cursor-pointer select-none w-full pointer-events-auto"
-                                          title="Move weekly break"
-                                          onClick={(e) => {
+                                          title="Move weekly break"                                          onClick={(e) => {
                                             e.preventDefault()
                                             e.stopPropagation()
                                             const start = String(b.preset_start_time || timeStr || '').slice(0, 5)
@@ -1237,8 +1236,7 @@ export default function BookLessonModal({
                                       <div
                                         key={`${b.teacher_name}-${bi}-${b.break_source || 'x'}`}
                                         className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-0.5 text-center text-[8px] font-medium leading-tight text-slate-600 select-none"
-                                        title="Calendar break (edit in Google Calendar)"
-                                      >
+                                        title="Calendar break (edit in Google Calendar)"                                      >
                                         {label}
                                       </div>
                                     )

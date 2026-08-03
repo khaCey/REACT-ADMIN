@@ -1,0 +1,32 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows, x64]
+
+    defaults:
+      run:
+        shell: cmd
+        working-directory: C:\GitHub\REACT-ADMIN
+
+    steps:
+      - name: Trust deployment repository
+        run: git config --global --add safe.directory C:/GitHub/REACT-ADMIN
+
+      - name: Pull latest main branch
+        run: git pull --ff-only origin main
+
+      - name: Build application
+        run: npm run build
+
