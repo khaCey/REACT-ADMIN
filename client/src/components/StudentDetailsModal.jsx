@@ -218,6 +218,9 @@ export default function StudentDetailsModal({
 
   useEffect(() => {
     if (!guideFocusKey) return
+    if (guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete') {
+      setStudentSettingsOpen(true)
+    }
     const t = setTimeout(() => setGuideFocusKey(null), 7000)
     return () => clearTimeout(t)
   }, [guideFocusKey])
@@ -566,67 +569,27 @@ export default function StudentDetailsModal({
               </section>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setStudentSettingsOpen(true)}
-                  className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 cursor-pointer"
-                  title="Student settings"
-                  aria-label="Student settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {!bookingExcluded && (
-                  <button
-                    type="button"
-                    onClick={openBookingFlow}
-                    disabled={BOOKING_WIP_DISABLED}
-                    title={BOOKING_WIP_DISABLED ? 'Booking is temporarily disabled' : undefined}
-                    className={
-                      BOOKING_WIP_DISABLED
-                        ? 'inline-flex items-center gap-1.5 rounded-lg bg-gray-300 text-gray-500 px-3 py-1.5 text-sm font-semibold line-through cursor-not-allowed'
-                        : 'inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-sm font-semibold hover:bg-blue-700 cursor-pointer'
-                    }
-                  >
-                    <Calendar className="w-4 h-4" />
-                    {studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
-                  </button>
-                )}
-                {!bookingExcluded && (
-                  <button
-                    type="button"
-                    onClick={() => setCreateReservedOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-600 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 cursor-pointer"
-                  >
-                    Create 固定
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
-                    setGuideFocusKey(null)
-                    setEditStudentModal(true)
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-gray-50 cursor-pointer ${
-                    guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'
-                      ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
-                      : ''
-                  }`}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={onClose}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 text-white px-3 py-1.5 text-sm font-semibold hover:bg-black cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
+            <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setStudentSettingsOpen(true)}
+                className={`inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 cursor-pointer ${
+                  guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'
+                    ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
+                    : ''
+                }`}
+                title="Student settings"
+                aria-label="Student settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 text-white px-3 py-1.5 text-sm font-semibold hover:bg-black cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </>
           </ModalErrorBoundary>
@@ -748,11 +711,23 @@ export default function StudentDetailsModal({
       <StudentSettingsModal
         studentName={student.Name}
         syncingGoogleContact={syncingGoogleContact}
+        showBookLesson={!bookingExcluded}
+        bookLessonDisabled={BOOKING_WIP_DISABLED}
+        bookLessonLabel={studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
+        showCreateReserved={!bookingExcluded}
         showManageGroup={student.Group === 'Group'}
         showMarkHiatus={student.Status === 'Active' || student.Status === 'Dormant'}
+        highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
+        onBookLesson={openBookingFlow}
+        onCreateReserved={() => setCreateReservedOpen(true)}
         onSyncGoogleContact={handleSyncGoogleContact}
         onManageGroup={handleOpenGroupLinkLesson}
         onMarkHiatus={() => setMarkHiatusOpen(true)}
+        onEdit={() => {
+          setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
+          setGuideFocusKey(null)
+          setEditStudentModal(true)
+        }}
         onClose={() => !syncingGoogleContact && setStudentSettingsOpen(false)}
       />
     )}

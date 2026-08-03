@@ -1,18 +1,26 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X } from 'lucide-react'
+import { X, Calendar } from 'lucide-react'
 
 /**
- * Secondary student admin actions (opened from the footer settings gear).
+ * Student actions opened from the footer settings gear.
  */
 export default function StudentSettingsModal({
   studentName,
   syncingGoogleContact = false,
+  showBookLesson = false,
+  bookLessonDisabled = false,
+  bookLessonLabel = 'Book lesson',
+  showCreateReserved = false,
   showManageGroup = false,
   showMarkHiatus = false,
+  highlightEdit = false,
+  onBookLesson,
+  onCreateReserved,
   onSyncGoogleContact,
   onManageGroup,
   onMarkHiatus,
+  onEdit,
   onClose,
 }) {
   useEffect(() => {
@@ -70,6 +78,34 @@ export default function StudentSettingsModal({
           </button>
         </header>
         <div className="px-4 py-3 space-y-2">
+          {showBookLesson && (
+            <button
+              type="button"
+              onClick={() => {
+                if (bookLessonDisabled) return
+                runAndClose(onBookLesson)
+              }}
+              disabled={bookLessonDisabled}
+              title={bookLessonDisabled ? 'Booking is temporarily disabled' : undefined}
+              className={
+                bookLessonDisabled
+                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
+                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer'
+              }
+            >
+              <Calendar className="w-4 h-4" />
+              {bookLessonLabel}
+            </button>
+          )}
+          {showCreateReserved && (
+            <button
+              type="button"
+              onClick={() => runAndClose(onCreateReserved)}
+              className="w-full inline-flex items-center justify-center rounded-lg border border-cyan-600 bg-white px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 cursor-pointer"
+            >
+              Create 固定
+            </button>
+          )}
           <button
             type="button"
             onClick={runSyncGoogleContact}
@@ -98,6 +134,17 @@ export default function StudentSettingsModal({
               Mark on break (休会中)
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => runAndClose(onEdit)}
+            className={`w-full inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer ${
+              highlightEdit
+                ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
+                : ''
+            }`}
+          >
+            Edit
+          </button>
         </div>
       </div>
     </div>,
