@@ -138,7 +138,7 @@ When a student cannot attend **one** reserved week, staff use **Change date** on
 | Body | `student_id`, `month` (`YYYY-MM`), `weekday` (1=Mon…7=Sun or 0=Sun) **or** `date`, `time`, optional `duration_minutes`, `location`, `teacher_name` |
 | Calendar | `reserved_hold_recurring_create` weekly until end of month |
 | DB | Inserts `reserved` rows for each occurrence (group members share `event_id` when linked) |
-| UI | **Create 固定** on student details → `CreateReservedModal` |
+| UI | Opens the booking week calendar in pick-only mode (`BookLessonModal` + `createReservedPick`); Confirm calls `create-reserved` (does **not** book a lesson). Works even while Book lesson WIP is disabled. |
 
 ## Kids title prefix (`子`)
 
@@ -146,7 +146,7 @@ Lesson titles for child students are built with a leading **`子 `** in [`server
 
 ## Manual QA (固定)
 
-1. **Create 固定** → yellow weeks appear for that weekday/time.
+1. **Create 固定** → booking calendar opens → pick slot → yellow weeks for that weekday/time.
 2. **Change date** on one week → booking calendar opens (availability only) → pick slot → still Reserved; other weeks unchanged.
 3. **Confirm one** on moved week → green at new datetime.
 4. **Confirm all** / **Remove** still follow the Confirm Schedule rules above.
