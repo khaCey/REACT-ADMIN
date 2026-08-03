@@ -4,7 +4,7 @@ import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { studentIsDemo } from '../config/booking'
-import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
+import { BOOKING_WIP_DISABLED, RESERVED_CONFIRM_WIP_DISABLED } from '../guides/wipFlags'
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
@@ -481,9 +481,21 @@ export default function LessonDetailsModal({
                 {canConfirmSchedule && typeof onConfirmOneWeek === 'function' && (
                   <button
                     type="button"
-                    onClick={() => setConfirmOneOpen(true)}
-                    disabled={confirmDialogOpen || isTransientBusy}
-                    className="rounded-md border border-cyan-600 bg-white px-3 py-1.5 text-sm font-medium text-cyan-800 hover:bg-cyan-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={() => {
+                      if (RESERVED_CONFIRM_WIP_DISABLED) return
+                      setConfirmOneOpen(true)
+                    }}
+                    disabled={RESERVED_CONFIRM_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={
+                      RESERVED_CONFIRM_WIP_DISABLED
+                        ? '固定 confirm is temporarily disabled'
+                        : undefined
+                    }
+                    className={
+                      RESERVED_CONFIRM_WIP_DISABLED
+                        ? 'rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md border border-cyan-600 bg-white px-3 py-1.5 text-sm font-medium text-cyan-800 hover:bg-cyan-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
                   >
                     Confirm one
                   </button>
@@ -491,9 +503,21 @@ export default function LessonDetailsModal({
                 {canConfirmSchedule && typeof onConfirmAllWeeks === 'function' && (
                   <button
                     type="button"
-                    onClick={() => setConfirmAllOpen(true)}
-                    disabled={confirmDialogOpen || isTransientBusy}
-                    className="rounded-md border border-cyan-700 bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={() => {
+                      if (RESERVED_CONFIRM_WIP_DISABLED) return
+                      setConfirmAllOpen(true)
+                    }}
+                    disabled={RESERVED_CONFIRM_WIP_DISABLED || confirmDialogOpen || isTransientBusy}
+                    title={
+                      RESERVED_CONFIRM_WIP_DISABLED
+                        ? '固定 confirm is temporarily disabled'
+                        : undefined
+                    }
+                    className={
+                      RESERVED_CONFIRM_WIP_DISABLED
+                        ? 'rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-500 line-through cursor-not-allowed'
+                        : 'rounded-md border border-cyan-700 bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-700 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed'
+                    }
                   >
                     Confirm all
                   </button>
