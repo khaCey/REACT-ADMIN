@@ -330,6 +330,21 @@ export default function StudentDetailsModal({
     }
   }, [fetchData, onStudentUpdated, studentId, success])
 
+  const handleMarkActiveFromHiatus = useCallback(async () => {
+    setMarkHiatusSubmitting(true)
+    try {
+      await api.patchStudentHiatus(studentId, { action: 'returned' })
+      success('Student set to Active (再開)')
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to set Active')
+      throw e
+    } finally {
+      setMarkHiatusSubmitting(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
+
   useEffect(() => {
     if (studentId == null) return
     const onKey = (e) => e.key === 'Escape' && onClose()
@@ -713,16 +728,19 @@ export default function StudentDetailsModal({
         syncingGoogleContact={syncingGoogleContact}
         showBookLesson={!bookingExcluded}
         bookLessonDisabled={BOOKING_WIP_DISABLED}
-        bookLessonLabel={studentIsDemo(student) ? 'Book demo lesson' : 'Book lesson'}
+        bookLessonLabel={studentIsDemo(student) ? 'Book Demo Lesson' : 'Book Lesson'}
         showCreateReserved={!bookingExcluded}
         showManageGroup={student.Group === 'Group'}
         showMarkHiatus={student.Status === 'Active' || student.Status === 'Dormant'}
+        showMarkActive={student.Status === '休会中'}
+        markActiveBusy={markHiatusSubmitting}
         highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
         onBookLesson={openBookingFlow}
         onCreateReserved={() => setCreateReservedOpen(true)}
         onSyncGoogleContact={handleSyncGoogleContact}
         onManageGroup={handleOpenGroupLinkLesson}
         onMarkHiatus={() => setMarkHiatusOpen(true)}
+        onMarkActive={handleMarkActiveFromHiatus}
         onEdit={() => {
           setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
           setGuideFocusKey(null)
