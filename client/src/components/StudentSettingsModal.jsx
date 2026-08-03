@@ -1,11 +1,58 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil } from 'lucide-react'
+import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil, Info } from 'lucide-react'
 
 const ROW =
-  'w-full inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 hover:border-gray-300 cursor-pointer transition-colors'
+  'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 hover:border-gray-300 cursor-pointer transition-colors'
 const ROW_DISABLED =
-  'w-full inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left text-sm font-medium text-gray-400 line-through cursor-not-allowed'
+  'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left text-sm font-medium text-gray-400 line-through cursor-not-allowed'
+
+function InfoTip({ text }) {
+  return (
+    <span className="relative group/tip shrink-0">
+      <button
+        type="button"
+        className="inline-flex items-center justify-center rounded-full p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-help"
+        aria-label={text}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Info className="w-3.5 h-3.5" aria-hidden />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute right-0 bottom-full z-[1] mb-1.5 w-52 rounded-md bg-gray-900 px-2.5 py-1.5 text-xs font-normal leading-snug text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100 group-focus-within/tip:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  )
+}
+
+function ActionRow({
+  icon: Icon,
+  label,
+  tip,
+  disabled = false,
+  highlight = false,
+  onClick,
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={`${disabled ? ROW_DISABLED : ROW} ${
+          highlight ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50' : ''
+        }`}
+      >
+        <Icon className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+        <span className="truncate">{label}</span>
+      </button>
+      <InfoTip text={tip} />
+    </div>
+  )
+}
 
 /**
  * Student actions opened from the footer settings gear.
@@ -78,87 +125,65 @@ export default function StudentSettingsModal({
             disabled={syncingGoogleContact}
             className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
             aria-label="Close settings"
-            title="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </header>
         <div className="px-4 py-3 space-y-1.5">
           {showBookLesson && (
-            <button
-              type="button"
-              onClick={() => {
-                if (bookLessonDisabled) return
-                runAndClose(onBookLesson)
-              }}
-              disabled={bookLessonDisabled}
-              title={
+            <ActionRow
+              icon={Calendar}
+              label={bookLessonLabel}
+              tip={
                 bookLessonDisabled
                   ? 'Booking is temporarily disabled'
                   : 'Open the calendar to book a lesson for this student'
               }
-              className={bookLessonDisabled ? ROW_DISABLED : ROW}
-            >
-              <Calendar className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-              <span>{bookLessonLabel}</span>
-            </button>
+              disabled={bookLessonDisabled}
+              onClick={() => {
+                if (bookLessonDisabled) return
+                runAndClose(onBookLesson)
+              }}
+            />
           )}
           {showCreateReserved && (
-            <button
-              type="button"
+            <ActionRow
+              icon={CalendarRange}
+              label="Create 固定"
+              tip="Create a weekly 固定 (reserved) hold for this student"
               onClick={() => runAndClose(onCreateReserved)}
-              title="Create a weekly 固定 (reserved) hold for this student"
-              className={ROW}
-            >
-              <CalendarRange className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-              <span>Create 固定</span>
-            </button>
+            />
           )}
-          <button
-            type="button"
-            onClick={runSyncGoogleContact}
+          <ActionRow
+            icon={Contact}
+            label={syncingGoogleContact ? 'Syncing…' : 'Sync Google Contact'}
+            tip="Create or update this student’s Google Contact"
             disabled={syncingGoogleContact}
-            title="Create or update this student’s Google Contact"
-            className={syncingGoogleContact ? ROW_DISABLED : ROW}
-          >
-            <Contact className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-            <span>{syncingGoogleContact ? 'Syncing…' : 'Sync Google Contact'}</span>
-          </button>
+            onClick={runSyncGoogleContact}
+          />
           {showManageGroup && (
-            <button
-              type="button"
+            <ActionRow
+              icon={Users}
+              label="Manage Group Members"
+              tip="Link or unlink students in this group lesson"
               onClick={() => runAndClose(onManageGroup)}
-              title="Link or unlink students in this group lesson"
-              className={ROW}
-            >
-              <Users className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-              <span>Manage Group Members</span>
-            </button>
+            />
           )}
           {showMarkHiatus && (
-            <button
-              type="button"
+            <ActionRow
+              icon={Coffee}
+              label="Mark on break (休会中)"
+              tip="Mark this student as on break (休会中)"
               onClick={() => runAndClose(onMarkHiatus)}
-              title="Mark this student as on break (休会中)"
-              className={ROW}
-            >
-              <Coffee className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-              <span>Mark on break (休会中)</span>
-            </button>
+            />
           )}
-          <button
-            type="button"
+          <ActionRow
+            icon={Pencil}
+            label="Edit"
+            tip="Edit student profile details"
+            highlight={highlightEdit}
             onClick={() => runAndClose(onEdit)}
-            title="Edit student profile details"
-            className={`${ROW} ${
-              highlightEdit
-                ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
-                : ''
-            }`}
-          >
-            <Pencil className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
-            <span>Edit</span>
-          </button>
+          />
         </div>
       </div>
     </div>,
