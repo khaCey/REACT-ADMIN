@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Plus, Calendar } from 'lucide-react'
+import { X, Plus, Calendar, Settings } from 'lucide-react'
 import { api } from '../api'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
@@ -17,6 +17,7 @@ import GroupLinkModal from './GroupLinkModal'
 import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
 import CreateReservedModal from './CreateReservedModal'
+import StudentSettingsModal from './StudentSettingsModal'
 
 class ModalErrorBoundary extends Component {
   state = { hasError: false, error: null }
@@ -74,6 +75,7 @@ export default function StudentDetailsModal({
   const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
   const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
   const [createReservedOpen, setCreateReservedOpen] = useState(false)
+  const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -564,20 +566,19 @@ export default function StudentDetailsModal({
               </section>
             </div>
 
-            <div className="flex items-center justify-between px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
-              <div />
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleSyncGoogleContact}
-                  disabled={syncingGoogleContact}
-                  className={`inline-flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-3 py-1.5 text-sm font-semibold ${
-                    syncingGoogleContact ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 cursor-pointer'
-                  }`}
-                  title="Create or resync this student's Google Contact"
+                  onClick={() => setStudentSettingsOpen(true)}
+                  className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  title="Student settings"
+                  aria-label="Student settings"
                 >
-                  {syncingGoogleContact ? 'Syncing...' : 'Create/Resync Google Contact'}
+                  <Settings className="w-4 h-4" />
                 </button>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 {!bookingExcluded && (
                   <button
                     type="button"
@@ -603,24 +604,8 @@ export default function StudentDetailsModal({
                     Create 固定
                   </button>
                 )}
-                {student?.Group === 'Group' && (
-                  <button
-                    type="button"
-                    onClick={handleOpenGroupLinkLesson}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-600 bg-white px-3 py-1.5 text-sm font-semibold text-purple-700 hover:bg-purple-50 cursor-pointer"
-                  >
-                    Manage Group Members
-                  </button>
-                )}
-                {(student?.Status === 'Active' || student?.Status === 'Dormant') && (
-                  <button
-                    type="button"
-                    onClick={() => setMarkHiatusOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-green-600 bg-white px-3 py-1.5 text-sm font-semibold text-green-700 hover:bg-green-50 cursor-pointer"
-                  >
-                    Mark on break (休会中)
-                  </button>
-                )}
+              </div>
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
@@ -757,6 +742,18 @@ export default function StudentDetailsModal({
           setScheduleRefreshKey((k) => k + 1)
           success('固定 hold created')
         }}
+      />
+    )}
+    {studentSettingsOpen && student && (
+      <StudentSettingsModal
+        studentName={student.Name}
+        syncingGoogleContact={syncingGoogleContact}
+        showManageGroup={student.Group === 'Group'}
+        showMarkHiatus={student.Status === 'Active' || student.Status === 'Dormant'}
+        onSyncGoogleContact={handleSyncGoogleContact}
+        onManageGroup={handleOpenGroupLinkLesson}
+        onMarkHiatus={() => setMarkHiatusOpen(true)}
+        onClose={() => !syncingGoogleContact && setStudentSettingsOpen(false)}
       />
     )}
     </>,
