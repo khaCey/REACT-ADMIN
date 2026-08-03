@@ -127,7 +127,7 @@ When a student cannot attend **one** reserved week, staff use **Change date** on
 |--------|--------|
 | Body | `event_id`, `date` (`YYYY-MM-DD`), `time` (`HH:MM`), optional `duration_minutes`, `location` |
 | Calendar | Create Banana (`colorId` 5) single event at new datetime → delete old yellow occurrence (`excludeEventIds`) → update DB row (new ids/date/time, still `reserved`) |
-| UI | `MoveReservedModal` from Lessons This Month; works while Book lesson WIP is disabled |
+| UI | Opens the booking week calendar in pick-only mode (`BookLessonModal` + `moveReservedSource`); Confirm calls `move-reserved` (does **not** book a new lesson). Works even while Book lesson WIP is disabled. |
 
 ## Create 固定
 
@@ -147,7 +147,7 @@ Lesson titles for child students are built with a leading **`子 `** in [`server
 ## Manual QA (固定)
 
 1. **Create 固定** → yellow weeks appear for that weekday/time.
-2. **Change date** on one week → new date/time, still Reserved; other weeks unchanged.
+2. **Change date** on one week → booking calendar opens (availability only) → pick slot → still Reserved; other weeks unchanged.
 3. **Confirm one** on moved week → green at new datetime.
 4. **Confirm all** / **Remove** still follow the Confirm Schedule rules above.
 5. Kids confirm/create → Calendar title starts with `子`.
