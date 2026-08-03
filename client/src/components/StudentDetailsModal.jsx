@@ -569,7 +569,7 @@ export default function StudentDetailsModal({
               </section>
             </div>
 
-            <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
+            <div className="flex items-center justify-end gap-2 px-4 sm:px-6 py-2 bg-gray-50 border-t border-gray-200 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => setStudentSettingsOpen(true)}
