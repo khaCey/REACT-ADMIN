@@ -9,7 +9,7 @@ const _MESSAGES_WIP_DISABLED = true
 /** When true, grey out + strikethrough booking CTAs and block the booking calendar. */
 const _BOOKING_WIP_DISABLED = false
 /** When true, grey out Confirm one / Confirm all for 固定 (reserved) lessons. */
-const _RESERVED_CONFIRM_WIP_DISABLED = true
+const _RESERVED_CONFIRM_WIP_DISABLED = false
 
 // When set, only these guide slugs are enabled. Enables them even in production.
 // Use null to allow all guides (subject to GUIDES_WIP_HIDDEN).
