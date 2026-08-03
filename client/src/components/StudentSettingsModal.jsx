@@ -136,8 +136,8 @@ export default function StudentSettingsModal({
               label={bookLessonLabel}
               tip={
                 bookLessonDisabled
-                  ? 'Booking is temporarily disabled'
-                  : 'Open the calendar to book a lesson for this student'
+                  ? '予約機能は一時的に無効です'
+                  : 'カレンダーを開いてこの生徒のレッスンを予約します'
               }
               disabled={bookLessonDisabled}
               onClick={() => {
@@ -150,14 +150,14 @@ export default function StudentSettingsModal({
             <ActionRow
               icon={CalendarRange}
               label="Create 固定"
-              tip="Create a weekly 固定 (reserved) hold for this student"
+              tip="この生徒の毎週の固定（予約済み）ホールドを作成します"
               onClick={() => runAndClose(onCreateReserved)}
             />
           )}
           <ActionRow
             icon={Contact}
             label={syncingGoogleContact ? 'Syncing…' : 'Sync Google Contact'}
-            tip="Create or update this student’s Google Contact"
+            tip="この生徒の Google 連絡先を作成または更新します"
             disabled={syncingGoogleContact}
             onClick={runSyncGoogleContact}
           />
@@ -165,7 +165,7 @@ export default function StudentSettingsModal({
             <ActionRow
               icon={Users}
               label="Manage Group Members"
-              tip="Link or unlink students in this group lesson"
+              tip="このグループレッスンの生徒をリンク／解除します"
               onClick={() => runAndClose(onManageGroup)}
             />
           )}
@@ -173,14 +173,14 @@ export default function StudentSettingsModal({
             <ActionRow
               icon={Coffee}
               label="Mark on break (休会中)"
-              tip="Mark this student as on break (休会中)"
+              tip="この生徒を休会中にします"
               onClick={() => runAndClose(onMarkHiatus)}
             />
           )}
           <ActionRow
             icon={Pencil}
             label="Edit"
-            tip="Edit student profile details"
+            tip="生徒のプロフィール情報を編集します"
             highlight={highlightEdit}
             onClick={() => runAndClose(onEdit)}
           />
