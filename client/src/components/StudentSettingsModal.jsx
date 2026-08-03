@@ -1,6 +1,11 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Calendar } from 'lucide-react'
+import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil } from 'lucide-react'
+
+const ROW =
+  'w-full inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 hover:border-gray-300 cursor-pointer transition-colors'
+const ROW_DISABLED =
+  'w-full inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left text-sm font-medium text-gray-400 line-through cursor-not-allowed'
 
 /**
  * Student actions opened from the footer settings gear.
@@ -61,7 +66,7 @@ export default function StudentSettingsModal({
         <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
           <div className="min-w-0">
             <h2 id="student-settings-title" className="text-base font-semibold text-gray-900">
-              Student settings
+              Settings
             </h2>
             {studentName ? (
               <p className="text-xs text-gray-500 truncate mt-0.5">{studentName}</p>
@@ -72,12 +77,13 @@ export default function StudentSettingsModal({
             onClick={onClose}
             disabled={syncingGoogleContact}
             className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
-            aria-label="Close"
+            aria-label="Close settings"
+            title="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </header>
-        <div className="px-4 py-3 space-y-2">
+        <div className="px-4 py-3 space-y-1.5">
           {showBookLesson && (
             <button
               type="button"
@@ -86,64 +92,72 @@ export default function StudentSettingsModal({
                 runAndClose(onBookLesson)
               }}
               disabled={bookLessonDisabled}
-              title={bookLessonDisabled ? 'Booking is temporarily disabled' : undefined}
-              className={
+              title={
                 bookLessonDisabled
-                  ? 'w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-300 px-3 py-2 text-sm font-semibold text-gray-500 line-through cursor-not-allowed'
-                  : 'w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 cursor-pointer'
+                  ? 'Booking is temporarily disabled'
+                  : 'Open the calendar to book a lesson for this student'
               }
+              className={bookLessonDisabled ? ROW_DISABLED : ROW}
             >
-              <Calendar className="w-4 h-4" />
-              {bookLessonLabel}
+              <Calendar className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+              <span>{bookLessonLabel}</span>
             </button>
           )}
           {showCreateReserved && (
             <button
               type="button"
               onClick={() => runAndClose(onCreateReserved)}
-              className="w-full inline-flex items-center justify-center rounded-lg border border-cyan-600 bg-white px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 cursor-pointer"
+              title="Create a weekly 固定 (reserved) hold for this student"
+              className={ROW}
             >
-              Create 固定
+              <CalendarRange className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+              <span>Create 固定</span>
             </button>
           )}
           <button
             type="button"
             onClick={runSyncGoogleContact}
             disabled={syncingGoogleContact}
-            className={`w-full inline-flex items-center justify-center rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white ${
-              syncingGoogleContact ? 'opacity-70 cursor-not-allowed' : 'hover:bg-green-700 cursor-pointer'
-            }`}
+            title="Create or update this student’s Google Contact"
+            className={syncingGoogleContact ? ROW_DISABLED : ROW}
           >
-            {syncingGoogleContact ? 'Syncing…' : 'Sync Google Contact'}
+            <Contact className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+            <span>{syncingGoogleContact ? 'Syncing…' : 'Sync Google Contact'}</span>
           </button>
           {showManageGroup && (
             <button
               type="button"
               onClick={() => runAndClose(onManageGroup)}
-              className="w-full inline-flex items-center justify-center rounded-lg border border-purple-600 bg-white px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 cursor-pointer"
+              title="Link or unlink students in this group lesson"
+              className={ROW}
             >
-              Manage Group Members
+              <Users className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+              <span>Manage Group Members</span>
             </button>
           )}
           {showMarkHiatus && (
             <button
               type="button"
               onClick={() => runAndClose(onMarkHiatus)}
-              className="w-full inline-flex items-center justify-center rounded-lg border border-green-600 bg-white px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 cursor-pointer"
+              title="Mark this student as on break (休会中)"
+              className={ROW}
             >
-              Mark on break (休会中)
+              <Coffee className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+              <span>Mark on break (休会中)</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => runAndClose(onEdit)}
-            className={`w-full inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer ${
+            title="Edit student profile details"
+            className={`${ROW} ${
               highlightEdit
                 ? 'relative z-[30] ring-4 ring-yellow-300 animate-pulse shadow-xl bg-yellow-50'
                 : ''
             }`}
           >
-            Edit
+            <Pencil className="w-4 h-4 shrink-0 text-gray-500" aria-hidden />
+            <span>Edit</span>
           </button>
         </div>
       </div>
