@@ -359,8 +359,8 @@ router.post('/break-presets', requireAuth, requireAdminOrOperator, async (req, r
   }
 });
 
-/** PUT /api/shifts/break-presets/:id */
-router.put('/break-presets/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
+/** PUT /api/shifts/break-presets/:id — any signed-in staff (booking calendar Move Break). */
+router.put('/break-presets/:id', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid preset id' });

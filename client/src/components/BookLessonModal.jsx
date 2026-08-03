@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Coffee } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
 import PreBookLessonModal from './PreBookLessonModal'
 import { useToast } from '../context/ToastContext'
-import { useAuth } from '../context/AuthContext'
 import { endTimeOneHourAfterStart } from '../utils/breakPresetTime.js'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemo } from '../config/booking'
@@ -15,6 +14,8 @@ const TIME_SLOTS = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00
 /** Matches POST /schedule/book default `duration_minutes` and `/schedule/week` overlap preview. */
 const WEEK_SCHEDULE_DURATION_MINUTES = 50
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+/** 0=Sun … 6=Sat — matches server `teacher_break_presets.weekday`. */
+const BREAK_WEEKDAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 
@@ -331,12 +332,7 @@ export default function BookLessonModal({
   onOptimisticScheduleMutation,
 }) {
   const { success } = useToast()
-  const { staff } = useAuth()
   const { lastSynced } = useCalendarPollingContext()
-  const canEditBreakPresets =
-    !!staff?.is_admin ||
-    !!staff?.is_operator ||
-    String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const [moveBreakModal, setMoveBreakModal] = useState(null)
   const [moveBreakSaving, setMoveBreakSaving] = useState(false)
   const [weekStartStr, setWeekStartStr] = useState(getMondayJstStr)
@@ -910,11 +906,15 @@ export default function BookLessonModal({
 
   const handleSaveMoveBreak = async () => {
     if (!moveBreakModal) return
-    const { preset_id, teacher_name, weekday, start_time } = moveBreakModal
+    const { preset_id, teacher_name, weekday, start_time, original_start_time } = moveBreakModal
     const st = String(start_time || '').slice(0, 5)
     const et = endTimeOneHourAfterStart(st)
-    if (!/^\d{2}:\d{2}$/.test(st) || !et) {
-      setError('Start time must be HH:MM.')
+    if (!TIME_SLOTS.includes(st) || !et) {
+      setError('Choose a break hour from the list.')
+      return
+    }
+    if (st === String(original_start_time || '').slice(0, 5)) {
+      setMoveBreakModal(null)
       return
     }
     setMoveBreakSaving(true)
@@ -927,15 +927,24 @@ export default function BookLessonModal({
         end_time: et,
         active: true,
       })
-      success('Break preset updated')
+      success(`${String(teacher_name || '').trim() || 'Teacher'}'s break moved to ${st}`)
       setMoveBreakModal(null)
       await refetchWeekSchedule()
     } catch (e) {
-      setError(e?.message || 'Failed to update break preset')
+      setError(e?.message || 'Failed to update break')
     } finally {
       setMoveBreakSaving(false)
     }
   }
+
+  useEffect(() => {
+    if (!moveBreakModal) return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !moveBreakSaving) setMoveBreakModal(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [moveBreakModal, moveBreakSaving])
 
   const studentName = student?.Name || student?.name || 'Student'
   const studentKanji = student?.['漢字'] || student?.name_kanji || ''
@@ -1198,22 +1207,24 @@ export default function BookLessonModal({
                                     const label = formatBreakChipLabel(b)
                                     const isPreset =
                                       b.preset_id != null && Number.isFinite(Number(b.preset_id))
-                                    if (canEditBreakPresets && isPreset) {
+                                    if (isPreset) {
                                       return (
                                         <button
                                           key={`preset-${b.preset_id}-${bi}`}
                                           type="button"
-                                          className="booking-slot-break-chip relative z-10 rounded border border-slate-200/70 bg-slate-50/95 px-1 py-0.5 text-center text-[8px] font-medium leading-tight text-slate-700 hover:bg-slate-100 cursor-pointer select-none w-full pointer-events-auto"
-                                          title="Move recurring break preset"
-                                          onClick={(e) => {
+                                          className="booking-slot-break-chip relative z-10 rounded border border-amber-200/90 bg-amber-50/95 px-1 py-0.5 text-center text-[8px] font-semibold leading-tight text-amber-900 hover:bg-amber-100 hover:border-amber-300 cursor-pointer select-none w-full pointer-events-auto"
+                                          title="Move weekly break"                                          onClick={(e) => {
                                             e.preventDefault()
                                             e.stopPropagation()
+                                            const start = String(b.preset_start_time || timeStr || '').slice(0, 5)
                                             setMoveBreakModal({
                                               preset_id: Number(b.preset_id),
                                               teacher_name: b.teacher_name,
                                               weekday: Number(b.preset_weekday),
-                                              start_time: String(b.preset_start_time || '').slice(0, 5),
+                                              start_time: start,
                                               end_time: String(b.preset_end_time || '').slice(0, 5),
+                                              original_start_time: start,
+                                              slot_date: dateStr,
                                             })
                                           }}
                                         >
@@ -1225,14 +1236,7 @@ export default function BookLessonModal({
                                       <div
                                         key={`${b.teacher_name}-${bi}-${b.break_source || 'x'}`}
                                         className="booking-slot-break-chip rounded border border-slate-200/70 bg-slate-50/95 px-1 py-0.5 text-center text-[8px] font-medium leading-tight text-slate-600 select-none"
-                                        title={
-                                          b.break_source === 'schedule'
-                                            ? 'Calendar break (edit in Google Calendar)'
-                                            : !canEditBreakPresets && isPreset
-                                              ? 'Admin/operator can move this break'
-                                              : b.title || undefined
-                                        }
-                                      >
+                                        title="Calendar break (edit in Google Calendar)"                                      >
                                         {label}
                                       </div>
                                     )
@@ -1368,55 +1372,132 @@ export default function BookLessonModal({
           }}
         />
       )}
-      {moveBreakModal && (
-        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="moveBreakTitle">
+      {moveBreakModal && (() => {
+        const teacher = String(moveBreakModal.teacher_name || '').trim() || 'Teacher'
+        const weekdayNum = Number(moveBreakModal.weekday)
+        const weekdayLabel = Number.isFinite(weekdayNum)
+          ? BREAK_WEEKDAY_FULL[weekdayNum] || 'This day'
+          : 'This day'
+        const original = String(moveBreakModal.original_start_time || '').slice(0, 5)
+        const selected = String(moveBreakModal.start_time || '').slice(0, 5)
+        const selectedEnd = endTimeOneHourAfterStart(selected)
+        const originalEnd = endTimeOneHourAfterStart(original)
+        const unchanged = selected === original
+        return (
           <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => !moveBreakSaving && setMoveBreakModal(null)}
-            aria-hidden="true"
-          />
-          <div className="relative w-full max-w-sm rounded-xl bg-white shadow-xl ring-1 ring-black/5 p-5">
-            <h4 id="moveBreakTitle" className="text-base font-semibold text-gray-900">
-              Move Break
-            </h4>
-            <p className="text-sm text-gray-800 mt-1 mb-4 font-medium">{moveBreakModal.teacher_name}</p>
-            <div className="space-y-3">
-              <label className="block">
-                <span className="text-xs font-medium text-gray-700">Start (1 hour)</span>
-                <input
-                  type="time"
-                  className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
-                  value={moveBreakModal.start_time}
+            className="fixed inset-0 z-[10001] flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="moveBreakTitle"
+          >
+            <div
+              className="absolute inset-0 bg-black/45"
+              onClick={() => !moveBreakSaving && setMoveBreakModal(null)}
+              aria-hidden="true"
+            />
+            <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden">
+              <div className="px-5 pt-5 pb-4 border-b border-amber-100 bg-gradient-to-br from-amber-50 to-white">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800 ring-1 ring-amber-200/80">
+                    <Coffee className="w-5 h-5" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 id="moveBreakTitle" className="text-lg font-semibold text-gray-900 leading-tight">
+                      Move {teacher}&apos;s break
+                    </h4>
+                    <p className="text-sm text-gray-600 mt-1 leading-snug">
+                      Weekly on <span className="font-medium text-gray-800">{weekdayLabel}s</span>
+                      {' · '}1 hour
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-5 py-4 space-y-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    Now
+                  </p>
+                  <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                    {original}
+                    {originalEnd ? ` – ${originalEnd}` : ''}
+                  </p>
+                  {!unchanged && selectedEnd && (
+                    <p className="mt-2 text-sm text-emerald-800">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700/80 block mb-0.5">
+                        After save
+                      </span>
+                      <span className="font-semibold tabular-nums">
+                        {selected} – {selectedEnd}
+                      </span>
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium text-gray-800 mb-2">Choose a new hour</p>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-4">
+                    {TIME_SLOTS.map((slot) => {
+                      const isCurrent = slot === original
+                      const isSelected = slot === selected
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          disabled={moveBreakSaving}
+                          onClick={() =>
+                            setMoveBreakModal((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    start_time: slot,
+                                    end_time: endTimeOneHourAfterStart(slot),
+                                  }
+                                : prev
+                            )
+                          }
+                          className={`rounded-lg px-2 py-2.5 text-sm font-semibold tabular-nums transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white ring-2 ring-emerald-600 ring-offset-1'
+                              : isCurrent
+                                ? 'bg-amber-50 text-amber-950 ring-1 ring-amber-300 hover:bg-amber-100'
+                                : 'bg-white text-gray-800 ring-1 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300'
+                          }`}
+                        >
+                          {slot}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-2.5 text-xs text-gray-500 leading-relaxed">
+                    Applies every {weekdayLabel} for this teacher (booking calendar + capacity).
+                    Google Calendar events are not edited here.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/80">
+                <button
+                  type="button"
+                  className="rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
                   disabled={moveBreakSaving}
-                  onChange={(e) =>
-                    setMoveBreakModal((prev) =>
-                      prev ? { ...prev, start_time: e.target.value.slice(0, 5) } : prev
-                    )
-                  }
-                />
-              </label>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                disabled={moveBreakSaving}
-                onClick={() => setMoveBreakModal(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                disabled={moveBreakSaving}
-                onClick={handleSaveMoveBreak}
-              >
-                {moveBreakSaving ? 'Saving…' : 'Save'}
-              </button>
+                  onClick={() => setMoveBreakModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  disabled={moveBreakSaving || unchanged}
+                  onClick={handleSaveMoveBreak}
+                >
+                  {moveBreakSaving ? 'Saving…' : unchanged ? 'Pick a different hour' : `Move to ${selected}`}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </>,
     document.body
   )
