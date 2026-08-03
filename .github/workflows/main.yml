@@ -30,5 +30,3 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Restart all PM2 processes
-        run: pm2 restart all
