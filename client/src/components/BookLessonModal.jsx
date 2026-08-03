@@ -349,6 +349,8 @@ export default function BookLessonModal({
   rescheduleSource = null,
   /** When set, calendar is pick-only: one slot → move this 固定 week (no book/reschedule). */
   moveReservedSource = null,
+  /** When true, calendar is pick-only: one slot → create weekly 固定 hold for that weekday/time (no book). */
+  createReservedPick = false,
   onClose,
   onBooked,
   onOptimisticScheduleMutation,
@@ -358,7 +360,8 @@ export default function BookLessonModal({
   const [moveBreakModal, setMoveBreakModal] = useState(null)
   const [moveBreakSaving, setMoveBreakSaving] = useState(false)
   const isMoveReservedPick = Boolean(moveReservedSource)
-  const isSingleSlotPick = Boolean(rescheduleSource || moveReservedSource)
+  const isCreateReservedPick = Boolean(createReservedPick)
+  const isSingleSlotPick = Boolean(rescheduleSource || moveReservedSource || createReservedPick)
   const [weekStartStr, setWeekStartStr] = useState(() => {
     const seed = lessonDateYyyyMmDd(moveReservedSource || rescheduleSource)
     return seed ? getMondayOfDateStr(seed) : getMondayJstStr()
@@ -638,6 +641,40 @@ export default function BookLessonModal({
     }
     if (selectedSlotKeys.length === 0) {
       setError('Please select one or more slots first.')
+      return
+    }
+    if (isCreateReservedPick) {
+      if (selectedSlotKeys.length !== 1) {
+        setError('Select exactly one available slot for the 固定 weekday and time.')
+        return
+      }
+      const [date, time] = selectedSlotKeys[0].split('T')
+      const month = String(date || '').slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(month) || !/^\d{2}:\d{2}$/.test(time)) {
+        setError('Invalid date or time')
+        return
+      }
+      setSubmitting(true)
+      setError(null)
+      setHideBookingCalendar(true)
+      try {
+        await api.createReservedSchedule({
+          student_id: sidRaw,
+          month,
+          date,
+          time,
+          duration_minutes: 50,
+          location: 'Cafe',
+        })
+        onBooked?.({ eventIds: [] })
+        success('固定 hold created')
+        onClose?.()
+      } catch (e) {
+        setError(e?.message || 'Failed to create 固定')
+        setHideBookingCalendar(false)
+      } finally {
+        setSubmitting(false)
+      }
       return
     }
     if (isMoveReservedPick) {
@@ -1061,18 +1098,22 @@ export default function BookLessonModal({
           <header className="shrink-0 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-5 py-3 border-b border-gray-200">
             <div className="min-w-0 flex-1">
               <h3 id="bookLessonTitle" className="text-lg font-semibold text-gray-900 leading-tight">
-                {isMoveReservedPick
-                  ? 'Change date (固定)'
-                  : rescheduleSource
-                    ? 'Reschedule lesson'
-                    : isDemoStudent
-                      ? 'Book a Demo Lesson'
-                      : 'Book a New Lesson'}
+                {isCreateReservedPick
+                  ? 'Create 固定'
+                  : isMoveReservedPick
+                    ? 'Change date (固定)'
+                    : rescheduleSource
+                      ? 'Reschedule lesson'
+                      : isDemoStudent
+                        ? 'Book a Demo Lesson'
+                        : 'Book a New Lesson'}
               </h3>
               <p className="text-xs text-gray-600 mt-0.5">
-                {isMoveReservedPick
-                  ? `${studentName}${studentKanji ? ` (${studentKanji})` : ''} — pick an available slot. This moves the reserved week only (does not book a new lesson).`
-                  : `${studentName} ${studentKanji ? `(${studentKanji})` : ''}`}
+                {isCreateReservedPick
+                  ? `${studentName}${studentKanji ? ` (${studentKanji})` : ''} — pick an available slot. Creates weekly yellow holds for that weekday/time in that month (does not book a lesson).`
+                  : isMoveReservedPick
+                    ? `${studentName}${studentKanji ? ` (${studentKanji})` : ''} — pick an available slot. This moves the reserved week only (does not book a new lesson).`
+                    : `${studentName} ${studentKanji ? `(${studentKanji})` : ''}`}
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 ml-auto">
@@ -1334,13 +1375,15 @@ export default function BookLessonModal({
             >
               {submitting
                 ? 'Submitting...'
-                : isMoveReservedPick
-                  ? 'Change date'
-                  : rescheduleSource
-                    ? 'Confirm reschedule'
-                    : isDemoStudent
-                      ? `Book demo lesson (${selectedSlotKeys.length})`
-                      : `Submit selected (${selectedSlotKeys.length})`}
+                : isCreateReservedPick
+                  ? 'Create 固定'
+                  : isMoveReservedPick
+                    ? 'Change date'
+                    : rescheduleSource
+                      ? 'Confirm reschedule'
+                      : isDemoStudent
+                        ? `Book demo lesson (${selectedSlotKeys.length})`
+                        : `Submit selected (${selectedSlotKeys.length})`}
             </button>
             <button
               type="button"

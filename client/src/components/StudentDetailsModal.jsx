@@ -16,7 +16,6 @@ import ModalLoadingOverlay from './ModalLoadingOverlay'
 import GroupLinkModal from './GroupLinkModal'
 import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
-import CreateReservedModal from './CreateReservedModal'
 import StudentSettingsModal from './StudentSettingsModal'
 
 class ModalErrorBoundary extends Component {
@@ -76,7 +75,7 @@ export default function StudentDetailsModal({
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
   const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
-  const [createReservedOpen, setCreateReservedOpen] = useState(false)
+  const [createReservedPick, setCreateReservedPick] = useState(false)
   const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
@@ -91,13 +90,14 @@ export default function StudentDetailsModal({
       setBookLessonModal(false)
       setPreBookLessonModal(false)
       setMoveReservedSourceLesson(null)
+      setCreateReservedPick(false)
       return
     }
-    if (BOOKING_WIP_DISABLED && !moveReservedSourceLesson) {
+    if (BOOKING_WIP_DISABLED && !moveReservedSourceLesson && !createReservedPick) {
       setBookLessonModal(false)
       setPreBookLessonModal(false)
     }
-  }, [bookingExcluded, moveReservedSourceLesson])
+  }, [bookingExcluded, moveReservedSourceLesson, createReservedPick])
 
   useEffect(() => {
     setScheduleRefreshKey(0)
@@ -273,6 +273,16 @@ export default function StudentDetailsModal({
       setGuideFocusKey(null)
       setRescheduleSourceLesson(null)
       setMoveReservedSourceLesson(moveSource)
+      setCreateReservedPick(false)
+      setOverridePaidLessons(null)
+      setBookLessonModal(true)
+      return
+    }
+    if (opts?.createReservedPick) {
+      setGuideFocusKey(null)
+      setRescheduleSourceLesson(null)
+      setMoveReservedSourceLesson(null)
+      setCreateReservedPick(true)
       setOverridePaidLessons(null)
       setBookLessonModal(true)
       return
@@ -282,6 +292,7 @@ export default function StudentDetailsModal({
     setGuideFocusKey(null)
     setRescheduleSourceLesson(source)
     setMoveReservedSourceLesson(null)
+    setCreateReservedPick(false)
     if (source) {
       setOverridePaidLessons(null)
       setBookLessonModal(true)
@@ -669,7 +680,7 @@ export default function StudentDetailsModal({
         }}
       />
     )}
-    {bookLessonModal && !bookingExcluded && (!BOOKING_WIP_DISABLED || moveReservedSourceLesson) && (
+    {bookLessonModal && !bookingExcluded && (!BOOKING_WIP_DISABLED || moveReservedSourceLesson || createReservedPick) && (
       <BookLessonModal
         studentId={studentId}
         student={student}
@@ -681,11 +692,13 @@ export default function StudentDetailsModal({
           setOverridePaidLessons(null)
           setRescheduleSourceLesson(null)
           setMoveReservedSourceLesson(null)
+          setCreateReservedPick(false)
         }}
         onBooked={handleBooked}
         onOptimisticScheduleMutation={handleOptimisticScheduleMutation}
         rescheduleSource={rescheduleSourceLesson}
         moveReservedSource={moveReservedSourceLesson}
+        createReservedPick={createReservedPick}
       />
     )}
     {preBookLessonModal && !bookingExcluded && !BOOKING_WIP_DISABLED && (
@@ -731,17 +744,6 @@ export default function StudentDetailsModal({
         onConfirm={handleMarkHiatusConfirm}
       />
     )}
-    {createReservedOpen && !bookingExcluded && (
-      <CreateReservedModal
-        studentId={studentId}
-        student={student}
-        onClose={() => setCreateReservedOpen(false)}
-        onCreated={() => {
-          setScheduleRefreshKey((k) => k + 1)
-          success('固定 hold created')
-        }}
-      />
-    )}
     {studentSettingsOpen && student && (
       <StudentSettingsModal
         studentName={student.Name}
@@ -756,7 +758,7 @@ export default function StudentDetailsModal({
         markActiveBusy={markHiatusSubmitting}
         highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
         onBookLesson={openBookingFlow}
-        onCreateReserved={() => setCreateReservedOpen(true)}
+        onCreateReserved={() => openBookingFlow({ createReservedPick: true })}
         onSyncGoogleContact={handleSyncGoogleContact}
         onManageGroup={handleOpenGroupLinkLesson}
         onMarkHiatus={() => setMarkHiatusOpen(true)}
