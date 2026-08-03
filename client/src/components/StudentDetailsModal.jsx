@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Plus, Calendar, Settings } from 'lucide-react'
+import { X, Plus, Settings } from 'lucide-react'
 import { api } from '../api'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
