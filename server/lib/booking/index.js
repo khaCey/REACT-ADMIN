@@ -25,6 +25,8 @@ export {
 } from './cancelRescheduleService.js';
 export { handleRemoveLesson } from './removeLessonService.js';
 export { handleConfirmReserved } from './confirmReservedService.js';
+export { handleMoveReserved } from './moveReservedService.js';
+export { handleCreateReserved } from './createReservedService.js';
 export {
   handleRenumberMonthTitles,
   renumberMonthLessonTitlesForStudent,

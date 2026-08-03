@@ -296,7 +296,14 @@ export async function createBookedLessonEventInGas(args) {
     bookingKey ? `BookingSyncKey: ${bookingKey}` : null,
   ].filter(Boolean);
 
-  const explicitColorId = bookingEventColorId(lessonKind);
+  const explicitColorId =
+    args?.colorId != null && String(args.colorId).trim() !== ''
+      ? String(args.colorId).trim()
+      : bookingEventColorId(lessonKind);
+  const description =
+    args?.description != null && String(args.description).trim() !== ''
+      ? String(args.description).trim()
+      : descLines.join('\n');
   const payload = {
     action: 'lesson_book_create',
     lessonKind,
@@ -304,7 +311,7 @@ export async function createBookedLessonEventInGas(args) {
     title: args?.title || '',
     start: args?.startIso,
     end: args?.endIso,
-    description: descLines.join('\n'),
+    description,
     location: args?.location || '',
     bookingKey,
     source: 'student-admin-server',

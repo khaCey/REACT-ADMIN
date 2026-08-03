@@ -37,6 +37,7 @@ export default function LessonDetailsModal({
   confirmScheduleMonthKey,
   onRemove,
   onBookLesson,
+  onMoveReservedDate,
   onLessonNotesChanged,
 }) {
   const { success } = useToast()
@@ -201,6 +202,11 @@ export default function LessonDetailsModal({
     !isUnscheduled &&
     !isCancelled &&
     !isRescheduled &&
+    status === 'reserved' &&
+    calendarSyncStatus === 'synced'
+  const canMoveReservedDate =
+    typeof onMoveReservedDate === 'function' &&
+    !isTransientBusy &&
     status === 'reserved' &&
     calendarSyncStatus === 'synced'
   const canReschedule =
@@ -520,6 +526,16 @@ export default function LessonDetailsModal({
                     }
                   >
                     Confirm all
+                  </button>
+                )}
+                {canMoveReservedDate && (
+                  <button
+                    type="button"
+                    onClick={() => onMoveReservedDate(lesson, student)}
+                    disabled={confirmDialogOpen || isTransientBusy}
+                    className="rounded-md border border-amber-600 bg-white px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Change date
                   </button>
                 )}
                 {typeof onRemove === 'function' && (

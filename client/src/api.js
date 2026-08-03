@@ -242,6 +242,12 @@ export const api = {
    */
   confirmReservedSchedule: (body) =>
     fetchApi('/schedule/confirm-reserved', { method: 'POST', body: JSON.stringify(body) }),
+  /** Move one reserved (固定) week to a new date/time; stays reserved. */
+  moveReservedSchedule: (body) =>
+    fetchApi('/schedule/move-reserved', { method: 'POST', body: JSON.stringify(body) }),
+  /** Create a weekly reserved (固定) hold for a student/month. */
+  createReservedSchedule: (body) =>
+    fetchApi('/schedule/create-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */
   renumberMonthLessonTitles: (body) =>
     fetchApi('/schedule/renumber-month-titles', { method: 'POST', body: JSON.stringify(body) }),
