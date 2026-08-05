@@ -1,6 +1,17 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Calendar, CalendarRange, Contact, Users, Coffee, Pencil, Info, UserCheck } from 'lucide-react'
+import {
+  X,
+  Calendar,
+  CalendarRange,
+  Contact,
+  Users,
+  Coffee,
+  Pencil,
+  Info,
+  UserCheck,
+  MessageSquareQuote,
+} from 'lucide-react'
 
 const ROW =
   'flex-1 min-w-0 inline-flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 hover:border-gray-300 cursor-pointer transition-colors'
@@ -57,6 +68,7 @@ function ActionRow({
 /**
  * Student actions opened from the footer settings gear.
  * Mark on Break / Mark Active are mutually exclusive by student status.
+ * Mark 口コミ済 / Clear 口コミ are mutually exclusive by HasReview.
  */
 export default function StudentSettingsModal({
   studentName,
@@ -69,6 +81,9 @@ export default function StudentSettingsModal({
   showMarkHiatus = false,
   showMarkActive = false,
   markActiveBusy = false,
+  showMarkReview = false,
+  showClearReview = false,
+  reviewBusy = false,
   highlightEdit = false,
   onBookLesson,
   onCreateReserved,
@@ -76,19 +91,23 @@ export default function StudentSettingsModal({
   onManageGroup,
   onMarkHiatus,
   onMarkActive,
+  onMarkReview,
+  onClearReview,
   onEdit,
   onClose,
 }) {
+  const busy = syncingGoogleContact || markActiveBusy || reviewBusy
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape' && !syncingGoogleContact && !markActiveBusy) onClose()
+      if (e.key === 'Escape' && !busy) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, syncingGoogleContact, markActiveBusy])
+  }, [onClose, busy])
 
   const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !syncingGoogleContact && !markActiveBusy) onClose()
+    if (e.target === e.currentTarget && !busy) onClose()
   }
 
   const runAndClose = (fn) => {
@@ -106,6 +125,18 @@ export default function StudentSettingsModal({
   const runMarkActive = async () => {
     if (typeof onMarkActive !== 'function' || markActiveBusy) return
     await onMarkActive()
+    onClose()
+  }
+
+  const runMarkReview = async () => {
+    if (typeof onMarkReview !== 'function' || reviewBusy) return
+    await onMarkReview()
+    onClose()
+  }
+
+  const runClearReview = async () => {
+    if (typeof onClearReview !== 'function' || reviewBusy) return
+    await onClearReview()
     onClose()
   }
 
@@ -132,7 +163,7 @@ export default function StudentSettingsModal({
           <button
             type="button"
             onClick={onClose}
-            disabled={syncingGoogleContact || markActiveBusy}
+            disabled={busy}
             className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 cursor-pointer disabled:opacity-50"
             aria-label="Close settings"
           >
@@ -194,6 +225,24 @@ export default function StudentSettingsModal({
               tip="休会中の生徒を Active（再開）に戻します"
               disabled={markActiveBusy}
               onClick={runMarkActive}
+            />
+          )}
+          {showMarkReview && (
+            <ActionRow
+              icon={MessageSquareQuote}
+              label={reviewBusy ? 'Saving…' : 'Mark 口コミ済'}
+              tip="この生徒を口コミリストに追加します"
+              disabled={reviewBusy}
+              onClick={runMarkReview}
+            />
+          )}
+          {showClearReview && (
+            <ActionRow
+              icon={MessageSquareQuote}
+              label={reviewBusy ? 'Saving…' : 'Clear 口コミ'}
+              tip="この生徒を口コミリストから外します"
+              disabled={reviewBusy}
+              onClick={runClearReview}
             />
           )}
           <ActionRow

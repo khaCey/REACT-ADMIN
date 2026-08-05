@@ -49,6 +49,7 @@ function mapStudentRow(r) {
     HiatusContacted: !!r.hiatus_contacted,
     HiatusExpectedReturn: formatDateColumn(r.hiatus_expected_return),
     HiatusOtsukisha: !!r.hiatus_otsukisha,
+    HasReview: !!r.has_review,
   };
 }
 
@@ -129,6 +130,20 @@ router.get('/hiatus', async (req, res) => {
         WHERE TRIM(COALESCE(status, '')) = $1
         ORDER BY hiatus_expected_return NULLS LAST, name ASC NULLS LAST, id ASC`,
       [HIATUS_STATUS]
+    );
+    res.json((result.rows || []).map(mapStudentRow));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Students marked as having left a 口コミ (review). */
+router.get('/reviews', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT * FROM students
+        WHERE has_review = TRUE
+        ORDER BY name ASC NULLS LAST, id ASC`
     );
     res.json((result.rows || []).map(mapStudentRow));
   } catch (err) {
@@ -471,6 +486,46 @@ router.put('/:id', async (req, res) => {
       req
     );
     res.json({ ok: true, googleContactSync });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Manual 口コミ (review) flag. */
+router.patch('/:id/review', async (req, res) => {
+  try {
+    const studentId = Number(req.params.id);
+    if (!Number.isFinite(studentId) || !Number.isInteger(studentId) || studentId < 0) {
+      return res.status(400).json({ error: 'Invalid student id' });
+    }
+    if (req.body?.has_review === undefined && req.body?.hasReview === undefined) {
+      return res.status(400).json({ error: 'has_review is required' });
+    }
+    const hasReview = !!(req.body?.has_review !== undefined ? req.body.has_review : req.body.hasReview);
+
+    const oldResult = await query('SELECT * FROM students WHERE id = $1', [studentId]);
+    if (oldResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    const oldRow = oldResult.rows[0];
+
+    await query(
+      `UPDATE students SET has_review = $2, updated_at = NOW() WHERE id = $1`,
+      [studentId, hasReview]
+    );
+
+    const newRow = (await query('SELECT * FROM students WHERE id = $1', [studentId])).rows[0];
+    await logChange(
+      {
+        entityType: 'students',
+        entityKey: String(studentId),
+        action: 'update',
+        oldData: oldRow,
+        newData: newRow,
+      },
+      req
+    );
+    res.json({ ok: true, student: mapStudentRow(newRow) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

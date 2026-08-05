@@ -75,6 +75,7 @@ export default function StudentDetailsModal({
   const [syncingGoogleContact, setSyncingGoogleContact] = useState(false)
   const [markHiatusOpen, setMarkHiatusOpen] = useState(false)
   const [markHiatusSubmitting, setMarkHiatusSubmitting] = useState(false)
+  const [reviewBusy, setReviewBusy] = useState(false)
   const [createReservedPick, setCreateReservedPick] = useState(false)
   const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
@@ -371,6 +372,36 @@ export default function StudentDetailsModal({
       throw e
     } finally {
       setMarkHiatusSubmitting(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
+
+  const handleMarkReview = useCallback(async () => {
+    setReviewBusy(true)
+    try {
+      await api.patchStudentReview(studentId, { has_review: true })
+      success('Marked 口コミ済 — listed under 口コミリスト')
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to mark 口コミ')
+      throw e
+    } finally {
+      setReviewBusy(false)
+    }
+  }, [fetchData, onStudentUpdated, studentId, success])
+
+  const handleClearReview = useCallback(async () => {
+    setReviewBusy(true)
+    try {
+      await api.patchStudentReview(studentId, { has_review: false })
+      success('Cleared 口コミ — removed from 口コミリスト')
+      await fetchData({ silent: true })
+      onStudentUpdated?.()
+    } catch (e) {
+      setError(e.message || 'Failed to clear 口コミ')
+      throw e
+    } finally {
+      setReviewBusy(false)
     }
   }, [fetchData, onStudentUpdated, studentId, success])
 
@@ -756,6 +787,9 @@ export default function StudentDetailsModal({
         showMarkHiatus={student.Status === 'Active' || student.Status === 'Dormant'}
         showMarkActive={student.Status === '休会中'}
         markActiveBusy={markHiatusSubmitting}
+        showMarkReview={!student.HasReview}
+        showClearReview={!!student.HasReview}
+        reviewBusy={reviewBusy}
         highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
         onBookLesson={openBookingFlow}
         onCreateReserved={() => openBookingFlow({ createReservedPick: true })}
@@ -763,12 +797,14 @@ export default function StudentDetailsModal({
         onManageGroup={handleOpenGroupLinkLesson}
         onMarkHiatus={() => setMarkHiatusOpen(true)}
         onMarkActive={handleMarkActiveFromHiatus}
+        onMarkReview={handleMarkReview}
+        onClearReview={handleClearReview}
         onEdit={() => {
           setGuideHighlightDeleteInEdit(guideFocusKey === 'student-delete')
           setGuideFocusKey(null)
           setEditStudentModal(true)
         }}
-        onClose={() => !syncingGoogleContact && setStudentSettingsOpen(false)}
+        onClose={() => !syncingGoogleContact && !reviewBusy && setStudentSettingsOpen(false)}
       />
     )}
     </>,
