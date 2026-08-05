@@ -167,7 +167,7 @@ export default function Navbar({ onToggleSidebar }) {
             <Menu className="w-6 h-6" />
           </button>
           <Link to="/students" className="text-xl font-semibold">
-            Green Square
+            Green Square Admin
           </Link>
         </div>
         <div className="flex items-center space-x-3 relative" ref={dropdownRef}>
