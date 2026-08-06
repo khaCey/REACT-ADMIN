@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Calendar,
   Coffee,
+  MessageSquareQuote,
 } from 'lucide-react'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
@@ -26,6 +27,7 @@ export default function Sidebar({
   onOpenUnpaid,
   onOpenUnscheduled,
   onOpenHiatus,
+  onOpenReviews,
 }) {
   const location = useLocation()
   const { staff } = useAuth()
@@ -33,7 +35,7 @@ export default function Sidebar({
   const isAdmin = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
   const isOperator = !!staff?.is_operator
   const canAccessStaff = isAdmin || isOperator
-  const hasListActions = !!(onOpenUnpaid || onOpenUnscheduled || onOpenHiatus)
+  const hasListActions = !!(onOpenUnpaid || onOpenUnscheduled || onOpenHiatus || onOpenReviews)
 
   return (
     <aside
@@ -136,6 +138,18 @@ export default function Sidebar({
                 >
                   <Coffee className="w-5 h-5" />
                   <span>休会中</span>
+                </button>
+              </li>
+            )}
+            {onOpenReviews && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onOpenReviews}
+                  className={`${navItemClass(false)} w-full text-left`}
+                >
+                  <MessageSquareQuote className="w-5 h-5" />
+                  <span>口コミリスト</span>
                 </button>
               </li>
             )}

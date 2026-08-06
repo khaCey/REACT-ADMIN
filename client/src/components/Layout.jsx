@@ -6,6 +6,7 @@ import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import FeatureListModal from './FeatureListModal'
 import HiatusStudentsModal from './HiatusStudentsModal'
+import ReviewStudentsModal from './ReviewStudentsModal'
 import PostLoginUnreadModal from './PostLoginUnreadModal'
 import StudentDetailsModal from './StudentDetailsModal'
 
@@ -71,6 +72,7 @@ export default function Layout() {
         onOpenUnpaid={() => setFeatureModalMode('unpaid')}
         onOpenUnscheduled={() => setFeatureModalMode('unscheduled')}
         onOpenHiatus={() => setFeatureModalMode('hiatus')}
+        onOpenReviews={() => setFeatureModalMode('reviews')}
       />
       <main
         id="mainContent"
@@ -84,7 +86,7 @@ export default function Layout() {
           </div>
         </div>
       </main>
-      {featureModalMode && featureModalMode !== 'hiatus' && (
+      {featureModalMode && featureModalMode !== 'hiatus' && featureModalMode !== 'reviews' && (
         <FeatureListModal
           mode={featureModalMode}
           onClose={() => setFeatureModalMode(null)}
@@ -92,6 +94,9 @@ export default function Layout() {
       )}
       {featureModalMode === 'hiatus' && (
         <HiatusStudentsModal onClose={() => setFeatureModalMode(null)} />
+      )}
+      {featureModalMode === 'reviews' && (
+        <ReviewStudentsModal onClose={() => setFeatureModalMode(null)} />
       )}
       {showPostLoginUnread && staff && !NOTIFICATIONS_WIP_DISABLED && (
         <PostLoginUnreadModal open onClose={closePostLoginUnread} />

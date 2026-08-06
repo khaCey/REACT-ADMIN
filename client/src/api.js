@@ -27,6 +27,9 @@ export const api = {
   getHiatusStudents: () => fetchApi('/students/hiatus'),
   patchStudentHiatus: (id, body) =>
     fetchApi(`/students/${id}/hiatus`, { method: 'PATCH', body: JSON.stringify(body) }),
+  getReviewStudents: () => fetchApi('/students/reviews'),
+  patchStudentReview: (id, body) =>
+    fetchApi(`/students/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   getStudent: (id) => fetchApi(`/students/${id}`),
   getStudentGroup: (id) => fetchApi(`/students/${id}/group`),
   saveStudentGroup: (id, body) =>
