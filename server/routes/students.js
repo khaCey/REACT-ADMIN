@@ -50,6 +50,7 @@ function mapStudentRow(r) {
     HiatusExpectedReturn: formatDateColumn(r.hiatus_expected_return),
     HiatusOtsukisha: !!r.hiatus_otsukisha,
     HasReview: !!r.has_review,
+    ReviewFreeDrink: !!r.review_free_drink,
   };
 }
 
@@ -491,17 +492,27 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-/** Manual 口コミ (review) flag. */
+/** Manual 口コミ (review) flag + Free Drink toggle. */
 router.patch('/:id/review', async (req, res) => {
   try {
     const studentId = Number(req.params.id);
     if (!Number.isFinite(studentId) || !Number.isInteger(studentId) || studentId < 0) {
       return res.status(400).json({ error: 'Invalid student id' });
     }
-    if (req.body?.has_review === undefined && req.body?.hasReview === undefined) {
-      return res.status(400).json({ error: 'has_review is required' });
+    const body = req.body || {};
+    const hasReviewRaw = body.has_review !== undefined ? body.has_review : body.hasReview;
+    const freeDrinkRaw =
+      body.free_drink !== undefined
+        ? body.free_drink
+        : body.freeDrink !== undefined
+          ? body.freeDrink
+          : body.review_free_drink !== undefined
+            ? body.review_free_drink
+            : body.reviewFreeDrink;
+
+    if (hasReviewRaw === undefined && freeDrinkRaw === undefined) {
+      return res.status(400).json({ error: 'has_review or free_drink is required' });
     }
-    const hasReview = !!(req.body?.has_review !== undefined ? req.body.has_review : req.body.hasReview);
 
     const oldResult = await query('SELECT * FROM students WHERE id = $1', [studentId]);
     if (oldResult.rows.length === 0) {
@@ -509,10 +520,32 @@ router.patch('/:id/review', async (req, res) => {
     }
     const oldRow = oldResult.rows[0];
 
-    await query(
-      `UPDATE students SET has_review = $2, updated_at = NOW() WHERE id = $1`,
-      [studentId, hasReview]
-    );
+    const updates = [];
+    const params = [studentId];
+    let idx = 2;
+
+    if (hasReviewRaw !== undefined) {
+      const hasReview = !!hasReviewRaw;
+      updates.push(`has_review = $${idx}`);
+      params.push(hasReview);
+      idx += 1;
+      // Clearing 口コミ also clears Free Drink.
+      if (!hasReview) {
+        updates.push(`review_free_drink = FALSE`);
+      }
+    }
+    if (freeDrinkRaw !== undefined) {
+      updates.push(`review_free_drink = $${idx}`);
+      params.push(!!freeDrinkRaw);
+      idx += 1;
+      // Turning Free Drink on implies student is on the 口コミ list.
+      if (!!freeDrinkRaw && hasReviewRaw === undefined && !oldRow.has_review) {
+        updates.push(`has_review = TRUE`);
+      }
+    }
+    updates.push('updated_at = NOW()');
+
+    await query(`UPDATE students SET ${updates.join(', ')} WHERE id = $1`, params);
 
     const newRow = (await query('SELECT * FROM students WHERE id = $1', [studentId])).rows[0];
     await logChange(
