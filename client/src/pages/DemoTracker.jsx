@@ -82,17 +82,31 @@ export default function DemoTracker() {
   }, [fetchList])
 
   useEffect(() => {
-    if (!addOpen) return undefined
     let cancelled = false
-    Promise.all([api.getStudents(), api.getStaff().catch(() => ({ staff: [] }))])
-      .then(([students, staffRes]) => {
+    api
+      .getStaff()
+      .then((staffRes) => {
         if (cancelled) return
-        setAllStudents(Array.isArray(students) ? students : [])
         const staff = Array.isArray(staffRes?.staff) ? staffRes.staff : []
         const names = staff
           .map((s) => String(s.name || s.Name || '').trim())
           .filter(Boolean)
         setStaffNames([...new Set(names)].sort((a, b) => a.localeCompare(b)))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!addOpen) return undefined
+    let cancelled = false
+    api
+      .getStudents()
+      .then((students) => {
+        if (cancelled) return
+        setAllStudents(Array.isArray(students) ? students : [])
       })
       .catch((e) => {
         if (!cancelled) setError(e.message)
@@ -131,6 +145,27 @@ export default function DemoTracker() {
       })
     } catch (e) {
       setError(e.message || 'Failed to update Signed up')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleTeacherSave = async (row, nextRaw) => {
+    const next = String(nextRaw ?? '').trim()
+    const prev = String(row.teacher_name || '').trim()
+    if (next === prev) return
+    setBusyId(row.id)
+    setError(null)
+    try {
+      const res = await api.patchDemoTrackerEvent(row.id, { teacher_name: next || null })
+      const updated = res?.event
+      setRows((prevRows) =>
+        prevRows.map((r) =>
+          r.id === row.id ? { ...r, ...(updated || { teacher_name: next || null }) } : r
+        )
+      )
+    } catch (e) {
+      setError(e.message || 'Failed to update teacher')
     } finally {
       setBusyId(null)
     }
@@ -332,11 +367,6 @@ export default function DemoTracker() {
                 placeholder="Teacher name"
                 className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
               />
-              <datalist id="demo-tracker-teachers">
-                {staffNames.map((n) => (
-                  <option key={n} value={n} />
-                ))}
-              </datalist>
             </label>
             <label className="block text-sm">
               <span className="font-medium text-gray-700">Demo date</span>
@@ -362,6 +392,12 @@ export default function DemoTracker() {
       {error && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
+
+      <datalist id="demo-tracker-teachers">
+        {staffNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
 
       <div className="relative overflow-hidden rounded-xl border border-gray-200 bg-white">
         {loading && (
@@ -409,7 +445,21 @@ export default function DemoTracker() {
                         <div className="text-xs text-gray-500">{r.student_kanji}</div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{r.teacher_name || '—'}</td>
+                    <td className="px-4 py-3">
+                      <input
+                        list="demo-tracker-teachers"
+                        defaultValue={r.teacher_name || ''}
+                        key={`${r.id}-${r.teacher_name || ''}`}
+                        disabled={rowBusy}
+                        placeholder="Set teacher…"
+                        onBlur={(e) => handleTeacherSave(r, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                        }}
+                        className="w-full min-w-[8rem] max-w-[12rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-gray-800 hover:border-gray-300 focus:border-green-500 focus:bg-white focus:outline-none disabled:opacity-50"
+                        aria-label={`Teacher for ${r.student_name || r.id}`}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{r.student_status || '—'}</td>
                     <td className="px-4 py-3 text-center">
                       <div className="inline-flex justify-center">
