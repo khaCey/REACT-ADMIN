@@ -32,6 +32,7 @@ import {
   isBookingGasEnabled,
   shouldProceedWithDbOnlyCalendarDelete,
   isGasCalendarEventMissingError,
+  isGasReservedRemoveCalendarAlreadyGone,
   isGasCalendarDeleteUnreachableError,
   interpretGasDeleteResultForDbRemove,
   gasDeleteConfirmedInCalendar,
@@ -157,16 +158,29 @@ export async function handleRemoveLesson(req, res) {
       }
 
       let calendarCancel = null;
+      let calendarAlreadyGone = false;
       if (!localOnlyRemove && isBookingGasEnabled() && rowsShouldAttemptGasCalendarDelete(oldRows)) {
         // Cancel this one Calendar occurrence only (GAS patches status=cancelled; never removes series).
         calendarCancel = await deleteReservedPlaceholderForWeek(oldRows);
         if (!calendarCancel.ok) {
-          return res.status(502).json({
-            error: calendarCancel.error || 'Failed to cancel reserved calendar occurrence',
-            event_id: eventId,
-            series_master_id: bareSeriesMasterFromScheduleRow(oldRows[0]) || null,
-            ...(calendarCancel.gas_revision ? { gas_script_revision: calendarCancel.gas_revision } : {}),
-          });
+          const cancelErr = calendarCancel.error || 'Failed to cancel reserved calendar occurrence';
+          // Calendar instance already gone — still clear the local 固定 row.
+          if (isGasReservedRemoveCalendarAlreadyGone(cancelErr)) {
+            calendarAlreadyGone = true;
+            calendarCancel = {
+              ...calendarCancel,
+              ok: true,
+              error: null,
+              already_gone: true,
+            };
+          } else {
+            return res.status(502).json({
+              error: cancelErr,
+              event_id: eventId,
+              series_master_id: bareSeriesMasterFromScheduleRow(oldRows[0]) || null,
+              ...(calendarCancel.gas_revision ? { gas_script_revision: calendarCancel.gas_revision } : {}),
+            });
+          }
         }
       }
 
@@ -196,7 +210,8 @@ export async function handleRemoveLesson(req, res) {
         event_id: eventId,
         reserved_single: true,
         removed_row_count: primaryDeleted.rowCount || 0,
-        calendar_cancelled: Boolean(calendarCancel?.ok),
+        calendar_cancelled: Boolean(calendarCancel?.ok) && !calendarAlreadyGone,
+        ...(calendarAlreadyGone ? { calendar_already_gone: true } : {}),
         ...(calendarCancel?.gas_event_id ? { calendar_event_id: calendarCancel.gas_event_id } : {}),
         ...(calendarCancel?.gas_revision ? { gas_script_revision: calendarCancel.gas_revision } : {}),
       });

@@ -1225,9 +1225,11 @@ export default function LessonsThisMonth({
         )
       } else {
         success(
-          calendarWarning
-            ? '予約済みレッスンを削除しました（カレンダーは未反映の可能性があります）'
-            : '予約済みレッスンを削除しました'
+          removeResult?.calendar_already_gone
+            ? '予約済みレッスンを削除しました（カレンダー上は既にありませんでした）'
+            : calendarWarning
+              ? '予約済みレッスンを削除しました（カレンダーは未反映の可能性があります）'
+              : '予約済みレッスンを削除しました'
         )
       }
       if (

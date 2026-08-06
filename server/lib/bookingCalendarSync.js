@@ -58,7 +58,9 @@ const DEFAULT_TIMEOUT_MS = 60000;
 export function isGasCalendarEventMissingError(errorMessage) {
   const msg = String(errorMessage || '').trim().toLowerCase();
   if (!msg) return false;
-  // Lookup failed — the occurrence may still exist. Do not treat as already-deleted.
+  // Lookup failed — the occurrence may still exist. Do not treat as already-deleted
+  // for confirm-reserved (strict placeholder delete). Reserved *Remove* uses
+  // `isGasReservedRemoveCalendarAlreadyGone` instead.
   if (msg.includes('occurrence not found')) return false;
   if (msg.includes('refusing to delete series master')) return false;
   return (
@@ -78,6 +80,20 @@ export function isGasCalendarEventMissingError(errorMessage) {
     (msg.includes('remove series failed') && msg.includes('not found')) ||
     (msg.includes('not found') && msg.includes('calendar'))
   );
+}
+
+/**
+ * Reserved Remove only: Calendar occurrence is already gone (or GAS blocked with
+ * instance-remove-not-found). Safe to delete the local monthly_schedule row.
+ * Do not use for confirm-reserved placeholder deletes.
+ */
+export function isGasReservedRemoveCalendarAlreadyGone(errorMessage) {
+  const msg = String(errorMessage || '').trim().toLowerCase();
+  if (!msg) return false;
+  if (msg.includes('refusing to delete series master')) return false;
+  if (msg.includes('occurrence not found')) return true;
+  if (msg.includes('instance-remove-not-found')) return true;
+  return isGasCalendarEventMissingError(errorMessage);
 }
 
 /** GAS delete response: treat already-removed Calendar events as success (idempotent). */

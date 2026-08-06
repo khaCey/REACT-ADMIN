@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { MessageSquareQuote, RefreshCw, X } from 'lucide-react'
+import { MessageSquareQuote, Plus, X } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from './StudentDetailsModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
@@ -16,6 +16,11 @@ export default function ReviewStudentsModal({ onClose }) {
   const [error, setError] = useState(null)
   const [detailStudentId, setDetailStudentId] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [allStudents, setAllStudents] = useState([])
+  const [allStudentsLoading, setAllStudentsLoading] = useState(false)
+  const [addQuery, setAddQuery] = useState('')
+  const [addingId, setAddingId] = useState(null)
 
   const fetchList = useCallback(() => {
     setLoading(true)
@@ -32,8 +37,36 @@ export default function ReviewStudentsModal({ onClose }) {
   }, [fetchList])
 
   useEffect(() => {
+    if (!addOpen) return undefined
+    let cancelled = false
+    setAllStudentsLoading(true)
+    api
+      .getStudents()
+      .then((rows) => {
+        if (!cancelled) setAllStudents(Array.isArray(rows) ? rows : [])
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message || 'Failed to load students')
+      })
+      .finally(() => {
+        if (!cancelled) setAllStudentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [addOpen])
+
+  useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape' && detailStudentId == null) onClose()
+      if (e.key === 'Escape') {
+        if (detailStudentId != null) return
+        if (addOpen) {
+          setAddOpen(false)
+          setAddQuery('')
+          return
+        }
+        onClose()
+      }
     }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
@@ -41,7 +74,21 @@ export default function ReviewStudentsModal({ onClose }) {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
     }
-  }, [onClose, detailStudentId])
+  }, [onClose, detailStudentId, addOpen])
+
+  const listedIds = useMemo(() => new Set(list.map((s) => s.ID)), [list])
+
+  const addSuggestions = useMemo(() => {
+    const q = addQuery.trim().toLowerCase()
+    return (allStudents || [])
+      .filter((s) => s?.ID != null && !listedIds.has(s.ID))
+      .filter((s) => {
+        if (!q) return true
+        const hay = `${s.Name || ''} ${s.漢字 || ''} ${s.ID || ''} ${s.Email || ''}`.toLowerCase()
+        return hay.includes(q)
+      })
+      .slice(0, 12)
+  }, [allStudents, listedIds, addQuery])
 
   const handleClearReview = async (student) => {
     const id = student?.ID
@@ -56,6 +103,30 @@ export default function ReviewStudentsModal({ onClose }) {
       setError(e.message || 'Failed to clear 口コミ')
     } finally {
       setBusyId(null)
+    }
+  }
+
+  const handleAddStudent = async (student) => {
+    const id = student?.ID
+    if (id == null || listedIds.has(id)) return
+    setAddingId(id)
+    setError(null)
+    try {
+      const res = await api.patchStudentReview(id, { has_review: true })
+      const row = res?.student || student
+      setList((prev) => {
+        if (prev.some((s) => s.ID === row.ID)) return prev
+        return [...prev, row].sort((a, b) =>
+          String(a.Name || '').localeCompare(String(b.Name || ''), 'ja')
+        )
+      })
+      success(`${row.Name || 'Student'} added to 口コミリスト`)
+      setAddQuery('')
+      setAddOpen(false)
+    } catch (e) {
+      setError(e.message || 'Failed to add to 口コミリスト')
+    } finally {
+      setAddingId(null)
     }
   }
 
@@ -83,12 +154,14 @@ export default function ReviewStudentsModal({ onClose }) {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={fetchList}
-                disabled={loading}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 cursor-pointer disabled:opacity-50"
+                onClick={() => {
+                  setAddOpen((open) => !open)
+                  setAddQuery('')
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 cursor-pointer"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                <Plus className="h-3.5 w-3.5" />
+                Add student
               </button>
               <button
                 type="button"
@@ -102,6 +175,54 @@ export default function ReviewStudentsModal({ onClose }) {
           </header>
 
           <div className="flex flex-col flex-1 min-h-0">
+            {addOpen && (
+              <div className="px-5 py-3 border-b border-gray-100 bg-green-50/60">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                  Add student
+                </label>
+                <input
+                  type="search"
+                  autoFocus
+                  value={addQuery}
+                  onChange={(e) => setAddQuery(e.target.value)}
+                  placeholder="Search by name or ID…"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                />
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white">
+                  {allStudentsLoading ? (
+                    <p className="px-3 py-3 text-sm text-gray-500">Loading students…</p>
+                  ) : addSuggestions.length === 0 ? (
+                    <p className="px-3 py-3 text-sm text-gray-500">
+                      {addQuery.trim() ? 'No matching students' : 'Type to search students not yet on this list'}
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100">
+                      {addSuggestions.map((s) => (
+                        <li key={s.ID}>
+                          <button
+                            type="button"
+                            disabled={addingId != null}
+                            onClick={() => handleAddStudent(s)}
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm hover:bg-green-50 cursor-pointer disabled:opacity-50"
+                          >
+                            <span className="min-w-0">
+                              <span className="font-medium text-gray-900">{s.Name || '—'}</span>
+                              {s.漢字 ? (
+                                <span className="ml-2 text-xs text-gray-500">{s.漢字}</span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-xs text-gray-500">
+                              {addingId === s.ID ? 'Adding…' : `ID ${s.ID}`}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
             {error && (
               <p className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
