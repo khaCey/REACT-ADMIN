@@ -456,7 +456,7 @@ export default function DemoTracker() {
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.currentTarget.blur()
                         }}
-                        className="w-full min-w-[8rem] max-w-[12rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-gray-800 hover:border-gray-300 focus:border-green-500 focus:bg-white focus:outline-none disabled:opacity-50"
+                        className="w-full min-w-[8rem] max-w-[12rem] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 placeholder:text-gray-400 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:opacity-50"
                         aria-label={`Teacher for ${r.student_name || r.id}`}
                       />
                     </td>
