@@ -46,6 +46,7 @@ import {
   buildLessonTitleForOrderedStudents,
   rewriteLessonTitleStudentNames,
 } from '../groupLessonTitle.js';
+import { upsertDemoLessonEvent } from '../demoLessonEvents.js';
 import * as D from './domainInternals.js';
 
 const {
@@ -501,6 +502,21 @@ export async function handleBookLesson(req, res) {
           index + 1,
         ]
       );
+    }
+
+    if (String(lessonKind || '').toLowerCase() === 'demo') {
+      for (const studentEntry of orderedStudents) {
+        try {
+          await upsertDemoLessonEvent({
+            studentId: studentEntry.id,
+            demoDate: dateStr,
+            teacherName: assignedTeacherName,
+            sourceEventId: localEventId,
+          });
+        } catch (trackErr) {
+          console.error('[demo-tracker] upsert after book failed', trackErr?.message || trackErr);
+        }
+      }
     }
 
     res.status(201).json({

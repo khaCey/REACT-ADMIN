@@ -11,6 +11,7 @@ import {
   Calendar,
   Coffee,
   MessageSquareQuote,
+  ClipboardList,
 } from 'lucide-react'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
@@ -96,6 +97,17 @@ export default function Sidebar({
               <Link to="/admin" className={navItemClass(path === '/admin')}>
                 <Shield className="w-5 h-5" />
                 <span>Admin</span>
+              </Link>
+            </li>
+          )}
+          {isAdmin && (
+            <li>
+              <Link
+                to="/admin/demo-tracker"
+                className={navItemClass(path === '/admin/demo-tracker')}
+              >
+                <ClipboardList className="w-5 h-5" />
+                <span>Signed Up Tracker</span>
               </Link>
             </li>
           )}

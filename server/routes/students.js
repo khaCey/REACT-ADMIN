@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool, query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
 import { isStudentGasSyncEnabled, syncStudentToGas } from '../lib/studentContactSync.js';
+import { markDemoEventsSignedUpForStudent } from '../lib/demoLessonEvents.js';
 
 const router = Router();
 
@@ -474,6 +475,15 @@ router.put('/:id', async (req, res) => {
       ]
     );
     const newRow = (await query('SELECT * FROM students WHERE id = $1', [id])).rows[0] || oldRow;
+    const oldStatus = String(oldRow.status || '').trim().toUpperCase();
+    const newStatus = String(newRow.status || '').trim().toUpperCase();
+    if (oldStatus === 'DEMO' && newStatus === 'ACTIVE') {
+      try {
+        await markDemoEventsSignedUpForStudent(id);
+      } catch (trackErr) {
+        console.error('[demo-tracker] mark signed up failed', trackErr?.message || trackErr);
+      }
+    }
     let googleContactSync = 'disabled';
     if (isStudentGasSyncEnabled()) {
       const sync = await syncStudentToGas('student_upsert', newRow);
