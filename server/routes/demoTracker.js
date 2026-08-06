@@ -31,8 +31,73 @@ function mondayOfWeekContaining(dateStr) {
 
 router.get('/', async (req, res) => {
   try {
+    const year = String(req.query.year || '').trim();
     const month = String(req.query.month || '').trim();
     const weekStart = String(req.query.weekStart || '').trim();
+
+    if (/^\d{4}$/.test(year)) {
+      const y = Number(year);
+      const start = `${y}-01-01`;
+      const end = `${y + 1}-01-01`;
+      const [aggResult, yearsResult] = await Promise.all([
+        query(
+          `SELECT
+             COALESCE(NULLIF(TRIM(d.teacher_name), ''), 'Unassigned') AS teacher_name,
+             COUNT(*)::int AS demos,
+             COUNT(*) FILTER (WHERE d.signed_up)::int AS signed_up
+           FROM demo_lesson_events d
+           WHERE d.demo_date >= $1::date AND d.demo_date < $2::date
+           GROUP BY 1
+           ORDER BY demos DESC, signed_up DESC, teacher_name ASC`,
+          [start, end]
+        ),
+        query(
+          `SELECT DISTINCT EXTRACT(YEAR FROM demo_date)::int AS y
+             FROM demo_lesson_events
+            WHERE demo_date IS NOT NULL
+            ORDER BY y DESC`
+        ),
+      ]);
+      const teachers = (aggResult.rows || []).map((r) => {
+        const demos = Number(r.demos) || 0;
+        const signedUp = Number(r.signed_up) || 0;
+        const rate = demos > 0 ? Math.round((100 * signedUp) / demos) : 0;
+        return {
+          teacher_name: r.teacher_name,
+          demos,
+          signed_up: signedUp,
+          rate,
+        };
+      });
+      teachers.sort((a, b) => {
+        if (b.demos !== a.demos) return b.demos - a.demos;
+        if (b.rate !== a.rate) return b.rate - a.rate;
+        return String(a.teacher_name).localeCompare(String(b.teacher_name));
+      });
+      const total = teachers.reduce((s, t) => s + t.demos, 0);
+      const signedUpTotal = teachers.reduce((s, t) => s + t.signed_up, 0);
+      const yearsFromData = (yearsResult.rows || [])
+        .map((r) => Number(r.y))
+        .filter((n) => Number.isFinite(n));
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const currentY = jstNow.getUTCFullYear();
+      const years = [...new Set([currentY, ...yearsFromData])]
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => b - a)
+        .map(String);
+      return res.json({
+        mode: 'year',
+        year: String(y),
+        teachers,
+        years,
+        counts: {
+          total,
+          signed_up: signedUpTotal,
+          not_signed_up: Math.max(0, total - signedUpTotal),
+        },
+      });
+    }
+
     const params = [];
     let where = 'TRUE';
     if (/^\d{4}-\d{2}$/.test(month)) {

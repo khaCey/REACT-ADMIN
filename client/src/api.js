@@ -32,6 +32,7 @@ export const api = {
     fetchApi(`/students/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   getDemoTracker: (params = {}) => {
     const q = new URLSearchParams()
+    if (params.year) q.set('year', String(params.year))
     if (params.month) q.set('month', params.month)
     if (params.weekStart) q.set('weekStart', params.weekStart)
     const qs = q.toString()
