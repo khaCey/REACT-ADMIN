@@ -347,18 +347,21 @@ export default function DemoTracker() {
         ) : mode === 'week' ? (
           <span className="text-sm text-gray-600">Week of {weekStart}</span>
         ) : (
-          <select
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-          >
-            {yearOptions.map((y) => (
-              <option key={y} value={y}>
-                {y}
-                {y === getCurrentYearJst() ? ' (current)' : ''}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                  {y === getCurrentYearJst() ? ' (current)' : ''}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500">Past demos only (future not counted)</span>
+          </>
         )}
         <div className="ml-auto flex flex-wrap gap-4 text-sm">
           <span className="text-gray-600">
@@ -483,7 +486,7 @@ export default function DemoTracker() {
                 {!loading && teachers.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-4 py-12 text-center text-sm text-gray-500">
-                      No demo events for {year}. Try Import past demos or switch to Month.
+                      No past demos for {year}. Future demos are excluded from Year totals.
                     </td>
                   </tr>
                 )}

@@ -39,6 +39,9 @@ router.get('/', async (req, res) => {
       const y = Number(year);
       const start = `${y}-01-01`;
       const end = `${y + 1}-01-01`;
+      // Performance totals only include demos that have already happened (demo_date ≤ today JST).
+      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const todayJst = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}-${String(jstNow.getUTCDate()).padStart(2, '0')}`;
       const [aggResult, yearsResult] = await Promise.all([
         query(
           `SELECT
@@ -46,10 +49,12 @@ router.get('/', async (req, res) => {
              COUNT(*)::int AS demos,
              COUNT(*) FILTER (WHERE d.signed_up)::int AS signed_up
            FROM demo_lesson_events d
-           WHERE d.demo_date >= $1::date AND d.demo_date < $2::date
+           WHERE d.demo_date >= $1::date
+             AND d.demo_date < $2::date
+             AND d.demo_date <= $3::date
            GROUP BY 1
            ORDER BY demos DESC, signed_up DESC, teacher_name ASC`,
-          [start, end]
+          [start, end, todayJst]
         ),
         query(
           `SELECT DISTINCT EXTRACT(YEAR FROM demo_date)::int AS y
@@ -79,7 +84,6 @@ router.get('/', async (req, res) => {
       const yearsFromData = (yearsResult.rows || [])
         .map((r) => Number(r.y))
         .filter((n) => Number.isFinite(n));
-      const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
       const currentY = jstNow.getUTCFullYear();
       const years = [...new Set([currentY, ...yearsFromData])]
         .filter((n) => Number.isFinite(n))
