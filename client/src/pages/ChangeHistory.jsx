@@ -45,6 +45,7 @@ const FIELD_LABELS = {
   hiatus_expected_return: 'Hiatus expected return',
   hiatus_otsukisha: 'お月謝',
   has_review: '口コミ',
+  review_free_drink: 'Free Drink',
   payment: 'Payment',
   group_type: 'Group',
   group_size: '人数',

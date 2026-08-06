@@ -4,6 +4,7 @@ import { MessageSquareQuote, Plus, X } from 'lucide-react'
 import { api } from '../api'
 import StudentDetailsModal from './StudentDetailsModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
+import ToggleSwitch from './ToggleSwitch'
 import { useToast } from '../context/ToastContext'
 
 /**
@@ -101,6 +102,24 @@ export default function ReviewStudentsModal({ onClose }) {
       success(`${student.Name || 'Student'} removed from 口コミリスト`)
     } catch (e) {
       setError(e.message || 'Failed to clear 口コミ')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleFreeDrinkChange = async (student, checked) => {
+    const id = student?.ID
+    if (id == null) return
+    setBusyId(id)
+    setError(null)
+    try {
+      const res = await api.patchStudentReview(id, { free_drink: checked })
+      const row = res?.student
+      setList((prev) =>
+        prev.map((s) => (s.ID === id ? { ...s, ...(row || { ReviewFreeDrink: checked }) } : s))
+      )
+    } catch (e) {
+      setError(e.message || 'Failed to update Free Drink')
     } finally {
       setBusyId(null)
     }
@@ -239,6 +258,9 @@ export default function ReviewStudentsModal({ onClose }) {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       ID
                     </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">
+                      Free Drink
+                    </th>
                     <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Actions
                     </th>
@@ -247,7 +269,7 @@ export default function ReviewStudentsModal({ onClose }) {
                 <tbody className="divide-y divide-gray-100">
                   {!loading && list.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
                         No students marked 口コミ済 yet.
                       </td>
                     </tr>
@@ -274,6 +296,16 @@ export default function ReviewStudentsModal({ onClose }) {
                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-sm tabular-nums text-gray-600">{s.ID}</td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="inline-flex justify-center">
+                            <ToggleSwitch
+                              checked={!!s.ReviewFreeDrink}
+                              disabled={rowBusy}
+                              onChange={(next) => handleFreeDrinkChange(s, next)}
+                              aria-label={`Free Drink ${s.Name || s.ID}`}
+                            />
+                          </div>
+                        </td>
                         <td className="px-5 py-3 text-right">
                           <button
                             type="button"
