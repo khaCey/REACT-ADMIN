@@ -22,10 +22,16 @@ function getMondayJstStr() {
 
 function monthOptions() {
   const cur = getCurrentYyyyMmJst()
+  const [curY] = cur.split('-').map(Number)
+  const janThisYear = `${curY}-01`
   const opts = []
+  const next = addOneMonthYyyyMm(cur)
+  if (next) opts.push(next)
   let ym = cur
-  for (let i = 0; i < 6; i += 1) {
+  // Current month back through January of this (JST) year
+  while (ym && ym >= janThisYear) {
     opts.push(ym)
+    if (ym === janThisYear) break
     const [y, m] = ym.split('-').map(Number)
     let nm = m - 1
     let ny = y
@@ -35,8 +41,6 @@ function monthOptions() {
     }
     ym = `${ny}-${String(nm).padStart(2, '0')}`
   }
-  const next = addOneMonthYyyyMm(cur)
-  if (next) opts.unshift(next)
   return [...new Set(opts)]
 }
 
