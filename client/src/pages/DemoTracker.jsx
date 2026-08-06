@@ -89,6 +89,7 @@ export default function DemoTracker() {
         if (cancelled) return
         const staff = Array.isArray(staffRes?.staff) ? staffRes.staff : []
         const names = staff
+          .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
           .map((s) => String(s.name || s.Name || '').trim())
           .filter(Boolean)
         setStaffNames([...new Set(names)].sort((a, b) => a.localeCompare(b)))
