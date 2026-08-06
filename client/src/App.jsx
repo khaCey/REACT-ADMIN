@@ -9,6 +9,7 @@ import StudentDetail from './pages/StudentDetail'
 import Staff from './pages/Staff'
 import ChangeHistory from './pages/ChangeHistory'
 import Admin from './pages/Admin'
+import DemoTracker from './pages/DemoTracker'
 import Notifications from './pages/Notifications'
 import Messages from './pages/Messages'
 import Login from './pages/Login'
@@ -41,6 +42,14 @@ function App() {
         />
         <Route path="change-history" element={<ChangeHistory />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+        <Route
+          path="admin/demo-tracker"
+          element={
+            <AdminRoute>
+              <DemoTracker />
+            </AdminRoute>
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

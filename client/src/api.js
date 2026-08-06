@@ -30,6 +30,23 @@ export const api = {
   getReviewStudents: () => fetchApi('/students/reviews'),
   patchStudentReview: (id, body) =>
     fetchApi(`/students/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
+  getDemoTracker: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.month) q.set('month', params.month)
+    if (params.weekStart) q.set('weekStart', params.weekStart)
+    const qs = q.toString()
+    return fetchApi(`/demo-tracker${qs ? `?${qs}` : ''}`)
+  },
+  importPastDemoTracker: () => fetchApi('/demo-tracker/import-past', { method: 'POST' }),
+  createDemoTrackerEvent: (body) =>
+    fetchApi('/demo-tracker', { method: 'POST', body: JSON.stringify(body) }),
+  patchDemoTrackerEvent: (id, body) =>
+    fetchApi(`/demo-tracker/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteDemoTrackerEvent: (id) =>
+    fetchApi(`/demo-tracker/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getStudent: (id) => fetchApi(`/students/${id}`),
   getStudentGroup: (id) => fetchApi(`/students/${id}/group`),
   saveStudentGroup: (id, body) =>

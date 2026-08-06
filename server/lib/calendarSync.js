@@ -5,6 +5,7 @@
 import { query } from '../db/index.js';
 import { GOOGLE_INSTANCE_SUFFIX_RE } from './calendarEventId.js';
 import { utcToJstDateAndTime } from './timezone.js';
+import { upsertDemoLessonEvent } from './demoLessonEvents.js';
 
 /** Appended in buildMonthlyScheduleRows: _YYYY-MM-DD or _YYYY-MM-DD_HH-mm-ss */
 const OUR_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
@@ -630,6 +631,22 @@ export async function upsertMonthlySchedule(data, options = {}) {
       ]
     );
     upserted++;
+    if (
+      String(lessonKind || '').toLowerCase() === 'demo' &&
+      studentId != null &&
+      !['cancelled', 'canceled'].includes(String(status || '').toLowerCase())
+    ) {
+      try {
+        await upsertDemoLessonEvent({
+          studentId,
+          demoDate: date,
+          teacherName,
+          sourceEventId: eventId,
+        });
+      } catch (trackErr) {
+        console.error('[demo-tracker] upsert after poll failed', trackErr?.message || trackErr);
+      }
+    }
   }
 
   let deletedOrphans = 0;
