@@ -1114,9 +1114,22 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
     let months = [];
 
     if (action === 'add') {
+      const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
+      const onlyKeys = [];
+      if (entries && entries.length > 0) {
+        for (const e of entries) {
+          const eid = String(e?.event_id ?? e?.eventId ?? '').trim();
+          const sn = String(e?.student_name ?? e?.studentName ?? '').trim();
+          if (eid && sn) onlyKeys.push(`${eid}\t${sn}`);
+        }
+        if (onlyKeys.length === 0) {
+          return res.status(400).json({ error: 'entries must include event_id and student_name' });
+        }
+      }
       const result = await upsertMonthlySchedule(data, {
         reconcile: false,
         reconcileMonthsAllowlist: [month],
+        ...(onlyKeys.length > 0 ? { onlyKeys } : {}),
       });
       upserted = result.upserted;
       skippedDismissed = result.skippedDismissed || 0;
@@ -1178,6 +1191,10 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
       teacherSchedulesRefresh,
       missing: comparison.missing,
       disappeared: comparison.disappeared,
+      calendar_only: comparison.calendar_only || comparison.missing,
+      local_only: comparison.local_only || comparison.disappeared,
+      calendar: comparison.calendar || [],
+      local: comparison.local || [],
       calendarCount: comparison.calendarCount,
       localCount: comparison.localCount,
     });
