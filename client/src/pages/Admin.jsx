@@ -910,13 +910,13 @@ export default function Admin() {
       </div>
 
       {showBackfillModal && (
-        <BackfillScheduleModal onClose={() => setShowBackfillModal(false)}
+        <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
+      )}
       {showCalendarEvents && (
         <CalendarEventsModal
           onClose={() => setShowCalendarEvents(false)}
           onApplied={() => loadMonthlyRows(monthlyOffset, { silent: true })}
         />
-      )} />
       )}
       {restoreTarget != null && (
         <ConfirmActionModal
