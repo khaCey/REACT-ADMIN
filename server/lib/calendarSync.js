@@ -540,6 +540,7 @@ function monthsEligibleForReconcile(months, options) {
  * @param {{
  *   removed?: Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>,
  *   reconcile?: boolean,
+ *   forceReconcile?: boolean,
  *   reconcileMonthsAllowlist?: string[],
  *   reconcileOnlyYear?: string,
  * }} [options]
