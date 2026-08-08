@@ -41,8 +41,21 @@ function reconcileSourceLabel(source) {
   return 'Both'
 }
 
-function ReconcileLessonTable({ rows, emptyText, headClassName, showSource }) {
+function reconcileRowKey(row) {
+  return `${row?.event_id || ''}\t${row?.student_name || ''}`
+}
+
+function ReconcileLessonTable({
+  rows,
+  emptyText,
+  headClassName,
+  showSource,
+  onAddRow,
+  rowBusyKey,
+  disableActions,
+}) {
   const list = Array.isArray(rows) ? rows : []
+  const showAdd = typeof onAddRow === 'function'
   return (
     <div className="max-h-64 overflow-auto">
       <table className="min-w-full text-sm">
@@ -52,40 +65,60 @@ function ReconcileLessonTable({ rows, emptyText, headClassName, showSource }) {
             <th className="px-3 py-2">Student</th>
             <th className="px-3 py-2">Teacher</th>
             {showSource ? <th className="px-3 py-2">Source</th> : null}
+            {showAdd ? <th className="px-3 py-2 text-right">Action</th> : null}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
           {list.length === 0 ? (
             <tr>
-              <td colSpan={showSource ? 4 : 3} className="px-3 py-6 text-center text-gray-500">
+              <td
+                colSpan={(showSource ? 4 : 3) + (showAdd ? 1 : 0)}
+                className="px-3 py-6 text-center text-gray-500"
+              >
                 {emptyText}
               </td>
             </tr>
           ) : (
-            list.map((row, i) => (
-              <tr key={`${row.event_id}-${row.student_name}-${i}`}>
-                <td className="px-3 py-2 tabular-nums whitespace-nowrap">
-                  {formatReconcileLessonWhen(row)}
-                </td>
-                <td className="px-3 py-2">{row.student_name || '—'}</td>
-                <td className="px-3 py-2">{row.teacher_name || '—'}</td>
-                {showSource ? (
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        row.source === 'calendar_only'
-                          ? 'text-amber-700 font-medium'
-                          : row.source === 'local_only'
-                            ? 'text-red-700 font-medium'
-                            : 'text-gray-600'
-                      }
-                    >
-                      {reconcileSourceLabel(row.source)}
-                    </span>
+            list.map((row, i) => {
+              const key = reconcileRowKey(row)
+              const busy = rowBusyKey === key
+              return (
+                <tr key={`${key}-${i}`}>
+                  <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                    {formatReconcileLessonWhen(row)}
                   </td>
-                ) : null}
-              </tr>
-            ))
+                  <td className="px-3 py-2">{row.student_name || '—'}</td>
+                  <td className="px-3 py-2">{row.teacher_name || '—'}</td>
+                  {showSource ? (
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          row.source === 'calendar_only'
+                            ? 'text-amber-700 font-medium'
+                            : row.source === 'local_only'
+                              ? 'text-red-700 font-medium'
+                              : 'text-gray-600'
+                        }
+                      >
+                        {reconcileSourceLabel(row.source)}
+                      </span>
+                    </td>
+                  ) : null}
+                  {showAdd ? (
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        disabled={disableActions || busy || !row.event_id || !row.student_name}
+                        onClick={() => onAddRow(row)}
+                        className="px-2 py-1 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
+                      >
+                        {busy ? 'Adding…' : 'Add to local'}
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              )
+            })
           )}
         </tbody>
       </table>
@@ -98,6 +131,7 @@ export default function Admin() {
   const [showBackfillModal, setShowBackfillModal] = useState(false)
   const [reconcileMonthLoading, setReconcileMonthLoading] = useState(false)
   const [reconcileApplyLoading, setReconcileApplyLoading] = useState('') // 'add' | 'remove' | ''
+  const [reconcileRowBusy, setReconcileRowBusy] = useState('')
   const [reconcileMonthError, setReconcileMonthError] = useState('')
   const [reconcileCompare, setReconcileCompare] = useState(null)
   const [reconcileApplyResult, setReconcileApplyResult] = useState(null)
@@ -645,6 +679,7 @@ export default function Admin() {
                       type="button"
                       disabled={
                         !!reconcileApplyLoading ||
+                        !!reconcileRowBusy ||
                         reconcileMonthLoading ||
                         !((reconcileCompare.calendar_only || reconcileCompare.missing)?.length > 0)
                       }
@@ -686,6 +721,46 @@ export default function Admin() {
                     emptyText="None — local has everything from Calendar"
                     headClassName="bg-amber-50"
                     showSource={false}
+                    disableActions={!!reconcileApplyLoading || reconcileMonthLoading}
+                    rowBusyKey={reconcileRowBusy}
+                    onAddRow={async (row) => {
+                      const key = reconcileRowKey(row)
+                      setReconcileMonthError('')
+                      setReconcileRowBusy(key)
+                      try {
+                        const month = reconcileCompare.month || getCurrentYyyyMmJst()
+                        const res = await api.reconcileCalendarMonth({
+                          month,
+                          action: 'add',
+                          entries: [
+                            {
+                              event_id: row.event_id,
+                              student_name: row.student_name,
+                            },
+                          ],
+                        })
+                        setReconcileApplyResult(res)
+                        setReconcileCompare({
+                          ...reconcileCompare,
+                          month: res.month,
+                          missing: res.missing || [],
+                          disappeared: res.disappeared || [],
+                          calendar_only: res.calendar_only || res.missing || [],
+                          local_only: res.local_only || res.disappeared || [],
+                          calendar: res.calendar || [],
+                          local: res.local || [],
+                          calendarCount: res.calendarCount,
+                          localCount: res.localCount,
+                          fetched: res.fetched,
+                        })
+                        success(`Added ${row.student_name || 'lesson'} to local`)
+                        await loadMonthlyRows(monthlyOffset, { silent: true })
+                      } catch (err) {
+                        setReconcileMonthError(err.message || 'Add to local failed')
+                      } finally {
+                        setReconcileRowBusy('')
+                      }
+                    }}
                   />
                 </div>
                 <div className="rounded-lg border border-red-200 bg-red-50/40 overflow-hidden">
@@ -701,6 +776,7 @@ export default function Admin() {
                       type="button"
                       disabled={
                         !!reconcileApplyLoading ||
+                        !!reconcileRowBusy ||
                         reconcileMonthLoading ||
                         !((reconcileCompare.local_only || reconcileCompare.disappeared)?.length > 0)
                       }

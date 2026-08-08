@@ -688,19 +688,36 @@ function monthsEligibleForReconcile(months, options) {
  *   forceReconcile?: boolean,
  *   reconcileMonthsAllowlist?: string[],
  *   reconcileOnlyYear?: string,
+ *   onlyKeys?: Set<string> | string[],
  * }} [options]
  * - reconcile: delete DB rows in snapshot months not in `data` (default true).
  * - forceReconcile: when true, orphan deletes run even if CALENDAR_RECONCILE_ORPHANS is off (explicit admin reconcile).
  * - reconcileMonthsAllowlist: only these YYYY-MM months are reconciled (intersected with months from payload).
  * - reconcileOnlyYear: only months starting with this YYYY (after allowlist filter).
+ * - onlyKeys: optional `${eventId}\\t${studentName}` allowlist — upsert only those rows.
  */
 export async function upsertMonthlySchedule(data, options = {}) {
-  const { removed = [], reconcile = true, forceReconcile = false } = options;
+  const { removed = [], reconcile = true, forceReconcile = false, onlyKeys: onlyKeysOpt } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
-  const { rows, months, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
-    Array.isArray(data) ? data : []
-  );
+  const built = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
+  let { rows, months, incomingKeys, incomingSlotKeys } = built;
+  const onlyKeys =
+    onlyKeysOpt instanceof Set
+      ? onlyKeysOpt
+      : Array.isArray(onlyKeysOpt) && onlyKeysOpt.length > 0
+        ? new Set(onlyKeysOpt.map((k) => String(k)))
+        : null;
+  if (onlyKeys && onlyKeys.size > 0) {
+    rows = rows.filter((r) => onlyKeys.has(`${r.eventId}\t${r.studentName}`));
+    months = new Set(rows.map((r) => (r.date ? String(r.date).slice(0, 7) : '')).filter((m) => /^\d{4}-\d{2}$/.test(m)));
+    incomingKeys = new Set(rows.map((r) => `${r.eventId}\t${r.studentName}`));
+    incomingSlotKeys = new Set();
+    for (const r of rows) {
+      const sk = lessonSlotKey(r.studentName, r.startTs);
+      if (sk) incomingSlotKeys.add(sk);
+    }
+  }
   const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(months);
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
   const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '0').trim() === '1';
