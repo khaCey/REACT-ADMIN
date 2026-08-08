@@ -1046,7 +1046,7 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
  * - action=add: upsert Calendar snapshot (no orphan deletes)
  * - action=remove: delete local synced rows missing from Calendar (forceReconcile)
  */
-app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => {
   try {
     const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
     const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
