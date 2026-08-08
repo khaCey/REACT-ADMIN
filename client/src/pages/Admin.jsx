@@ -35,6 +35,64 @@ function formatReconcileLessonWhen(row) {
   return `${dateStr} ${timeStr}`
 }
 
+function reconcileSourceLabel(source) {
+  if (source === 'calendar_only') return 'Calendar only'
+  if (source === 'local_only') return 'Local only'
+  return 'Both'
+}
+
+function ReconcileLessonTable({ rows, emptyText, headClassName, showSource }) {
+  const list = Array.isArray(rows) ? rows : []
+  return (
+    <div className="max-h-64 overflow-auto">
+      <table className="min-w-full text-sm">
+        <thead className={`sticky top-0 ${headClassName}`}>
+          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <th className="px-3 py-2">When</th>
+            <th className="px-3 py-2">Student</th>
+            <th className="px-3 py-2">Teacher</th>
+            {showSource ? <th className="px-3 py-2">Source</th> : null}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 bg-white">
+          {list.length === 0 ? (
+            <tr>
+              <td colSpan={showSource ? 4 : 3} className="px-3 py-6 text-center text-gray-500">
+                {emptyText}
+              </td>
+            </tr>
+          ) : (
+            list.map((row, i) => (
+              <tr key={`${row.event_id}-${row.student_name}-${i}`}>
+                <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                  {formatReconcileLessonWhen(row)}
+                </td>
+                <td className="px-3 py-2">{row.student_name || '—'}</td>
+                <td className="px-3 py-2">{row.teacher_name || '—'}</td>
+                {showSource ? (
+                  <td className="px-3 py-2">
+                    <span
+                      className={
+                        row.source === 'calendar_only'
+                          ? 'text-amber-700 font-medium'
+                          : row.source === 'local_only'
+                            ? 'text-red-700 font-medium'
+                            : 'text-gray-600'
+                      }
+                    >
+                      {reconcileSourceLabel(row.source)}
+                    </span>
+                  </td>
+                ) : null}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function Admin() {
   const { success } = useToast()
   const [showBackfillModal, setShowBackfillModal] = useState(false)
