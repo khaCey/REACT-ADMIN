@@ -326,7 +326,7 @@ export const api = {
   backfillFromCalendar: (body) =>
     fetchApi('/calendar-poll/backfill', { method: 'POST', body: JSON.stringify(body) }),
 
-  /** Fetch Calendar snapshot for a month, upsert missing, delete local rows that disappeared (force reconcile). */
+  /** Month reconcile: action=compare|add|remove (default compare lists missing/disappeared). */
   reconcileCalendarMonth: (body = {}) =>
     fetchApi('/calendar-poll/reconcile-month', { method: 'POST', body: JSON.stringify(body) }),
 

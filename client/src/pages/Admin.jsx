@@ -26,12 +26,23 @@ function formatMonthlyScheduleDateTime(date, start) {
   return `${dateStr} ${timeStr}`
 }
 
+function formatReconcileLessonWhen(row) {
+  const dateStr = row?.date ? String(row.date).slice(0, 10) : '—'
+  if (!row?.start) return dateStr
+  const d = new Date(row.start)
+  if (Number.isNaN(d.getTime())) return dateStr
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `${dateStr} ${timeStr}`
+}
+
 export default function Admin() {
   const { success } = useToast()
   const [showBackfillModal, setShowBackfillModal] = useState(false)
   const [reconcileMonthLoading, setReconcileMonthLoading] = useState(false)
+  const [reconcileApplyLoading, setReconcileApplyLoading] = useState('') // 'add' | 'remove' | ''
   const [reconcileMonthError, setReconcileMonthError] = useState('')
-  const [reconcileMonthResult, setReconcileMonthResult] = useState(null)
+  const [reconcileCompare, setReconcileCompare] = useState(null)
+  const [reconcileApplyResult, setReconcileApplyResult] = useState(null)
   const [backups, setBackups] = useState([])
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
@@ -475,21 +486,21 @@ export default function Admin() {
             </button>
             <button
               type="button"
-              disabled={reconcileMonthLoading}
+              disabled={reconcileMonthLoading || !!reconcileApplyLoading}
               onClick={async () => {
                 setReconcileMonthError('')
-                setReconcileMonthResult(null)
+                setReconcileApplyResult(null)
                 setReconcileMonthLoading(true)
                 try {
                   const month = getCurrentYyyyMmJst()
-                  const res = await api.reconcileCalendarMonth({ month })
-                  setReconcileMonthResult(res)
+                  const res = await api.reconcileCalendarMonth({ month, action: 'compare' })
+                  setReconcileCompare(res)
                   success(
-                    `${res.month}: Calendar ${res.fetched ?? 0} · added ~${res.added ?? 0} · removed ${res.removed ?? 0} · upserted ${res.upserted ?? 0}`
+                    `${res.month}: ${res.missing?.length ?? 0} missing · ${res.disappeared?.length ?? 0} disappeared`
                   )
-                  await loadMonthlyRows(monthlyOffset, { silent: true })
                 } catch (err) {
-                  setReconcileMonthError(err.message || 'Reconcile failed')
+                  setReconcileMonthError(err.message || 'Compare failed')
+                  setReconcileCompare(null)
                 } finally {
                   setReconcileMonthLoading(false)
                 }
@@ -498,23 +509,180 @@ export default function Admin() {
             >
               <RefreshCw className={`w-4 h-4 ${reconcileMonthLoading ? 'animate-spin' : ''}`} />
               {reconcileMonthLoading
-                ? 'Reconciling…'
-                : `Reconcile ${getCurrentYyyyMmJst()} (add missing / remove gone)`}
+                ? 'Comparing…'
+                : `Compare ${getCurrentYyyyMmJst()} with Calendar`}
             </button>
           </div>
           <p className="text-xs text-gray-500 mb-2">
-            Reconcile fetches all Calendar lessons for this month (JST), upserts anything missing or changed, and deletes local synced rows that are no longer on Calendar.
+            Compare lists lessons on Calendar but not local (missing), and local synced lessons no longer on Calendar (disappeared). Then add or remove with the buttons below.
           </p>
           {reconcileMonthError && (
             <p className="text-sm text-red-600 mb-2">{reconcileMonthError}</p>
           )}
-          {reconcileMonthResult && (
-            <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-              <strong>{reconcileMonthResult.month}</strong>: fetched {reconcileMonthResult.fetched ?? 0} from
-              Calendar · local {reconcileMonthResult.localBefore ?? '—'} → {reconcileMonthResult.localAfter ?? '—'} ·
-              added ~{reconcileMonthResult.added ?? 0} · removed {reconcileMonthResult.removed ?? 0} · upserted{' '}
-              {reconcileMonthResult.upserted ?? 0}
+          {reconcileApplyResult && (
+            <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
+              Last apply ({reconcileApplyResult.action}): local {reconcileApplyResult.localBefore ?? '—'} →{' '}
+              {reconcileApplyResult.localAfter ?? '—'}
+              {reconcileApplyResult.action === 'add'
+                ? ` · added ~${reconcileApplyResult.added ?? 0}`
+                : ` · removed ${reconcileApplyResult.removed ?? 0}`}
             </p>
+          )}
+          {reconcileCompare && (
+            <div className="space-y-4 mt-3">
+              <p className="text-sm text-gray-700">
+                <strong>{reconcileCompare.month}</strong>: Calendar {reconcileCompare.calendarCount ?? 0} · local{' '}
+                {reconcileCompare.localCount ?? 0} · missing{' '}
+                <strong className="text-amber-700">{reconcileCompare.missing?.length ?? 0}</strong> · disappeared{' '}
+                <strong className="text-red-700">{reconcileCompare.disappeared?.length ?? 0}</strong>
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-amber-200 bg-amber-50/40 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-amber-200">
+                    <h4 className="text-sm font-semibold text-gray-900">
+                      Missing on local ({reconcileCompare.missing?.length ?? 0})
+                    </h4>
+                    <button
+                      type="button"
+                      disabled={
+                        !!reconcileApplyLoading ||
+                        reconcileMonthLoading ||
+                        !(reconcileCompare.missing?.length > 0)
+                      }
+                      onClick={async () => {
+                        setReconcileMonthError('')
+                        setReconcileApplyLoading('add')
+                        try {
+                          const month = reconcileCompare.month || getCurrentYyyyMmJst()
+                          const res = await api.reconcileCalendarMonth({ month, action: 'add' })
+                          setReconcileApplyResult(res)
+                          setReconcileCompare({
+                            ...reconcileCompare,
+                            month: res.month,
+                            missing: res.missing || [],
+                            disappeared: res.disappeared || [],
+                            calendarCount: res.calendarCount,
+                            localCount: res.localCount,
+                            fetched: res.fetched,
+                          })
+                          success(`Added missing lessons for ${res.month} (~${res.added ?? 0})`)
+                          await loadMonthlyRows(monthlyOffset, { silent: true })
+                        } catch (err) {
+                          setReconcileMonthError(err.message || 'Add missing failed')
+                        } finally {
+                          setReconcileApplyLoading('')
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
+                    >
+                      {reconcileApplyLoading === 'add' ? 'Adding…' : 'Add missing to local'}
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="sticky top-0 bg-amber-50">
+                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                          <th className="px-3 py-2">When</th>
+                          <th className="px-3 py-2">Student</th>
+                          <th className="px-3 py-2">Teacher</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-amber-100 bg-white">
+                        {(reconcileCompare.missing || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="px-3 py-6 text-center text-gray-500">
+                              None — local has everything from Calendar
+                            </td>
+                          </tr>
+                        ) : (
+                          reconcileCompare.missing.map((row, i) => (
+                            <tr key={`${row.event_id}-${row.student_name}-${i}`}>
+                              <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                                {formatReconcileLessonWhen(row)}
+                              </td>
+                              <td className="px-3 py-2">{row.student_name || '—'}</td>
+                              <td className="px-3 py-2">{row.teacher_name || '—'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-red-200 bg-red-50/40 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-red-200">
+                    <h4 className="text-sm font-semibold text-gray-900">
+                      Disappeared from Calendar ({reconcileCompare.disappeared?.length ?? 0})
+                    </h4>
+                    <button
+                      type="button"
+                      disabled={
+                        !!reconcileApplyLoading ||
+                        reconcileMonthLoading ||
+                        !(reconcileCompare.disappeared?.length > 0)
+                      }
+                      onClick={async () => {
+                        setReconcileMonthError('')
+                        setReconcileApplyLoading('remove')
+                        try {
+                          const month = reconcileCompare.month || getCurrentYyyyMmJst()
+                          const res = await api.reconcileCalendarMonth({ month, action: 'remove' })
+                          setReconcileApplyResult(res)
+                          setReconcileCompare({
+                            ...reconcileCompare,
+                            month: res.month,
+                            missing: res.missing || [],
+                            disappeared: res.disappeared || [],
+                            calendarCount: res.calendarCount,
+                            localCount: res.localCount,
+                            fetched: res.fetched,
+                          })
+                          success(`Removed ${res.removed ?? 0} disappeared lessons for ${res.month}`)
+                          await loadMonthlyRows(monthlyOffset, { silent: true })
+                        } catch (err) {
+                          setReconcileMonthError(err.message || 'Remove disappeared failed')
+                        } finally {
+                          setReconcileApplyLoading('')
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer disabled:opacity-50"
+                    >
+                      {reconcileApplyLoading === 'remove' ? 'Removing…' : 'Remove from local'}
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="sticky top-0 bg-red-50">
+                        <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                          <th className="px-3 py-2">When</th>
+                          <th className="px-3 py-2">Student</th>
+                          <th className="px-3 py-2">Teacher</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-red-100 bg-white">
+                        {(reconcileCompare.disappeared || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="px-3 py-6 text-center text-gray-500">
+                              None — no extra local synced rows
+                            </td>
+                          </tr>
+                        ) : (
+                          reconcileCompare.disappeared.map((row, i) => (
+                            <tr key={`${row.event_id}-${row.student_name}-${i}`}>
+                              <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                                {formatReconcileLessonWhen(row)}
+                              </td>
+                              <td className="px-3 py-2">{row.student_name || '—'}</td>
+                              <td className="px-3 py-2">{row.teacher_name || '—'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </section>
 
