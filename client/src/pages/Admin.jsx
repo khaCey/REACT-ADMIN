@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
+import CalendarEventsModal from '../components/CalendarEventsModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import { api } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -26,115 +27,10 @@ function formatMonthlyScheduleDateTime(date, start) {
   return `${dateStr} ${timeStr}`
 }
 
-function formatReconcileLessonWhen(row) {
-  const dateStr = row?.date ? String(row.date).slice(0, 10) : '—'
-  if (!row?.start) return dateStr
-  const d = new Date(row.start)
-  if (Number.isNaN(d.getTime())) return dateStr
-  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return `${dateStr} ${timeStr}`
-}
-
-function reconcileSourceLabel(source) {
-  if (source === 'calendar_only') return 'Calendar only'
-  if (source === 'local_only') return 'Local only'
-  return 'Both'
-}
-
-function reconcileRowKey(row) {
-  return `${row?.event_id || ''}\t${row?.student_name || ''}`
-}
-
-function ReconcileLessonTable({
-  rows,
-  emptyText,
-  headClassName,
-  showSource,
-  onAddRow,
-  rowBusyKey,
-  disableActions,
-}) {
-  const list = Array.isArray(rows) ? rows : []
-  const showAdd = typeof onAddRow === 'function'
-  return (
-    <div className="max-h-64 overflow-auto">
-      <table className="min-w-full text-sm">
-        <thead className={`sticky top-0 ${headClassName}`}>
-          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-            <th className="px-3 py-2">When</th>
-            <th className="px-3 py-2">Student</th>
-            <th className="px-3 py-2">Teacher</th>
-            {showSource ? <th className="px-3 py-2">Source</th> : null}
-            {showAdd ? <th className="px-3 py-2 text-right">Action</th> : null}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 bg-white">
-          {list.length === 0 ? (
-            <tr>
-              <td
-                colSpan={(showSource ? 4 : 3) + (showAdd ? 1 : 0)}
-                className="px-3 py-6 text-center text-gray-500"
-              >
-                {emptyText}
-              </td>
-            </tr>
-          ) : (
-            list.map((row, i) => {
-              const key = reconcileRowKey(row)
-              const busy = rowBusyKey === key
-              return (
-                <tr key={`${key}-${i}`}>
-                  <td className="px-3 py-2 tabular-nums whitespace-nowrap">
-                    {formatReconcileLessonWhen(row)}
-                  </td>
-                  <td className="px-3 py-2">{row.student_name || '—'}</td>
-                  <td className="px-3 py-2">{row.teacher_name || '—'}</td>
-                  {showSource ? (
-                    <td className="px-3 py-2">
-                      <span
-                        className={
-                          row.source === 'calendar_only'
-                            ? 'text-amber-700 font-medium'
-                            : row.source === 'local_only'
-                              ? 'text-red-700 font-medium'
-                              : 'text-gray-600'
-                        }
-                      >
-                        {reconcileSourceLabel(row.source)}
-                      </span>
-                    </td>
-                  ) : null}
-                  {showAdd ? (
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        disabled={disableActions || busy || !row.event_id || !row.student_name}
-                        onClick={() => onAddRow(row)}
-                        className="px-2 py-1 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
-                      >
-                        {busy ? 'Adding…' : 'Add to local'}
-                      </button>
-                    </td>
-                  ) : null}
-                </tr>
-              )
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 export default function Admin() {
   const { success } = useToast()
   const [showBackfillModal, setShowBackfillModal] = useState(false)
-  const [reconcileMonthLoading, setReconcileMonthLoading] = useState(false)
-  const [reconcileApplyLoading, setReconcileApplyLoading] = useState('') // 'add' | 'remove' | ''
-  const [reconcileRowBusy, setReconcileRowBusy] = useState('')
-  const [reconcileMonthError, setReconcileMonthError] = useState('')
-  const [reconcileCompare, setReconcileCompare] = useState(null)
-  const [reconcileApplyResult, setReconcileApplyResult] = useState(null)
+  const [showCalendarEvents, setShowCalendarEvents] = useState(false)
   const [backups, setBackups] = useState([])
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
@@ -567,7 +463,7 @@ export default function Admin() {
           <p className="text-sm text-gray-600 mb-4">
             Fetch past lessons from Google Calendar or from the MonthlySchedule sheet and sync them to the database. Existing rows are updated (upsert).
           </p>
-          <div className="flex flex-wrap items-center gap-3 mb-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setShowBackfillModal(true)}
@@ -578,251 +474,16 @@ export default function Admin() {
             </button>
             <button
               type="button"
-              disabled={reconcileMonthLoading || !!reconcileApplyLoading}
-              onClick={async () => {
-                setReconcileMonthError('')
-                setReconcileApplyResult(null)
-                setReconcileMonthLoading(true)
-                try {
-                  const month = getCurrentYyyyMmJst()
-                  const res = await api.reconcileCalendarMonth({ month, action: 'compare' })
-                  setReconcileCompare(res)
-                  success(
-                    `${res.month}: ${res.missing?.length ?? 0} missing · ${res.disappeared?.length ?? 0} disappeared`
-                  )
-                } catch (err) {
-                  setReconcileMonthError(err.message || 'Compare failed')
-                  setReconcileCompare(null)
-                } finally {
-                  setReconcileMonthLoading(false)
-                }
-              }}
-              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-semibold cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              onClick={() => setShowCalendarEvents(true)}
+              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-semibold cursor-pointer flex items-center gap-2"
             >
-              <RefreshCw className={`w-4 h-4 ${reconcileMonthLoading ? 'animate-spin' : ''}`} />
-              {reconcileMonthLoading
-                ? 'Comparing…'
-                : `Compare ${getCurrentYyyyMmJst()} with Calendar`}
+              <Calendar className="w-4 h-4" />
+              Calendar Events
             </button>
           </div>
-          <p className="text-xs text-gray-500 mb-2">
-            Compare lists lessons on Calendar but not local (missing), and local synced lessons no longer on Calendar (disappeared). Then add or remove with the buttons below.
+          <p className="text-xs text-gray-500 mt-2">
+            Calendar Events compares this month with Google Calendar (add missing / remove local-only). Also on Dashboard for all staff.
           </p>
-          {reconcileMonthError && (
-            <p className="text-sm text-red-600 mb-2">{reconcileMonthError}</p>
-          )}
-          {reconcileApplyResult && (
-            <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
-              Last apply ({reconcileApplyResult.action}): local {reconcileApplyResult.localBefore ?? '—'} →{' '}
-              {reconcileApplyResult.localAfter ?? '—'}
-              {reconcileApplyResult.action === 'add'
-                ? ` · added ~${reconcileApplyResult.added ?? 0}`
-                : ` · removed ${reconcileApplyResult.removed ?? 0}`}
-            </p>
-          )}
-          {reconcileCompare && (
-            <div className="space-y-4 mt-3">
-              <p className="text-sm text-gray-700">
-                <strong>{reconcileCompare.month}</strong>: Calendar {reconcileCompare.calendarCount ?? 0} · local{' '}
-                {reconcileCompare.localCount ?? 0} · calendar only{' '}
-                <strong className="text-amber-700">
-                  {(reconcileCompare.calendar_only || reconcileCompare.missing)?.length ?? 0}
-                </strong>{' '}
-                · local only{' '}
-                <strong className="text-red-700">
-                  {(reconcileCompare.local_only || reconcileCompare.disappeared)?.length ?? 0}
-                </strong>
-              </p>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-sky-200 bg-sky-50/40 overflow-hidden">
-                  <div className="px-3 py-2 border-b border-sky-200">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      On Calendar ({reconcileCompare.calendar?.length ?? reconcileCompare.calendarCount ?? 0})
-                    </h4>
-                    <p className="text-xs text-gray-500">Full month snapshot from Google Calendar</p>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={reconcileCompare.calendar}
-                    emptyText="No Calendar lessons for this month"
-                    headClassName="bg-sky-50"
-                    showSource
-                  />
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50/40 overflow-hidden">
-                  <div className="px-3 py-2 border-b border-slate-200">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      On local ({reconcileCompare.local?.length ?? reconcileCompare.localCount ?? 0})
-                    </h4>
-                    <p className="text-xs text-gray-500">Synced rows in monthly_schedule</p>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={reconcileCompare.local}
-                    emptyText="No local synced lessons for this month"
-                    headClassName="bg-slate-50"
-                    showSource
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-amber-200 bg-amber-50/40 overflow-hidden">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-amber-200">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900">
-                        Calendar only (
-                        {(reconcileCompare.calendar_only || reconcileCompare.missing)?.length ?? 0})
-                      </h4>
-                      <p className="text-xs text-gray-500">On Calendar, not in local — add these</p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={
-                        !!reconcileApplyLoading ||
-                        !!reconcileRowBusy ||
-                        reconcileMonthLoading ||
-                        !((reconcileCompare.calendar_only || reconcileCompare.missing)?.length > 0)
-                      }
-                      onClick={async () => {
-                        setReconcileMonthError('')
-                        setReconcileApplyLoading('add')
-                        try {
-                          const month = reconcileCompare.month || getCurrentYyyyMmJst()
-                          const res = await api.reconcileCalendarMonth({ month, action: 'add' })
-                          setReconcileApplyResult(res)
-                          setReconcileCompare({
-                            ...reconcileCompare,
-                            month: res.month,
-                            missing: res.missing || [],
-                            disappeared: res.disappeared || [],
-                            calendar_only: res.calendar_only || res.missing || [],
-                            local_only: res.local_only || res.disappeared || [],
-                            calendar: res.calendar || [],
-                            local: res.local || [],
-                            calendarCount: res.calendarCount,
-                            localCount: res.localCount,
-                            fetched: res.fetched,
-                          })
-                          success(`Added missing lessons for ${res.month} (~${res.added ?? 0})`)
-                          await loadMonthlyRows(monthlyOffset, { silent: true })
-                        } catch (err) {
-                          setReconcileMonthError(err.message || 'Add missing failed')
-                        } finally {
-                          setReconcileApplyLoading('')
-                        }
-                      }}
-                      className="px-2.5 py-1.5 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
-                    >
-                      {reconcileApplyLoading === 'add' ? 'Adding…' : 'Add to local'}
-                    </button>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={reconcileCompare.calendar_only || reconcileCompare.missing}
-                    emptyText="None — local has everything from Calendar"
-                    headClassName="bg-amber-50"
-                    showSource={false}
-                    disableActions={!!reconcileApplyLoading || reconcileMonthLoading}
-                    rowBusyKey={reconcileRowBusy}
-                    onAddRow={async (row) => {
-                      const key = reconcileRowKey(row)
-                      setReconcileMonthError('')
-                      setReconcileRowBusy(key)
-                      try {
-                        const month = reconcileCompare.month || getCurrentYyyyMmJst()
-                        const res = await api.reconcileCalendarMonth({
-                          month,
-                          action: 'add',
-                          entries: [
-                            {
-                              event_id: row.event_id,
-                              student_name: row.student_name,
-                            },
-                          ],
-                        })
-                        setReconcileApplyResult(res)
-                        setReconcileCompare({
-                          ...reconcileCompare,
-                          month: res.month,
-                          missing: res.missing || [],
-                          disappeared: res.disappeared || [],
-                          calendar_only: res.calendar_only || res.missing || [],
-                          local_only: res.local_only || res.disappeared || [],
-                          calendar: res.calendar || [],
-                          local: res.local || [],
-                          calendarCount: res.calendarCount,
-                          localCount: res.localCount,
-                          fetched: res.fetched,
-                        })
-                        success(`Added ${row.student_name || 'lesson'} to local`)
-                        await loadMonthlyRows(monthlyOffset, { silent: true })
-                      } catch (err) {
-                        setReconcileMonthError(err.message || 'Add to local failed')
-                      } finally {
-                        setReconcileRowBusy('')
-                      }
-                    }}
-                  />
-                </div>
-                <div className="rounded-lg border border-red-200 bg-red-50/40 overflow-hidden">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-red-200">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900">
-                        Local only (
-                        {(reconcileCompare.local_only || reconcileCompare.disappeared)?.length ?? 0})
-                      </h4>
-                      <p className="text-xs text-gray-500">In local, not on Calendar — remove these</p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={
-                        !!reconcileApplyLoading ||
-                        !!reconcileRowBusy ||
-                        reconcileMonthLoading ||
-                        !((reconcileCompare.local_only || reconcileCompare.disappeared)?.length > 0)
-                      }
-                      onClick={async () => {
-                        setReconcileMonthError('')
-                        setReconcileApplyLoading('remove')
-                        try {
-                          const month = reconcileCompare.month || getCurrentYyyyMmJst()
-                          const res = await api.reconcileCalendarMonth({ month, action: 'remove' })
-                          setReconcileApplyResult(res)
-                          setReconcileCompare({
-                            ...reconcileCompare,
-                            month: res.month,
-                            missing: res.missing || [],
-                            disappeared: res.disappeared || [],
-                            calendar_only: res.calendar_only || res.missing || [],
-                            local_only: res.local_only || res.disappeared || [],
-                            calendar: res.calendar || [],
-                            local: res.local || [],
-                            calendarCount: res.calendarCount,
-                            localCount: res.localCount,
-                            fetched: res.fetched,
-                          })
-                          success(`Removed ${res.removed ?? 0} local-only lessons for ${res.month}`)
-                          await loadMonthlyRows(monthlyOffset, { silent: true })
-                        } catch (err) {
-                          setReconcileMonthError(err.message || 'Remove local-only failed')
-                        } finally {
-                          setReconcileApplyLoading('')
-                        }
-                      }}
-                      className="px-2.5 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer disabled:opacity-50"
-                    >
-                      {reconcileApplyLoading === 'remove' ? 'Removing…' : 'Remove from local'}
-                    </button>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={reconcileCompare.local_only || reconcileCompare.disappeared}
-                    emptyText="None — no extra local synced rows"
-                    headClassName="bg-red-50"
-                    showSource={false}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -1249,7 +910,13 @@ export default function Admin() {
       </div>
 
       {showBackfillModal && (
-        <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
+        <BackfillScheduleModal onClose={() => setShowBackfillModal(false)}
+      {showCalendarEvents && (
+        <CalendarEventsModal
+          onClose={() => setShowCalendarEvents(false)}
+          onApplied={() => loadMonthlyRows(monthlyOffset, { silent: true })}
+        />
+      )} />
       )}
       {restoreTarget != null && (
         <ConfirmActionModal

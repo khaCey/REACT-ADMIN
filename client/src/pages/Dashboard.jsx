@@ -9,10 +9,11 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-import { LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import StudentDetailsModal from '../components/StudentDetailsModal'
+import CalendarEventsModal from '../components/CalendarEventsModal'
 import FullPageLoading from '../components/FullPageLoading'
 
 function formatMonthLabel(yyyyMm) {
@@ -182,6 +183,7 @@ export default function Dashboard() {
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showCalendarEvents, setShowCalendarEvents] = useState(false)
 
   const { lastSynced } = useCalendarPollingContext()
 
@@ -238,11 +240,19 @@ export default function Dashboard() {
 
   return (
     <div className="w-full flex flex-col h-full min-h-0 overflow-hidden">
-      <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200">
+      <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200 gap-3">
         <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <LayoutDashboard className="w-6 h-6 text-green-600" />
           Dashboard
         </h2>
+        <button
+          type="button"
+          onClick={() => setShowCalendarEvents(true)}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
+        >
+          <Calendar className="w-4 h-4 text-green-600" />
+          Calendar Events
+        </button>
       </div>
 
       {error && (
@@ -460,6 +470,12 @@ export default function Dashboard() {
           onStudentDeleted={fetchDashboard}
           onStudentUpdated={fetchDashboard}
           onLessonNotesChanged={() => fetchDashboard({ silent: true })}
+        />
+      )}
+      {showCalendarEvents && (
+        <CalendarEventsModal
+          onClose={() => setShowCalendarEvents(false)}
+          onApplied={() => fetchDashboard({ silent: true })}
         />
       )}
     </div>
