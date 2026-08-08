@@ -1010,7 +1010,7 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
         : year && /^\d{4}$/.test(String(year))
           ? { reconcileOnlyYear: String(year) }
           : {};
-    const { upserted, months } = await upsertMonthlySchedule(data, reconcileOpts);
+    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, reconcileOpts);
 
     // Keep teacher_schedules in sync so booking UI has correct capacity/constraints.
     // (Booking grid calls GET /schedule/week which reads teacher_schedules from DB.)
@@ -1029,12 +1029,120 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
       upserted,
       months,
       fetched: data.length,
+      deletedOrphans: deletedOrphans || 0,
       backfill: json.backfill,
       teacherSchedulesRefresh,
     });
   } catch (err) {
     const detail = formatFetchError(err);
     console.error('[calendar-poll/backfill] error:', detail);
+    res.status(500).json({ error: detail });
+  }
+});
+
+/**
+ * Explicit month reconcile: fetch full Calendar snapshot for one month, upsert missing/changed rows,
+ * and delete local synced rows that disappeared from Calendar (forceReconcile; does not need env flag).
+ */
+app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    if (!url || !key) {
+      return res.status(400).json({
+        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+      });
+    }
+    let month = String(req.body?.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      const jstNow = new Date(Date.now() + JST_OFFSET_MS);
+      month = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const before = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM monthly_schedule
+        WHERE date IS NOT NULL
+          AND to_char(date, 'YYYY-MM') = $1
+          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      [month]
+    );
+    const localBefore = Number(before.rows?.[0]?.n) || 0;
+
+    const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1&month=${encodeURIComponent(month)}`;
+    let fetchRes;
+    try {
+      fetchRes = await fetch(gasUrl);
+    } catch (err) {
+      const detail = formatFetchError(err);
+      throw new Error(`Failed to reach Calendar GAS: ${detail}`);
+    }
+    const json = await fetchRes.json().catch(() => ({}));
+    if (!fetchRes.ok) {
+      const msg = json?.error || `GAS responded with ${fetchRes.status}`;
+      return res.status(502).json({ error: msg });
+    }
+    if (json.error) {
+      return res.status(400).json({ error: json.error });
+    }
+    const data = Array.isArray(json.data) ? json.data : [];
+    console.log('[calendar-poll/reconcile-month]', month, 'fetched', data.length, 'rows from GAS; localBefore=', localBefore);
+
+    const { upserted, months, deletedOrphans, skippedDismissed } = await upsertMonthlySchedule(data, {
+      reconcile: true,
+      forceReconcile: true,
+      reconcileMonthsAllowlist: [month],
+    });
+
+    const after = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM monthly_schedule
+        WHERE date IS NOT NULL
+          AND to_char(date, 'YYYY-MM') = $1
+          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      [month]
+    );
+    const localAfter = Number(after.rows?.[0]?.n) || 0;
+    const removed = deletedOrphans || 0;
+    // Approx added = new local size - (old size - removed); clamp at 0
+    const added = Math.max(0, localAfter - (localBefore - removed));
+
+    let teacherSchedulesRefresh = null;
+    try {
+      teacherSchedulesRefresh = await refreshTeacherSchedulesFromGASForMonth(month);
+    } catch (err) {
+      console.warn('[calendar-poll/reconcile-month] teacher schedule refresh failed:', err.message);
+      teacherSchedulesRefresh = { ok: false, error: err.message };
+    }
+
+    console.log(
+      '[calendar-poll/reconcile-month]',
+      month,
+      'upserted',
+      upserted,
+      'removed',
+      removed,
+      'local',
+      localBefore,
+      '→',
+      localAfter
+    );
+    res.json({
+      ok: true,
+      month,
+      fetched: data.length,
+      upserted,
+      skippedDismissed: skippedDismissed || 0,
+      removed,
+      added,
+      localBefore,
+      localAfter,
+      months,
+      teacherSchedulesRefresh,
+    });
+  } catch (err) {
+    const detail = formatFetchError(err);
+    console.error('[calendar-poll/reconcile-month] error:', detail);
     res.status(500).json({ error: detail });
   }
 });

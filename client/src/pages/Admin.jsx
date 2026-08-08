@@ -29,6 +29,9 @@ function formatMonthlyScheduleDateTime(date, start) {
 export default function Admin() {
   const { success } = useToast()
   const [showBackfillModal, setShowBackfillModal] = useState(false)
+  const [reconcileMonthLoading, setReconcileMonthLoading] = useState(false)
+  const [reconcileMonthError, setReconcileMonthError] = useState('')
+  const [reconcileMonthResult, setReconcileMonthResult] = useState(null)
   const [backups, setBackups] = useState([])
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
@@ -461,14 +464,58 @@ export default function Admin() {
           <p className="text-sm text-gray-600 mb-4">
             Fetch past lessons from Google Calendar or from the MonthlySchedule sheet and sync them to the database. Existing rows are updated (upsert).
           </p>
-          <button
-            type="button"
-            onClick={() => setShowBackfillModal(true)}
-            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Backfill past schedule
-          </button>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <button
+              type="button"
+              onClick={() => setShowBackfillModal(true)}
+              className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Backfill past schedule
+            </button>
+            <button
+              type="button"
+              disabled={reconcileMonthLoading}
+              onClick={async () => {
+                setReconcileMonthError('')
+                setReconcileMonthResult(null)
+                setReconcileMonthLoading(true)
+                try {
+                  const month = getCurrentYyyyMmJst()
+                  const res = await api.reconcileCalendarMonth({ month })
+                  setReconcileMonthResult(res)
+                  success(
+                    `${res.month}: Calendar ${res.fetched ?? 0} · added ~${res.added ?? 0} · removed ${res.removed ?? 0} · upserted ${res.upserted ?? 0}`
+                  )
+                  await loadMonthlyRows(monthlyOffset, { silent: true })
+                } catch (err) {
+                  setReconcileMonthError(err.message || 'Reconcile failed')
+                } finally {
+                  setReconcileMonthLoading(false)
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-semibold cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${reconcileMonthLoading ? 'animate-spin' : ''}`} />
+              {reconcileMonthLoading
+                ? 'Reconciling…'
+                : `Reconcile ${getCurrentYyyyMmJst()} (add missing / remove gone)`}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mb-2">
+            Reconcile fetches all Calendar lessons for this month (JST), upserts anything missing or changed, and deletes local synced rows that are no longer on Calendar.
+          </p>
+          {reconcileMonthError && (
+            <p className="text-sm text-red-600 mb-2">{reconcileMonthError}</p>
+          )}
+          {reconcileMonthResult && (
+            <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+              <strong>{reconcileMonthResult.month}</strong>: fetched {reconcileMonthResult.fetched ?? 0} from
+              Calendar · local {reconcileMonthResult.localBefore ?? '—'} → {reconcileMonthResult.localAfter ?? '—'} ·
+              added ~{reconcileMonthResult.added ?? 0} · removed {reconcileMonthResult.removed ?? 0} · upserted{' '}
+              {reconcileMonthResult.upserted ?? 0}
+            </p>
+          )}
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">

@@ -326,6 +326,10 @@ export const api = {
   backfillFromCalendar: (body) =>
     fetchApi('/calendar-poll/backfill', { method: 'POST', body: JSON.stringify(body) }),
 
+  /** Fetch Calendar snapshot for a month, upsert missing, delete local rows that disappeared (force reconcile). */
+  reconcileCalendarMonth: (body = {}) =>
+    fetchApi('/calendar-poll/reconcile-month', { method: 'POST', body: JSON.stringify(body) }),
+
   syncFromSheet: () =>
     fetchApi('/calendar-poll/sync-from-sheet', { method: 'POST' }),
 
