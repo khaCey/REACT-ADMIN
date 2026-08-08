@@ -439,6 +439,151 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys)
   return deleted;
 }
 
+function mapCompareLessonRow(row) {
+  const startIso =
+    row.startTs ||
+    (row.start instanceof Date
+      ? row.start.toISOString()
+      : row.start
+        ? new Date(row.start).toISOString()
+        : null);
+  const endIso =
+    row.endTs ||
+    (row.end instanceof Date
+      ? row.end.toISOString()
+      : row.end
+        ? new Date(row.end).toISOString()
+        : null);
+  const date =
+    row.date instanceof Date
+      ? row.date.toISOString().slice(0, 10)
+      : row.date
+        ? String(row.date).slice(0, 10)
+        : null;
+  return {
+    event_id: row.eventId || row.event_id || null,
+    student_name: row.studentName || row.student_name || null,
+    title: row.title || null,
+    date,
+    start: startIso,
+    end: endIso,
+    teacher_name: row.teacherName || row.teacher_name || null,
+    lesson_kind: row.lessonKind || row.lesson_kind || null,
+    status: row.status || null,
+  };
+}
+
+/**
+ * Compare GAS month snapshot to local synced monthly_schedule rows.
+ * Missing = on Calendar, not local. Disappeared = local synced, not on Calendar.
+ * @param {Array<Record<string, unknown>>} data
+ * @param {string} month YYYY-MM
+ */
+export async function compareMonthSchedule(data, month) {
+  const ym = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(ym)) {
+    throw new Error('month must be YYYY-MM');
+  }
+  const { rows, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
+    Array.isArray(data) ? data : []
+  );
+  const calendarRows = rows.filter((r) => r.date && String(r.date).slice(0, 7) === ym);
+
+  const existing = await query(
+    `SELECT ms.event_id, ms.student_name, ms.title, ms.date, ms.start, ms."end",
+            ms.teacher_name, ms.lesson_kind, ms.status
+       FROM monthly_schedule ms
+      WHERE ms.date IS NOT NULL
+        AND to_char(ms.date, 'YYYY-MM') = $1
+        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
+      ORDER BY ms.start ASC NULLS LAST, ms.student_name ASC`,
+    [ym]
+  );
+  const localRows = existing.rows || [];
+  const localKeys = new Set(localRows.map((r) => `${r.event_id}\t${r.student_name}`));
+  const localSlotKeys = new Set();
+  for (const r of localRows) {
+    const sk = lessonSlotKey(r.student_name, r.start);
+    if (sk) localSlotKeys.add(sk);
+  }
+
+  const missingKeys = new Set();
+  const missing = [];
+  for (const row of calendarRows) {
+    const k = `${row.eventId}\t${row.studentName}`;
+    if (localKeys.has(k)) continue;
+    const slot = lessonSlotKey(row.studentName, row.startTs);
+    if (slot && localSlotKeys.has(slot)) continue;
+    const mapped = { ...mapCompareLessonProp(row), source: 'calendar_only' };
+    missing.push(mapped);
+    missingKeys.add(k);
+    if (slot) missingKeys.add(`slot:${slot}`);
+  }
+
+  const disappearedKeys = new Set();
+  const disappeared = [];
+  for (const r of localRows) {
+    const k = `${r.event_id}\t${r.student_name}`;
+    if (incomingKeys.has(k)) continue;
+    const slot = lessonSlotKey(r.student_name, r.start);
+    if (slot && incomingSlotKeys.has(slot)) continue;
+    const block = await query(
+      `SELECT 1 FROM reschedules rs
+         WHERE TRIM(rs.from_event_id) = TRIM($1::text)
+           AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM($2::text), '\\s+', ' ', 'g')
+         LIMIT 1`,
+      [r.event_id, r.student_name]
+    );
+    if ((block.rows || []).length > 0) continue;
+    const mapped = { ...mapCompareLessonProp(r), source: 'local_only' };
+    disappeared.push(mapped);
+    disappearedKeys.add(k);
+  }
+
+  const calendar = calendarRows.map((row) => {
+    const k = `${row.eventId}\t${row.studentName}`;
+    const slot = lessonSlotKey(row.studentName, row.startTs);
+    const only = missingKeys.has(k) || (slot && missingKeys.has(`slot:${slot}`));
+    return {
+      ...mapCompareLessonProp(row),
+      source: only ? 'calendar_only' : 'both',
+    };
+  });
+
+  const local = localRows.map((r) => {
+    const k = `${r.event_id}\t${r.student_name}`;
+    return {
+      ...mapCompareLessonProp(r),
+      source: disappearedKeys.has(k) ? 'local_only' : 'both',
+    };
+  });
+
+  return {
+    month: ym,
+    fetched: Array.isArray(data) ? data.length : 0,
+    calendarCount: calendarRows.length,
+    localCount: localRows.length,
+    calendar,
+    local,
+    missing,
+    disappeared,
+    calendar_only: missing,
+    local_only: disappeared,
+  };
+}
+
+export async function removeDisappearedForMonth(data, month) {
+  const ym = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(ym)) {
+    throw new Error('month must be YYYY-MM');
+  }
+  const { incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
+    Array.isArray(data) ? data : []
+  );
+  return reconcileMonthsToSnapshot(new Set([ym]), incomingKeys, incomingSlotKeys);
+}
+
 /**
  * Normalize one removal from calendar-poll/sync (string key or object).
  * String keys: `eventID|studentName` (legacy) or `eventID|studentName|YYYY-MM-DD` (recurring-safe).

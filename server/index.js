@@ -19,7 +19,7 @@ process.on('unhandledRejection', (reason, promise) => {
 import express from 'express';
 import cors from 'cors';
 import { query, runMigrations } from './db/index.js';
-import { upsertMonthlySchedule } from './lib/calendarSync.js';
+import { upsertMonthlySchedule, compareMonthSchedule, removeDisappearedForMonth } from './lib/calendarSync.js';
 import { fetchMonthlyScheduleFromSheet } from './lib/googleSheets.js';
 import studentsRouter from './routes/students.js';
 import paymentsRouter from './routes/payments.js';
@@ -1041,8 +1041,10 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
 });
 
 /**
- * Explicit month reconcile: fetch full Calendar snapshot for one month, upsert missing/changed rows,
- * and delete local synced rows that disappeared from Calendar (forceReconcile; does not need env flag).
+ * Month reconcile against Calendar:
+ * - action=compare (default): list missing (Calendar-only) and disappeared (local-only); no writes
+ * - action=add: upsert Calendar snapshot (no orphan deletes)
+ * - action=remove: delete local synced rows missing from Calendar (forceReconcile)
  */
 app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -1058,16 +1060,10 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
       const jstNow = new Date(Date.now() + JST_OFFSET_MS);
       month = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
     }
-
-    const before = await query(
-      `SELECT COUNT(*)::int AS n
-         FROM monthly_schedule
-        WHERE date IS NOT NULL
-          AND to_char(date, 'YYYY-MM') = $1
-          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
-      [month]
-    );
-    const localBefore = Number(before.rows?.[0]?.n) || 0;
+    const action = String(req.body?.action || 'compare').trim().toLowerCase();
+    if (!['compare', 'add', 'remove'].includes(action)) {
+      return res.status(400).json({ error: 'action must be compare, add, or remove' });
+    }
 
     const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1&month=${encodeURIComponent(month)}`;
     let fetchRes;
@@ -1086,13 +1082,50 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
       return res.status(400).json({ error: json.error });
     }
     const data = Array.isArray(json.data) ? json.data : [];
-    console.log('[calendar-poll/reconcile-month]', month, 'fetched', data.length, 'rows from GAS; localBefore=', localBefore);
 
-    const { upserted, months, deletedOrphans, skippedDismissed } = await upsertMonthlySchedule(data, {
-      reconcile: true,
-      forceReconcile: true,
-      reconcileMonthsAllowlist: [month],
-    });
+    if (action === 'compare') {
+      const comparison = await compareMonthSchedule(data, month);
+      console.log(
+        '[calendar-poll/reconcile-month] compare',
+        month,
+        'fetched',
+        comparison.fetched,
+        'missing',
+        comparison.missing.length,
+        'disappeared',
+        comparison.disappeared.length
+      );
+      return res.json({ ok: true, action: 'compare', ...comparison });
+    }
+
+    const before = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM monthly_schedule
+        WHERE date IS NOT NULL
+          AND to_char(date, 'YYYY-MM') = $1
+          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      [month]
+    );
+    const localBefore = Number(before.rows?.[0]?.n) || 0;
+
+    let upserted = 0;
+    let deletedOrphans = 0;
+    let skippedDismissed = 0;
+    let months = [];
+
+    if (action === 'add') {
+      const result = await upsertMonthlySchedule(data, {
+        reconcile: false,
+        reconcileMonthsAllowlist: [month],
+      });
+      upserted = result.upserted;
+      skippedDismissed = result.skippedDismissed || 0;
+      months = result.months || [];
+    } else {
+      // remove — delete orphans only; do not upsert (avoids also adding missing)
+      deletedOrphans = await removeDisappearedForMonth(data, month);
+      months = [month];
+    }
 
     const after = await query(
       `SELECT COUNT(*)::int AS n
@@ -1104,8 +1137,7 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
     );
     const localAfter = Number(after.rows?.[0]?.n) || 0;
     const removed = deletedOrphans || 0;
-    // Approx added = new local size - (old size - removed); clamp at 0
-    const added = Math.max(0, localAfter - (localBefore - removed));
+    const added = action === 'add' ? Math.max(0, localAfter - localBefore) : 0;
 
     let teacherSchedulesRefresh = null;
     try {
@@ -1115,8 +1147,12 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
       teacherSchedulesRefresh = { ok: false, error: err.message };
     }
 
+    // Fresh compare after apply so UI can refresh lists
+    const comparison = await compareMonthSchedule(data, month);
+
     console.log(
       '[calendar-poll/reconcile-month]',
+      action,
       month,
       'upserted',
       upserted,
@@ -1129,16 +1165,21 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async 
     );
     res.json({
       ok: true,
+      action,
       month,
       fetched: data.length,
       upserted,
-      skippedDismissed: skippedDismissed || 0,
+      skippedDismissed,
       removed,
       added,
       localBefore,
       localAfter,
       months,
       teacherSchedulesRefresh,
+      missing: comparison.missing,
+      disappeared: comparison.disappeared,
+      calendarCount: comparison.calendarCount,
+      localCount: comparison.localCount,
     });
   } catch (err) {
     const detail = formatFetchError(err);
