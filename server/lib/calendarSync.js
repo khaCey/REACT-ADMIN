@@ -544,11 +544,12 @@ function monthsEligibleForReconcile(months, options) {
  *   reconcileOnlyYear?: string,
  * }} [options]
  * - reconcile: delete DB rows in snapshot months not in `data` (default true).
+ * - forceReconcile: when true, orphan deletes run even if CALENDAR_RECONCILE_ORPHANS is off (explicit admin reconcile).
  * - reconcileMonthsAllowlist: only these YYYY-MM months are reconciled (intersected with months from payload).
  * - reconcileOnlyYear: only months starting with this YYYY (after allowlist filter).
  */
 export async function upsertMonthlySchedule(data, options = {}) {
-  const { removed = [], reconcile = true } = options;
+  const { removed = [], reconcile = true, forceReconcile = false } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
   const { rows, months, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
@@ -652,7 +653,8 @@ export async function upsertMonthlySchedule(data, options = {}) {
   let deletedOrphans = 0;
   // Reconcile after upsert so rows are updated/inserted before we compare keys; avoids wiping lessons
   // that are present in this payload but still keyed by an older event_id string.
-  if (reconcile && envAllowReconcile && monthsToReconcile.size > 0) {
+  // forceReconcile: explicit admin "sync this month" bypasses CALENDAR_RECONCILE_ORPHANS=0.
+  if (reconcile && (envAllowReconcile || forceReconcile) && monthsToReconcile.size > 0) {
     deletedOrphans = await reconcileMonthsToSnapshot(monthsToReconcile, incomingKeys, incomingSlotKeys);
   }
 
