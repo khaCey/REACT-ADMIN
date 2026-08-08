@@ -507,15 +507,20 @@ export async function compareMonthSchedule(data, month) {
     if (sk) localSlotKeys.add(sk);
   }
 
+  const missingKeys = new Set();
   const missing = [];
   for (const row of calendarRows) {
     const k = `${row.eventId}\t${row.studentName}`;
     if (localKeys.has(k)) continue;
     const slot = lessonSlotKey(row.studentName, row.startTs);
     if (slot && localSlotKeys.has(slot)) continue;
-    missing.push(mapCompareLessonRow(row));
+    const mapped = { ...mapCompareLessonProp(row), source: 'calendar_only' };
+    missing.push(mapped);
+    missingKeys.add(k);
+    if (slot) missingKeys.add(`slot:${slot}`);
   }
 
+  const disappearedKeys = new Set();
   const disappeared = [];
   for (const r of localRows) {
     const k = `${r.event_id}\t${r.student_name}`;
@@ -531,25 +536,43 @@ export async function compareMonthSchedule(data, month) {
       [r.event_id, r.student_name]
     );
     if ((block.rows || []).length > 0) continue;
-    disappeared.push(mapCompareLessonRow(r));
+    const mapped = { ...mapCompareLessonProp(r), source: 'local_only' };
+    disappeared.push(mapped);
+    disappearedKeys.add(k);
   }
+
+  const calendar = calendarRows.map((row) => {
+    const k = `${row.eventId}\t${row.studentName}`;
+    const slot = lessonSlotKey(row.studentName, row.startTs);
+    const only = missingKeys.has(k) || (slot && missingKeys.has(`slot:${slot}`));
+    return {
+      ...mapCompareLessonProp(row),
+      source: only ? 'calendar_only' : 'both',
+    };
+  });
+
+  const local = localRows.map((r) => {
+    const k = `${r.event_id}\t${r.student_name}`;
+    return {
+      ...mapCompareLessonProp(r),
+      source: disappearedKeys.has(k) ? 'local_only' : 'both',
+    };
+  });
 
   return {
     month: ym,
     fetched: Array.isArray(data) ? data.length : 0,
     calendarCount: calendarRows.length,
     localCount: localRows.length,
+    calendar,
+    local,
     missing,
     disappeared,
+    calendar_only: missing,
+    local_only: disappeared,
   };
 }
 
-/**
- * Delete local synced rows for a month that are not in the Calendar snapshot (no upserts).
- * @param {Array<Record<string, unknown>>} data
- * @param {string} month YYYY-MM
- * @returns {Promise<number>} deleted count
- */
 export async function removeDisappearedForMonth(data, month) {
   const ym = String(month || '').trim();
   if (!/^\d{4}-\d{2}$/.test(ym)) {
