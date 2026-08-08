@@ -514,7 +514,7 @@ export async function compareMonthSchedule(data, month) {
     if (localKeys.has(k)) continue;
     const slot = lessonSlotKey(row.studentName, row.startTs);
     if (slot && localSlotKeys.has(slot)) continue;
-    const mapped = { ...mapCompareLessonProp(row), source: 'calendar_only' };
+    const mapped = { ...mapCompareLessonRow(row), source: 'calendar_only' };
     missing.push(mapped);
     missingKeys.add(k);
     if (slot) missingKeys.add(`slot:${slot}`);
@@ -536,7 +536,7 @@ export async function compareMonthSchedule(data, month) {
       [r.event_id, r.student_name]
     );
     if ((block.rows || []).length > 0) continue;
-    const mapped = { ...mapCompareLessonProp(r), source: 'local_only' };
+    const mapped = { ...mapCompareLessonRow(r), source: 'local_only' };
     disappeared.push(mapped);
     disappearedKeys.add(k);
   }
@@ -546,7 +546,7 @@ export async function compareMonthSchedule(data, month) {
     const slot = lessonSlotKey(row.studentName, row.startTs);
     const only = missingKeys.has(k) || (slot && missingKeys.has(`slot:${slot}`));
     return {
-      ...mapCompareLessonProp(row),
+      ...mapCompareLessonRow(row),
       source: only ? 'calendar_only' : 'both',
     };
   });
@@ -554,7 +554,7 @@ export async function compareMonthSchedule(data, month) {
   const local = localRows.map((r) => {
     const k = `${r.event_id}\t${r.student_name}`;
     return {
-      ...mapCompareLessonProp(r),
+      ...mapCompareLessonRow(r),
       source: disappearedKeys.has(k) ? 'local_only' : 'both',
     };
   });
