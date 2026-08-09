@@ -72,7 +72,6 @@ const FIELD_LABELS = {
   end: 'End',
   student_name: 'Student',
   is_kids_lesson: 'Kids lesson',
-  teacher_name: 'Teacher',
 }
 
 function getEntityDisplayLabel(change) {
