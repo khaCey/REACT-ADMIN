@@ -267,6 +267,40 @@ export async function recordScheduleSlotDismissals(rows) {
   }
 }
 
+/**
+ * Clear dismissals so an explicit "Add to local" can recreate the slot.
+ * @param {Array<{ studentName?: string, student_name?: string, date?: string, startTs?: string, start?: Date|string }>} rows
+ */
+export async function clearScheduleSlotDismissals(rows) {
+  for (const row of rows || []) {
+    const studentName = normalizeName(row.studentName ?? row.student_name);
+    const dateVal = row.date;
+    const startVal = row.startTs ?? row.start;
+    if (!studentName || !dateVal || !startVal) continue;
+    const dateStr =
+      dateVal instanceof Date
+        ? dateVal.toISOString().slice(0, 10)
+        : String(dateVal).trim().slice(0, 10);
+    const startDate = startVal instanceof Date ? startVal : new Date(startVal);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || Number.isNaN(startDate.getTime())) continue;
+    try {
+      await query(
+        `DELETE FROM schedule_slot_dismissals
+          WHERE REGEXP_REPLACE(TRIM(student_name), '\\s+', ' ', 'g')
+              = REGEXP_REPLACE(TRIM($1::text), '\\s+', ' ', 'g')
+            AND lesson_date = $2::date
+            AND start_time_utc = $3::timestamptz`,
+        [studentName, dateStr, startDate.toISOString()]
+      );
+    } catch (err) {
+      if (String(err?.message || '').includes('schedule_slot_dismissals')) {
+        return;
+      }
+      throw err;
+    }
+  }
+}
+
 async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
   const months = new Set();
@@ -506,6 +540,7 @@ export async function compareMonthSchedule(data, month) {
     const sk = lessonSlotKey(r.student_name, r.start);
     if (sk) localSlotKeys.add(sk);
   }
+  const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(new Set([ym]));
 
   const missingKeys = new Set();
   const missing = [];
@@ -514,7 +549,12 @@ export async function compareMonthSchedule(data, month) {
     if (localKeys.has(k)) continue;
     const slot = lessonSlotKey(row.studentName, row.startTs);
     if (slot && localSlotKeys.has(slot)) continue;
-    const mapped = { ...mapCompareLessonRow(row), source: 'calendar_only' };
+    const dismissed = !!(slot && dismissedSlotKeys.has(slot));
+    const mapped = {
+      ...mapCompareLessonRow(row),
+      source: 'calendar_only',
+      dismissed,
+    };
     missing.push(mapped);
     missingKeys.add(k);
     if (slot) missingKeys.add(`slot:${slot}`);
@@ -689,15 +729,23 @@ function monthsEligibleForReconcile(months, options) {
  *   reconcileMonthsAllowlist?: string[],
  *   reconcileOnlyYear?: string,
  *   onlyKeys?: Set<string> | string[],
+ *   ignoreDismissals?: boolean,
  * }} [options]
  * - reconcile: delete DB rows in snapshot months not in `data` (default true).
  * - forceReconcile: when true, orphan deletes run even if CALENDAR_RECONCILE_ORPHANS is off (explicit admin reconcile).
  * - reconcileMonthsAllowlist: only these YYYY-MM months are reconciled (intersected with months from payload).
  * - reconcileOnlyYear: only months starting with this YYYY (after allowlist filter).
  * - onlyKeys: optional `${eventId}\\t${studentName}` allowlist — upsert only those rows.
+ * - ignoreDismissals: when true (explicit Add to local), clear dismissals and insert even if previously removed in-app.
  */
 export async function upsertMonthlySchedule(data, options = {}) {
-  const { removed = [], reconcile = true, forceReconcile = false, onlyKeys: onlyKeysOpt } = options;
+  const {
+    removed = [],
+    reconcile = true,
+    forceReconcile = false,
+    onlyKeys: onlyKeysOpt,
+    ignoreDismissals = false,
+  } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
   const built = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
@@ -718,7 +766,12 @@ export async function upsertMonthlySchedule(data, options = {}) {
       if (sk) incomingSlotKeys.add(sk);
     }
   }
-  const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(months);
+  const dismissedSlotKeys = ignoreDismissals
+    ? new Set()
+    : await loadDismissedSlotKeysForMonths(months);
+  if (ignoreDismissals && rows.length > 0) {
+    await clearScheduleSlotDismissals(rows);
+  }
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
   const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '0').trim() === '1';
 

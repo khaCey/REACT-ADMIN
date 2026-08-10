@@ -1129,6 +1129,7 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => 
       const result = await upsertMonthlySchedule(data, {
         reconcile: false,
         reconcileMonthsAllowlist: [month],
+        ignoreDismissals: true,
         ...(onlyKeys.length > 0 ? { onlyKeys } : {}),
       });
       upserted = result.upserted;

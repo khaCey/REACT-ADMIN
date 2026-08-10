@@ -87,7 +87,14 @@ function ReconcileLessonTable({
                     {formatReconcileLessonWhen(row)}
                   </td>
                   <td className="px-3 py-2">{row.student_name || '—'}</td>
-                  <td className="px-3 py-2">{row.teacher_name || '—'}</td>
+                  <td className="px-3 py-2">
+                    {row.teacher_name || '—'}
+                    {row.dismissed ? (
+                      <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                        Was removed
+                      </span>
+                    ) : null}
+                  </td>
                   {showSource ? (
                     <td className="px-3 py-2">
                       <span
@@ -260,7 +267,10 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                       <h4 className="text-sm font-semibold text-gray-900">
                         Calendar only ({(compare.calendar_only || compare.missing)?.length ?? 0})
                       </h4>
-                      <p className="text-xs text-gray-500">On Calendar, not in local — add these</p>
+                      <p className="text-xs text-gray-500">
+                        On Calendar, not in local — add these. Rows marked “Was removed” were deleted in-app earlier
+                        (dismissal); Add clears that and restores them.
+                      </p>
                     </div>
                     <button
                       type="button"
