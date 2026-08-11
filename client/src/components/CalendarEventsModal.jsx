@@ -260,7 +260,6 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     rows={compare.calendar_only || compare.missing}
                     emptyText="None — local has everything from Calendar"
                     headClassName="bg-amber-50"
-                    showSource={false}
                     disableActions={busy}
                     rowBusyKey={rowBusy}
                     onAddRow={async (row) => {
