@@ -439,8 +439,9 @@ async function buildMonthlyScheduleRows(data) {
  * @param {Set<string>} months - YYYY-MM
  * @param {Set<string>} incomingKeys - `${eventId}\t${studentName}`
  * @param {Set<string>} incomingSlotKeys - student+JST date+UTC HH-mm-ss from start (see lessonSlotKey)
+ * @param {Set<string>|null} [onlyKeys] - when set, only delete these `${eventId}\t${studentName}` rows (still must be orphans)
  */
-async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys) {
+async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys, onlyKeys = null) {
   let deleted = 0;
   for (const ym of months) {
     const existing = await query(
@@ -453,6 +454,9 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys)
     );
     for (const r of existing.rows || []) {
       const k = `${r.event_id}\t${r.student_name}`;
+      if (onlyKeys && !onlyKeys.has(k)) {
+        continue;
+      }
       if (incomingKeys.has(k)) {
         continue;
       }
@@ -621,7 +625,14 @@ export async function compareMonthSchedule(data, month) {
   };
 }
 
-export async function removeDisappearedForMonth(data, month) {
+/**
+ * Delete local synced rows for a month that are missing from the Calendar snapshot.
+ * @param {Array<Record<string, unknown>>} data
+ * @param {string} month YYYY-MM
+ * @param {{ onlyKeys?: Set<string> | string[] }} [options]
+ *   onlyKeys: optional `${eventId}\\t${studentName}` allowlist — delete only those orphan rows
+ */
+export async function removeDisappearedForMonth(data, month, options = {}) {
   const ym = String(month || '').trim();
   if (!/^\d{4}-\d{2}$/.test(ym)) {
     throw new Error('month must be YYYY-MM');
@@ -629,7 +640,14 @@ export async function removeDisappearedForMonth(data, month) {
   const { incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
     Array.isArray(data) ? data : []
   );
-  return reconcileMonthsToSnapshot(new Set([ym]), incomingKeys, incomingSlotKeys);
+  const onlyKeysOpt = options?.onlyKeys;
+  const onlyKeys =
+    onlyKeysOpt instanceof Set
+      ? onlyKeysOpt
+      : Array.isArray(onlyKeysOpt) && onlyKeysOpt.length > 0
+        ? new Set(onlyKeysOpt.map((k) => String(k)))
+        : null;
+  return reconcileMonthsToSnapshot(new Set([ym]), incomingKeys, incomingSlotKeys, onlyKeys);
 }
 
 /**

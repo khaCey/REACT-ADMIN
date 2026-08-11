@@ -1044,7 +1044,8 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
  * Month reconcile against Calendar:
  * - action=compare (default): list missing (Calendar-only) and disappeared (local-only); no writes
  * - action=add: upsert Calendar snapshot (no orphan deletes)
- * - action=remove: delete local synced rows missing from Calendar (forceReconcile)
+ * - action=remove: delete local synced rows missing from Calendar (forceReconcile);
+ *   optional body.entries [{event_id, student_name}] limits delete to those orphan rows
  */
 app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => {
   try {
@@ -1137,7 +1138,21 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => 
       months = result.months || [];
     } else {
       // remove — delete orphans only; do not upsert (avoids also adding missing)
-      deletedOrphans = await removeDisappearedForMonth(data, month);
+      const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
+      const onlyKeys = [];
+      if (entries && entries.length > 0) {
+        for (const e of entries) {
+          const eid = String(e?.event_id ?? e?.eventId ?? '').trim();
+          const sn = String(e?.student_name ?? e?.studentName ?? '').trim();
+          if (eid && sn) onlyKeys.push(`${eid}\t${sn}`);
+        }
+        if (onlyKeys.length === 0) {
+          return res.status(400).json({ error: 'entries must include event_id and student_name' });
+        }
+      }
+      deletedOrphans = await removeDisappearedForMonth(data, month, {
+        ...(onlyKeys.length > 0 ? { onlyKeys } : {}),
+      });
       months = [month];
     }
 
