@@ -14,7 +14,7 @@ const STATUS_STYLES = {
   confirm_processing: { color: 'bg-violet-600', text: 'Processing' },
   cancelled: { color: 'bg-slate-500', text: 'Cancelled' },
   reschedule_date_tbd: { color: 'bg-orange-500', text: 'Reschedule (date TBD)' },
-  rescheduled: { color: 'bg-amber-600', text: 'Rescheduled' },
+  rescheduled: { color: 'bg-slate-500', text: 'Rescheduled' },
   demo: { color: 'bg-violet-600', text: 'Demo' },
   unscheduled: { color: 'bg-rose-600', text: 'Unscheduled' },
   deleting: { color: 'bg-slate-700', text: 'Deleting...' },
