@@ -18,12 +18,6 @@ function formatReconcileLessonWhen(row) {
   return `${dateStr} ${timeStr}`
 }
 
-function reconcileSourceLabel(source) {
-  if (source === 'calendar_only') return 'Calendar only'
-  if (source === 'local_only') return 'Local only'
-  return 'Both'
-}
-
 function reconcileRowKey(row) {
   return `${row?.event_id || ''}\t${row?.student_name || ''}`
 }
@@ -36,8 +30,6 @@ function applyComparePayload(prev, res) {
     disappeared: res.disappeared || [],
     calendar_only: res.calendar_only || res.missing || [],
     local_only: res.local_only || res.disappeared || [],
-    calendar: res.calendar || [],
-    local: res.local || [],
     calendarCount: res.calendarCount,
     localCount: res.localCount,
     fetched: res.fetched,
@@ -48,13 +40,15 @@ function ReconcileLessonTable({
   rows,
   emptyText,
   headClassName,
-  showSource,
   onAddRow,
+  onRemoveRow,
   rowBusyKey,
   disableActions,
 }) {
   const list = Array.isArray(rows) ? rows : []
   const showAdd = typeof onAddRow === 'function'
+  const showRemove = typeof onRemoveRow === 'function'
+  const showAction = showAdd || showRemove
   return (
     <div className="max-h-56 overflow-auto">
       <table className="min-w-full text-sm">
@@ -63,15 +57,14 @@ function ReconcileLessonTable({
             <th className="px-3 py-2">When</th>
             <th className="px-3 py-2">Student</th>
             <th className="px-3 py-2">Teacher</th>
-            {showSource ? <th className="px-3 py-2">Source</th> : null}
-            {showAdd ? <th className="px-3 py-2 text-right">Action</th> : null}
+            {showAction ? <th className="px-3 py-2 text-right">Action</th> : null}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
           {list.length === 0 ? (
             <tr>
               <td
-                colSpan={(showSource ? 4 : 3) + (showAdd ? 1 : 0)}
+                colSpan={3 + (showAction ? 1 : 0)}
                 className="px-3 py-6 text-center text-gray-500"
               >
                 {emptyText}
@@ -95,31 +88,28 @@ function ReconcileLessonTable({
                       </span>
                     ) : null}
                   </td>
-                  {showSource ? (
-                    <td className="px-3 py-2">
-                      <span
-                        className={
-                          row.source === 'calendar_only'
-                            ? 'text-amber-700 font-medium'
-                            : row.source === 'local_only'
-                              ? 'text-red-700 font-medium'
-                              : 'text-gray-600'
-                        }
-                      >
-                        {reconcileSourceLabel(row.source)}
-                      </span>
-                    </td>
-                  ) : null}
-                  {showAdd ? (
+                  {showAction ? (
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        disabled={disableActions || busy || !row.event_id || !row.student_name}
-                        onClick={() => onAddRow(row)}
-                        className="px-2 py-1 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
-                      >
-                        {busy ? 'Adding…' : 'Add to local'}
-                      </button>
+                      {showAdd ? (
+                        <button
+                          type="button"
+                          disabled={disableActions || busy || !row.event_id || !row.student_name}
+                          onClick={() => onAddRow(row)}
+                          className="px-2 py-1 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 cursor-pointer disabled:opacity-50"
+                        >
+                          {busy ? 'Adding…' : 'Add to local'}
+                        </button>
+                      ) : null}
+                      {showRemove ? (
+                        <button
+                          type="button"
+                          disabled={disableActions || busy || !row.event_id || !row.student_name}
+                          onClick={() => onRemoveRow(row)}
+                          className="px-2 py-1 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer disabled:opacity-50"
+                        >
+                          {busy ? 'Removing…' : 'Remove from local'}
+                        </button>
+                      ) : null}
                     </td>
                   ) : null}
                 </tr>
@@ -230,37 +220,6 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
               </p>
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-sky-200 bg-sky-50/40 overflow-hidden">
-                  <div className="px-3 py-2 border-b border-sky-200">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      On Calendar ({compare.calendar?.length ?? compare.calendarCount ?? 0})
-                    </h4>
-                    <p className="text-xs text-gray-500">Full month snapshot from Google Calendar</p>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={compare.calendar}
-                    emptyText="No Calendar lessons for this month"
-                    headClassName="bg-sky-50"
-                    showSource
-                  />
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50/40 overflow-hidden">
-                  <div className="px-3 py-2 border-b border-slate-200">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      On local ({compare.local?.length ?? compare.localCount ?? 0})
-                    </h4>
-                    <p className="text-xs text-gray-500">Synced rows in monthly_schedule</p>
-                  </div>
-                  <ReconcileLessonTable
-                    rows={compare.local}
-                    emptyText="No local synced lessons for this month"
-                    headClassName="bg-slate-50"
-                    showSource
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
                 <div className="rounded-lg border border-amber-200 bg-amber-50/40 overflow-hidden">
                   <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-amber-200">
                     <div>
@@ -301,7 +260,6 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     rows={compare.calendar_only || compare.missing}
                     emptyText="None — local has everything from Calendar"
                     headClassName="bg-amber-50"
-                    showSource={false}
                     disableActions={busy}
                     rowBusyKey={rowBusy}
                     onAddRow={async (row) => {
@@ -369,6 +327,33 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     emptyText="None — no extra local synced rows"
                     headClassName="bg-red-50"
                     showSource={false}
+                    disableActions={busy}
+                    rowBusyKey={rowBusy}
+                    onRemoveRow={async (row) => {
+                      const key = reconcileRowKey(row)
+                      setError('')
+                      setRowBusy(key)
+                      try {
+                        const res = await api.reconcileCalendarMonth({
+                          month,
+                          action: 'remove',
+                          entries: [
+                            {
+                              event_id: row.event_id,
+                              student_name: row.student_name,
+                            },
+                          ],
+                        })
+                        setApplyResult(res)
+                        setCompare((prev) => applyComparePayload(prev, res))
+                        success(`Removed ${row.student_name || 'lesson'} from local`)
+                        onApplied?.(res)
+                      } catch (err) {
+                        setError(err.message || 'Remove from local failed')
+                      } finally {
+                        setRowBusy('')
+                      }
+                    }}
                   />
                 </div>
               </div>
