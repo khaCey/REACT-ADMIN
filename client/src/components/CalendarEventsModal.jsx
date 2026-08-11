@@ -151,15 +151,17 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
     runCompare()
   }, [runCompare])
 
-  const busy = compareLoading || !!applyLoading || !!rowBusy
+  const rowActionBusy = !!rowBusy
+  const modalBusy = compareLoading || !!applyLoading
+  const actionsLocked = modalBusy
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
       <div
-        className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-xl bg-white shadow-xl border border-gray-200 flex flex-col"
+        className="relative w-full max-w-6xl h-[min(90vh,52rem)] overflow-hidden rounded-xl bg-white shadow-xl border border-gray-200 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {busy && <ModalLoadingOverlay className="rounded-xl" />}
+        {modalBusy && <ModalLoadingOverlay className="rounded-xl" />}
         <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 shrink-0">
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -173,7 +175,7 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              disabled={busy}
+              disabled={modalBusy || rowActionBusy}
               onClick={runCompare}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-800 hover:bg-gray-50 cursor-pointer disabled:opacity-50"
             >
@@ -234,7 +236,9 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     <button
                       type="button"
                       disabled={
-                        busy || !((compare.calendar_only || compare.missing)?.length > 0)
+                        actionsLocked ||
+                        rowActionBusy ||
+                        !((compare.calendar_only || compare.missing)?.length > 0)
                       }
                       onClick={async () => {
                         setError('')
@@ -260,7 +264,7 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     rows={compare.calendar_only || compare.missing}
                     emptyText="None — local has everything from Calendar"
                     headClassName="bg-amber-50"
-                    disableActions={busy}
+                    disableActions={actionsLocked || rowActionBusy}
                     rowBusyKey={rowBusy}
                     onAddRow={async (row) => {
                       const key = reconcileRowKey(row)
@@ -300,7 +304,9 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     <button
                       type="button"
                       disabled={
-                        busy || !((compare.local_only || compare.disappeared)?.length > 0)
+                        actionsLocked ||
+                        rowActionBusy ||
+                        !((compare.local_only || compare.disappeared)?.length > 0)
                       }
                       onClick={async () => {
                         setError('')
@@ -326,13 +332,25 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                     rows={compare.local_only || compare.disappeared}
                     emptyText="None — no extra local synced rows"
                     headClassName="bg-red-50"
-                    showSource={false}
-                    disableActions={busy}
+                    disableActions={actionsLocked}
                     rowBusyKey={rowBusy}
                     onRemoveRow={async (row) => {
                       const key = reconcileRowKey(row)
                       setError('')
                       setRowBusy(key)
+                      // Optimistic: drop the row immediately while delete runs
+                      setCompare((prev) => {
+                        if (!prev) return prev
+                        const local_only = (prev.local_only || prev.disappeared || []).filter(
+                          (r) => reconcileRowKey(r) !== key
+                        )
+                        return {
+                          ...prev,
+                          local_only,
+                          disappeared: local_only,
+                          localCount: Math.max(0, (prev.localCount ?? 1) - 1),
+                        }
+                      })
                       try {
                         const res = await api.reconcileCalendarMonth({
                           month,
@@ -350,6 +368,16 @@ export default function CalendarEventsModal({ onClose, onApplied }) {
                         onApplied?.(res)
                       } catch (err) {
                         setError(err.message || 'Remove from local failed')
+                        // Restore list from server on failure
+                        try {
+                          const refreshed = await api.reconcileCalendarMonth({
+                            month,
+                            action: 'compare',
+                          })
+                          setCompare(applyComparePayload(null, refreshed))
+                        } catch {
+                          /* keep optimistic state + error */
+                        }
                       } finally {
                         setRowBusy('')
                       }
