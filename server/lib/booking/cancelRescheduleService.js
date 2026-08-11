@@ -43,6 +43,7 @@ import {
   stripOurMonthlyDisambiguationSuffix,
 } from '../calendarEventId.js';
 import {
+  applyKidsTitlePrefix,
   buildLessonTitleForOrderedStudents,
   rewriteLessonTitleStudentNames,
 } from '../groupLessonTitle.js';
@@ -211,9 +212,19 @@ export async function handleRescheduleLinked(req, res) {
     const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
     const movedFromLabel = fromDisplay || '???';
 
-    let title;
+    const sourceOrderedStudents = await getOrderedEventStudents(sourceEventId);
+    const sourceTitleSeed = sourceAnchor.title || '';
+    const kidsAwareSourceStudents =
+      sourceOrderedStudents.length > 0
+        ? sourceOrderedStudents
+        : [{ name: studentName, is_child: !!student?.is_child }];
+
+    let destinationBaseTitle;
     if (lessonKindForBooking === 'demo') {
-      title = applyRescheduleTitleMarker(`${studentName} D/L`, 'from', movedFromLabel);
+      destinationBaseTitle = applyKidsTitlePrefix(
+        `${studentName} D/L`,
+        kidsAwareSourceStudents
+      );
     } else {
       let totalLessons = parsePackTotalFromTitle(sourceAnchor.title);
       if (!totalLessons) {
@@ -236,21 +247,24 @@ export async function handleRescheduleLinked(req, res) {
       );
       const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
       const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
-      title = applyRescheduleTitleMarker(
+      destinationBaseTitle = applyKidsTitlePrefix(
         `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`,
-        'from',
-        movedFromLabel
+        kidsAwareSourceStudents
       );
     }
 
-    const sourceTitleSeed = sourceAnchor.title || title || '';
-    const sourceOrderedStudents = await getOrderedEventStudents(sourceEventId);
     const canonicalBaseTitle =
       sourceOrderedStudents.length > 1 && sourceTitleSeed
         ? stripRescheduleTitleMarker(buildCanonicalLessonTitle(sourceTitleSeed, sourceOrderedStudents))
-        : stripRescheduleTitleMarker(sourceTitleSeed);
-    const canonicalSourceTitleUpdated = applyRescheduleTitleMarker(canonicalBaseTitle, 'to', toDisplay || '???');
-    const canonicalDestinationTitle = applyRescheduleTitleMarker(canonicalBaseTitle, 'from', movedFromLabel);
+        : stripRescheduleTitleMarker(sourceTitleSeed) ||
+          stripRescheduleTitleMarker(destinationBaseTitle);
+    // Keep kids 子 on the original slot title when present / required.
+    const sourceBaseTitle = applyKidsTitlePrefix(canonicalBaseTitle, kidsAwareSourceStudents);
+    const canonicalSourceTitleUpdated = applyRescheduleTitleMarker(sourceBaseTitle, 'to', toDisplay || '???');
+    // Solo moves: use renumbered destination base. Group moves: keep shared group title from source.
+    const destBaseForMarker =
+      sourceOrderedStudents.length > 1 ? sourceBaseTitle : destinationBaseTitle || sourceBaseTitle;
+    const canonicalDestinationTitle = applyRescheduleTitleMarker(destBaseForMarker, 'from', movedFromLabel);
 
     const localEventId = buildLocalBookingEventId();
     const destinationLessonUuid = randomUUID();

@@ -45,7 +45,8 @@ const CARD_STYLES = {
     hoverRing: 'hover:ring-orange-500/60',
     label: 'Date TBD',
   },
-  rescheduled: { accent: 'bg-amber-600', bg: 'bg-amber-50', dot: 'bg-amber-600', hoverRing: 'hover:ring-amber-500/60', label: 'Rescheduled' },
+  /** Original slot after a linked reschedule — greyed out (matches Calendar graphite). */
+  rescheduled: { accent: 'bg-slate-500', bg: 'bg-slate-100', dot: 'bg-slate-500', hoverRing: 'hover:ring-slate-400/60', label: 'Rescheduled' },
   demo: { accent: 'bg-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-600', hoverRing: 'hover:ring-violet-500/60', label: 'Demo' },
   unscheduled: { accent: 'bg-rose-600', bg: 'bg-rose-50', dot: 'bg-rose-600', hoverRing: 'hover:ring-rose-500/60', label: 'Unscheduled' },
   deleting: { accent: 'bg-slate-700', bg: 'bg-slate-100', dot: 'bg-slate-700', hoverRing: 'hover:ring-slate-600/60', label: 'Deleting...' },

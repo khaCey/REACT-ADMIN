@@ -374,10 +374,18 @@ async function buildMonthlyScheduleRows(data) {
 
     if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
 
-    const status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
+    const title = (r.title || '').toString().trim();
+    // Prefer title markers over poll color→status (GAS once mapped graphite to cancelled, and
+    // only recognized legacy [RESCHEDULED] — not "Moved to/from").
+    let status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
+    if (
+      /Moved\s+(to|from)\s+(\?{3}|\d{1,2}(?:st|nd|rd|th))/i.test(title) ||
+      /\[RESCHEDULED\]/i.test(title)
+    ) {
+      status = 'rescheduled';
+    }
     const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
       r.isKidsLesson === true || r.is_kids_lesson === true;
-    const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
     const lessonKind = normalizeLessonKind(r.lessonKind ?? r.lesson_kind);
     const lessonMode = normalizeLessonMode(
@@ -819,7 +827,18 @@ export async function upsertMonthlySchedule(data, options = {}) {
          calendar_source_event_id = COALESCE(EXCLUDED.calendar_source_event_id, monthly_schedule.calendar_source_event_id),
          lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
+         status = CASE
+           WHEN EXISTS (
+             SELECT 1 FROM reschedules rs
+             WHERE TRIM(rs.from_event_id) = TRIM(monthly_schedule.event_id)
+               AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+                 = REGEXP_REPLACE(TRIM(monthly_schedule.student_name), '\\s+', ' ', 'g')
+           )
+           AND LOWER(TRIM(EXCLUDED.status)) IN ('scheduled', 'cancelled')
+             THEN 'rescheduled'
+           ELSE EXCLUDED.status
+         END,
+         is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
          calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
          awaiting_reschedule_date = CASE
            WHEN $13::boolean IS NULL THEN monthly_schedule.awaiting_reschedule_date
