@@ -46,11 +46,16 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+/** Owner-only: staff name must be Khacey (case-insensitive). Not granted by is_admin alone. */
+export function isKhaceyStaff(staff) {
+  return String(staff?.name || '').trim().toLowerCase() === 'khacey';
+}
+
 export function requireAdmin(req, res, next) {
   if (!req.staff) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-  const isAdmin = !!req.staff.is_admin || String(req.staff.name || '').trim().toLowerCase() === 'khacey';
+  const isAdmin = !!req.staff.is_admin || isKhaceyStaff(req.staff);
   if (!isAdmin) {
     return res.status(403).json({ error: 'Admin access required' });
   }
@@ -61,10 +66,20 @@ export function requireAdminOrOperator(req, res, next) {
   if (!req.staff) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-  const isAdmin = !!req.staff.is_admin || String(req.staff.name || '').trim().toLowerCase() === 'khacey';
+  const isAdmin = !!req.staff.is_admin || isKhaceyStaff(req.staff);
   const isOperator = !!req.staff.is_operator;
   if (!isAdmin && !isOperator) {
     return res.status(403).json({ error: 'Admin or operator access required' });
+  }
+  next();
+}
+
+export function requireKhacey(req, res, next) {
+  if (!req.staff) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  if (!isKhaceyStaff(req.staff)) {
+    return res.status(403).json({ error: 'Access restricted to Khacey' });
   }
   next();
 }

@@ -1,10 +1,10 @@
 /**
- * Signed Up Tracker — demo lesson events (admin / khacey).
+ * Signed Up Tracker — demo lesson events (Khacey only).
  */
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { logChange } from '../lib/changeLog.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireKhacey } from '../middleware/auth.js';
 import {
   upsertDemoLessonEvent,
   importPastDemoLessonsFromSchedule,
@@ -13,7 +13,7 @@ import {
 
 const router = Router();
 
-router.use(requireAuth, requireAdmin);
+router.use(requireAuth, requireKhacey);
 
 function addDaysYyyyMmDd(dateStr, n) {
   const [y, m, d] = dateStr.split('-').map(Number);

@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
+import KhaceyRoute from './components/KhaceyRoute'
 import StaffRoute from './components/StaffRoute'
 import Dashboard from './pages/Dashboard'
 import Students from './pages/Students'
@@ -45,9 +46,9 @@ function App() {
         <Route
           path="admin/demo-tracker"
           element={
-            <AdminRoute>
+            <KhaceyRoute>
               <DemoTracker />
-            </AdminRoute>
+            </KhaceyRoute>
           }
         />
       </Route>

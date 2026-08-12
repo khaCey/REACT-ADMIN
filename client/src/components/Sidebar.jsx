@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
+import { isKhaceyStaff } from '../utils/staffAccess'
 
 const navItemClass = (active) =>
   `flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer ${
@@ -34,6 +35,7 @@ export default function Sidebar({
   const { staff } = useAuth()
   const path = location.pathname
   const isAdmin = !!staff?.is_admin || String(staff?.name || '').trim().toLowerCase() === 'khacey'
+  const isKhacey = isKhaceyStaff(staff)
   const isOperator = !!staff?.is_operator
   const canAccessStaff = isAdmin || isOperator
   const hasListActions = !!(onOpenUnpaid || onOpenUnscheduled || onOpenHiatus || onOpenReviews)
@@ -100,7 +102,7 @@ export default function Sidebar({
               </Link>
             </li>
           )}
-          {isAdmin && (
+          {isKhacey && (
             <li>
               <Link
                 to="/admin/demo-tracker"
