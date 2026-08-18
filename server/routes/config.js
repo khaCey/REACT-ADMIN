@@ -3,12 +3,15 @@ import { query } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logChange } from '../lib/changeLog.js';
 import {
-  getLineLinkEmailTestUrl,
   isStudentLineEmailEnabled,
   isValidEmailAddress,
   maskEmailAddress,
   sendStudentLineLinkEmail,
 } from '../lib/studentLineEmail.js';
+import {
+  createStudentLineLinkInvitation,
+  isStudentLineLinkApiConfigured,
+} from '../lib/studentLineInvitation.js';
 
 const router = Router();
 
@@ -48,12 +51,9 @@ router.get('/calendar-poll', requireAuth, (_req, res) => {
 });
 
 /**
- * Send the first-phase LINE linking email from REACT-ADMIN.
- *
- * For this branch the link is intentionally a configurable test URL. The GAS
- * invitation generator will replace getLineLinkEmailTestUrl() in the next phase.
- * The student's email address is read from the private local database and is
- * never supplied by the browser.
+ * Create a one-time LINE linking invitation through GAS, then send it to the
+ * student's saved email address. The browser supplies only the student id;
+ * recipient details are read from the private local database.
  */
 router.post('/student-line-email/:id', requireAuth, async (req, res) => {
   try {
@@ -90,12 +90,31 @@ router.post('/student-line-email/:id', requireAuth, async (req, res) => {
         code: 'EMAIL_NOT_CONFIGURED',
       });
     }
+    if (!isStudentLineLinkApiConfigured()) {
+      return res.status(503).json({
+        error: 'LINE連携リンク生成APIが設定されていません。',
+        code: 'LINE_LINK_API_NOT_CONFIGURED',
+      });
+    }
 
-    const linkUrl = getLineLinkEmailTestUrl();
+    let invitation;
+    try {
+      invitation = await createStudentLineLinkInvitation(
+        student.id,
+        req.staff?.id || ''
+      );
+    } catch (err) {
+      console.error('[StudentLineEmail] invitation creation failed', err?.message || err);
+      return res.status(502).json({
+        error: 'LINE連携リンクを生成できませんでした。GASの設定を確認してください。',
+        code: err?.code || 'LINE_LINK_CREATE_FAILED',
+      });
+    }
+
     const sendResult = await sendStudentLineLinkEmail({
       to: email,
       studentName: student.name,
-      linkUrl,
+      linkUrl: invitation.link,
     });
 
     const recipientMasked = sendResult.recipientMasked || maskEmailAddress(email);
@@ -108,7 +127,10 @@ router.post('/student-line-email/:id', requireAuth, async (req, res) => {
         newData: {
           recipientMasked,
           sentAt: new Date().toISOString(),
-          testMode: true,
+          invitationId: invitation.invitationId,
+          invitationExpiresAt: invitation.expiresAt,
+          expiresInHours: invitation.expiresInHours,
+          testMode: false,
         },
       },
       req
@@ -117,7 +139,10 @@ router.post('/student-line-email/:id', requireAuth, async (req, res) => {
     return res.json({
       ok: true,
       recipientMasked,
-      testMode: true,
+      invitationId: invitation.invitationId,
+      expiresAt: invitation.expiresAt,
+      expiresInHours: invitation.expiresInHours,
+      testMode: false,
     });
   } catch (err) {
     console.error('[StudentLineEmail] send failed', err?.message || err);
