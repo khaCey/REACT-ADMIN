@@ -13,7 +13,7 @@
     "server": "node server/index.js",
     "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\"",
     "test:booking": "node --test server/lib/booking/__tests__/*.test.js",
-    "test:line-email": "node --test server/lib/__tests__/studentLineEmail.test.js"
+    "test:line-email": "node --test server/lib/__tests__/studentLine*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
