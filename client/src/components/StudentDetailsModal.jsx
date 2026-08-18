@@ -408,20 +408,15 @@ export default function StudentDetailsModal({
     }
   }, [fetchData, onStudentUpdated, studentId, success])
 
+  const [lineEmailConfirmOpen, setLineEmailConfirmOpen] = useState(false)
+
   const handleSendLineEmail = async () => {
-    const email = String(student?.Email || '').trim()
-    if (!email) {
-      setLineEmailResult({ type: 'error', message: 'この生徒にはメールアドレスが登録されていません。' })
-      return
-    }
-    const confirmed = window.confirm(
-      `${student.Name || 'この生徒'}の登録メールアドレス（${email}）にLINE連携のテストメールを送信します。\n\n現在のメールにはテスト用リンクが入ります。送信しますか？`
-    )
-    if (!confirmed) return
+    setLineEmailConfirmOpen(false)
     setLineEmailSending(true)
     setLineEmailResult(null)
     try {
       const result = await sendStudentLineLinkEmail(studentId)
+      const email = String(student?.Email || '').trim()
       setLineEmailResult({ type: 'success', message: `LINE連携メールを送信しました。送信先: ${result.recipientMasked || email}` })
     } catch (err) {
       setLineEmailResult({ type: 'error', message: err?.message || 'LINE連携メールを送信できませんでした。' })
@@ -598,7 +593,7 @@ export default function StudentDetailsModal({
                   </div>
                   <button
                     type="button"
-                    onClick={handleSendLineEmail}
+                    onClick={() => { setLineEmailResult(null); setLineEmailConfirmOpen(true) }}
                     disabled={lineEmailSending || !String(student.Email || '').trim()}
                     className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -861,6 +856,17 @@ export default function StudentDetailsModal({
           setEditStudentModal(true)
         }}
         onClose={() => !syncingGoogleContact && !reviewBusy && setStudentSettingsOpen(false)}
+      />
+    )}
+    {lineEmailConfirmOpen && student && (
+      <ConfirmActionModal
+        title="LINE連携メール送信"
+        message={`${student.Name || 'この生徒'}の登録メールアドレス（${String(student.Email || '').trim()}）にLINE連携のテストメールを送信します。\n\n現在のメールにはテスト用リンクが入ります。送信しますか？`}
+        confirmLabel="送信する"
+        confirming={lineEmailSending}
+        busyConfirmLabel="送信中..."
+        onConfirm={handleSendLineEmail}
+        onClose={() => !lineEmailSending && setLineEmailConfirmOpen(false)}
       />
     )}
     </>,
