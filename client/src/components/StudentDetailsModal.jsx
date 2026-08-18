@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Settings, Mail } from 'lucide-react'
 import { api } from '../api'
-import { sendStudentLineLinkEmail } from '../api/studentLineEmail'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
@@ -14,7 +13,6 @@ import LessonsThisMonth from './LessonsThisMonth'
 import BookLessonModal from './BookLessonModal'
 import PreBookLessonModal from './PreBookLessonModal'
 import ModalLoadingOverlay from './ModalLoadingOverlay'
-import ConfirmActionModal from './ConfirmActionModal'
 import GroupLinkModal from './GroupLinkModal'
 import StudentStatusBadge from './StudentStatusBadge'
 import MarkHiatusModal from './MarkHiatusModal'
@@ -80,9 +78,7 @@ export default function StudentDetailsModal({
   const [reviewBusy, setReviewBusy] = useState(false)
   const [createReservedPick, setCreateReservedPick] = useState(false)
   const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
-  const [lineEmailSending, setLineEmailSending] = useState(false)
   const [lineEmailResult, setLineEmailResult] = useState(null)
-  const [lineEmailConfirmOpen, setLineEmailConfirmOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -410,25 +406,46 @@ export default function StudentDetailsModal({
     }
   }, [fetchData, onStudentUpdated, studentId, success])
 
-  const handleSendLineEmail = async () => {
-    setLineEmailConfirmOpen(false)
-    setLineEmailSending(true)
-    setLineEmailResult(null)
-    try {
-      const result = await sendStudentLineLinkEmail(studentId)
-      const email = String(student?.Email || '').trim()
-      setLineEmailResult({
-        type: 'success',
-        message: `LINE連携メールを送信しました。送信先: ${result.recipientMasked || email}`,
-      })
-    } catch (err) {
+  const handleSendLineEmail = () => {
+    const email = String(student?.Email || '').trim()
+    if (!email) {
       setLineEmailResult({
         type: 'error',
-        message: err?.message || 'LINE連携メールを送信できませんでした。',
+        message: 'メールアドレスが登録されていないため下書きを作成できません。',
       })
-    } finally {
-      setLineEmailSending(false)
+      return
     }
+
+    const studentName = String(student?.Name || '').trim()
+    const greeting = studentName ? `${studentName} 様` : 'Green Square 生徒様'
+    const linkUrl = 'https://booking.kaelenoer.com/link/TEST'
+    const subject = 'Green Square LINE予約サービスのご案内'
+    const body = `${greeting}
+
+いつもGreen Squareをご利用いただきありがとうございます。
+
+LINEからレッスンの予約・日時変更をご利用いただけるよう、LINEアカウントの連携をご案内しています。
+
+下記のリンクを開き、画面の案内に沿ってLINEと連携してください。
+
+${linkUrl}
+
+※このメールに心当たりがない場合は、リンクを開かずそのまま削除してください。
+
+Green Square`
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    const mailtoUrl = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+
+    const opened = window.open(gmailUrl, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      window.location.href = mailtoUrl
+    }
+
+    setLineEmailResult({
+      type: 'success',
+      message: 'メール下書きを開きました。内容を確認して手動で送信してください。',
+    })
   }
 
   useEffect(() => {
@@ -595,24 +612,21 @@ export default function StudentDetailsModal({
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-emerald-700" />
                     <span className="font-semibold text-sm text-slate-900">LINE連携</span>
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">テスト</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">手動送信</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setLineEmailResult(null)
-                      setLineEmailConfirmOpen(true)
-                    }}
-                    disabled={lineEmailSending || !String(student.Email || '').trim()}
+                    onClick={handleSendLineEmail}
+                    disabled={!String(student.Email || '').trim()}
                     className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Mail className="h-3.5 w-3.5" />
-                    {lineEmailSending ? '送信中...' : 'LINE連携メールを送信'}
+                    Gmailで下書きを開く
                   </button>
                 </div>
                 {!String(student.Email || '').trim() && (
                   <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                    メールアドレスが登録されていないため送信できません。
+                    メールアドレスが登録されていないため下書きを作成できません。
                   </p>
                 )}
                 {lineEmailResult && (
@@ -869,17 +883,6 @@ export default function StudentDetailsModal({
           setEditStudentModal(true)
         }}
         onClose={() => !syncingGoogleContact && !reviewBusy && setStudentSettingsOpen(false)}
-      />
-    )}
-    {lineEmailConfirmOpen && student && (
-      <ConfirmActionModal
-        title="LINE連携メール送信"
-        message={`${student.Name || 'この生徒'}の登録メールアドレス（${String(student.Email || '').trim()}）にLINE連携のテストメールを送信します。\n\n現在のメールにはテスト用リンクが入ります。送信しますか？`}
-        confirmLabel="送信する"
-        confirming={lineEmailSending}
-        busyConfirmLabel="送信中..."
-        onConfirm={handleSendLineEmail}
-        onClose={() => !lineEmailSending && setLineEmailConfirmOpen(false)}
       />
     )}
     </>,
