@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Plus, Settings } from 'lucide-react'
+import { X, Plus, Settings, Mail } from 'lucide-react'
 import { api } from '../api'
+import { sendStudentLineLinkEmail } from '../api/studentLineEmail'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
@@ -78,6 +79,8 @@ export default function StudentDetailsModal({
   const [reviewBusy, setReviewBusy] = useState(false)
   const [createReservedPick, setCreateReservedPick] = useState(false)
   const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
+  const [lineEmailSending, setLineEmailSending] = useState(false)
+  const [lineEmailResult, setLineEmailResult] = useState(null)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -405,6 +408,28 @@ export default function StudentDetailsModal({
     }
   }, [fetchData, onStudentUpdated, studentId, success])
 
+  const handleSendLineEmail = async () => {
+    const email = String(student?.Email || '').trim()
+    if (!email) {
+      setLineEmailResult({ type: 'error', message: 'この生徒にはメールアドレスが登録されていません。' })
+      return
+    }
+    const confirmed = window.confirm(
+      `${student.Name || 'この生徒'}の登録メールアドレス（${email}）にLINE連携のテストメールを送信します。\n\n現在のメールにはテスト用リンクが入ります。送信しますか？`
+    )
+    if (!confirmed) return
+    setLineEmailSending(true)
+    setLineEmailResult(null)
+    try {
+      const result = await sendStudentLineLinkEmail(studentId)
+      setLineEmailResult({ type: 'success', message: `LINE連携メールを送信しました。送信先: ${result.recipientMasked || email}` })
+    } catch (err) {
+      setLineEmailResult({ type: 'error', message: err?.message || 'LINE連携メールを送信できませんでした。' })
+    } finally {
+      setLineEmailSending(false)
+    }
+  }
+
   useEffect(() => {
     if (studentId == null) return
     const onKey = (e) => e.key === 'Escape' && onClose()
@@ -562,6 +587,37 @@ export default function StudentDetailsModal({
                     </table>
                   </div>
                 </section>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 flex-shrink-0">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-emerald-700" />
+                    <span className="font-semibold text-sm text-slate-900">LINE連携</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">テスト</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendLineEmail}
+                    disabled={lineEmailSending || !String(student.Email || '').trim()}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    {lineEmailSending ? '送信中...' : 'LINE連携メールを送信'}
+                  </button>
+                </div>
+                {!String(student.Email || '').trim() && (
+                  <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                    メールアドレスが登録されていないため送信できません。
+                  </p>
+                )}
+                {lineEmailResult && (
+                  <p className={`mt-2 rounded-lg px-2 py-1.5 text-xs ${
+                    lineEmailResult.type === 'success' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-50 text-red-700'
+                  }`}>
+                    {lineEmailResult.message}
+                  </p>
+                )}
               </div>
 
               <section className="mt-5 rounded-xl border border-gray-200 bg-white shadow flex-1 min-h-[280px] flex flex-col overflow-hidden">
