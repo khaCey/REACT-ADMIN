@@ -21,7 +21,7 @@ test('reports whether the GAS invitation API is configured', () => {
   assert.equal(isStudentLineLinkApiConfigured(), true);
 });
 
-test('creates a LINE invitation without sending an API key', async () => {
+test('creates a LINE invitation without sending an API key and uses booking.kaelenoer.com', async () => {
   process.env.LINE_LINK_API_URL = 'https://script.google.com/macros/s/test/exec';
 
   let capturedUrl = null;
@@ -36,6 +36,8 @@ test('creates a LINE invitation without sending an API key', async () => {
           ok: true,
           invitationId: 'invite-1',
           studentNumber: '12345',
+          // Simulate GAS still returning the older public host. REACT-ADMIN
+          // should preserve the token while normalizing the current host.
           link: 'https://booking.greensquare.jp/link/example-token',
           expiresAt: '2026-08-19T10:00:00.000Z',
           expiresInHours: 24,
@@ -55,8 +57,29 @@ test('creates a LINE invitation without sending an API key', async () => {
     createdByStaffId: '7',
   });
   assert.equal(Object.hasOwn(body, 'apiKey'), false);
-  assert.equal(result.link, 'https://booking.greensquare.jp/link/example-token');
+  assert.equal(result.link, 'https://booking.kaelenoer.com/link/example-token');
   assert.equal(result.expiresInHours, 24);
+});
+
+test('keeps a GAS token that already uses booking.kaelenoer.com', async () => {
+  process.env.LINE_LINK_API_URL = 'https://script.google.com/macros/s/test/exec';
+
+  const fakeFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        ok: true,
+        invitationId: 'invite-2',
+        studentNumber: '12345',
+        link: 'https://booking.kaelenoer.com/link/already-correct-token',
+        expiresAt: '2026-08-19T10:00:00.000Z',
+        expiresInHours: 24,
+      };
+    },
+  });
+
+  const result = await createStudentLineLinkInvitation('12345', '', fakeFetch);
+  assert.equal(result.link, 'https://booking.kaelenoer.com/link/already-correct-token');
 });
 
 test('uses GAS payload.ok as the application-level result', async () => {
