@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, Component, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Settings, Mail } from 'lucide-react'
 import { api } from '../api'
-import { sendStudentLineLinkEmail } from '../api/studentLineEmail'
+import { createStudentLineInvitation } from '../api/studentLineEmail'
 import { isStudentExcludedFromBooking, studentIsDemo } from '../config/booking'
 import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
 import { formatMonth, formatNumber, formatDate, formatDateUTC } from '../utils/format'
@@ -415,7 +415,7 @@ export default function StudentDetailsModal({
     if (!email) {
       setLineEmailResult({
         type: 'error',
-        message: 'メールアドレスが登録されていないため送信できません。',
+        message: 'メールアドレスが登録されていないため下書きを作成できません。',
       })
       return
     }
@@ -423,17 +423,46 @@ export default function StudentDetailsModal({
     setLineEmailBusy(true)
     setLineEmailResult(null)
     try {
-      const payload = await sendStudentLineLinkEmail(studentId)
-      const masked = payload?.recipientMasked ? `（${payload.recipientMasked}）` : ''
+      const payload = await createStudentLineInvitation(studentId)
+      const linkUrl = String(payload?.link || '').trim()
+      if (!/^https:\/\//i.test(linkUrl) || /\/link\/TEST$/i.test(linkUrl)) {
+        throw new Error('LINE連携リンクを生成できませんでした。')
+      }
+
+      const studentName = String(payload?.studentName || student?.Name || '').trim()
+      const recipient = String(payload?.email || email).trim()
+      const greeting = studentName ? `${studentName} 様` : 'Green Square 生徒様'
+      const subject = 'Green Square LINE予約サービスのご案内'
+      const body = `${greeting}
+
+いつもGreen Squareをご利用いただきありがとうございます。
+
+LINEからレッスンの予約・日時変更をご利用いただけるよう、LINEアカウントの連携をご案内しています。
+
+下記のリンクを開き、画面の案内に沿ってLINEと連携してください。
+
+${linkUrl}
+
+※このメールに心当たりがない場合は、リンクを開かずそのまま削除してください。
+
+Green Square`
+
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+      const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+
+      const opened = window.open(gmailUrl, '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        window.location.href = mailtoUrl
+      }
+
       setLineEmailResult({
         type: 'success',
-        message: `LINE連携メールを送信しました${masked}。`,
+        message: 'メール下書きを開きました。内容を確認して手動で送信してください。',
       })
-      success('LINE連携メールを送信しました')
     } catch (e) {
       setLineEmailResult({
         type: 'error',
-        message: e.message || 'メールを送信できませんでした。',
+        message: e.message || 'LINE連携リンクを生成できませんでした。',
       })
     } finally {
       setLineEmailBusy(false)
@@ -604,6 +633,7 @@ export default function StudentDetailsModal({
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-emerald-700" />
                     <span className="font-semibold text-sm text-slate-900">LINE連携</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">手動送信</span>
                   </div>
                   <button
                     type="button"
@@ -612,12 +642,12 @@ export default function StudentDetailsModal({
                     className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Mail className="h-3.5 w-3.5" />
-                    {lineEmailBusy ? '送信中…' : 'LINE連携メールを送信'}
+                    {lineEmailBusy ? 'リンク生成中…' : 'LINE連携メールを送信'}
                   </button>
                 </div>
                 {!String(student.Email || '').trim() && (
                   <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                    メールアドレスが登録されていないため送信できません。
+                    メールアドレスが登録されていないため下書きを作成できません。
                   </p>
                 )}
                 {lineEmailResult && (

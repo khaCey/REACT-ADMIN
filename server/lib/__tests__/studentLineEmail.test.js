@@ -20,7 +20,7 @@ test('masks the local part before returning a recipient to the UI', () => {
 });
 
 test('builds Japanese LINE linking text and HTML around the supplied URL', () => {
-  const linkUrl = 'https://booking.kaelenoer.com/link/TEST';
+  const linkUrl = 'https://booking.greensquare.jp/link/example-token';
   const email = buildStudentLineLinkEmail({
     studentName: 'Keishi',
     linkUrl,
@@ -29,7 +29,7 @@ test('builds Japanese LINE linking text and HTML around the supplied URL', () =>
   assert.equal(email.subject, 'Green Square LINE予約サービスのご案内');
   assert.match(email.text, /Keishi 様/);
   assert.match(email.text, /LINEアカウントの連携/);
-  assert.match(email.text, /https:\/\/booking\.kaelenoer\.com\/link\/TEST/);
+  assert.match(email.text, /https:\/\/booking\.greensquare\.jp\/link\/example-token/);
   assert.match(email.html, /LINEと連携する/);
-  assert.match(email.html, /https:\/\/booking\.kaelenoer\.com\/link\/TEST/);
+  assert.match(email.html, /https:\/\/booking\.greensquare\.jp\/link\/example-token/);
 });
