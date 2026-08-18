@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-const DEFAULT_TEST_LINK = 'https://booking.kaelenoer.com/link/TEST';
 
 function loadServiceAccountCredentials() {
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
@@ -60,10 +59,6 @@ export function maskEmailAddress(value) {
   const visible = local.slice(0, Math.min(2, local.length));
   const maskedLocal = `${visible}${'*'.repeat(Math.max(3, local.length - visible.length))}`;
   return `${maskedLocal}@${domain}`;
-}
-
-export function getLineLinkEmailTestUrl() {
-  return String(process.env.LINE_LINK_EMAIL_TEST_URL || DEFAULT_TEST_LINK).trim();
 }
 
 function getDelegatedUser() {
