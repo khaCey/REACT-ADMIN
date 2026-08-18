@@ -81,6 +81,7 @@ export default function StudentDetailsModal({
   const [studentSettingsOpen, setStudentSettingsOpen] = useState(false)
   const [lineEmailSending, setLineEmailSending] = useState(false)
   const [lineEmailResult, setLineEmailResult] = useState(null)
+  const [lineEmailConfirmOpen, setLineEmailConfirmOpen] = useState(false)
   const [guideFocusKey, setGuideFocusKey] = useState(null)
   const [guideHighlightDeleteInEdit, setGuideHighlightDeleteInEdit] = useState(false)
   const lastGuideActionRef = useRef(null)
@@ -407,8 +408,6 @@ export default function StudentDetailsModal({
       setReviewBusy(false)
     }
   }, [fetchData, onStudentUpdated, studentId, success])
-
-  const [lineEmailConfirmOpen, setLineEmailConfirmOpen] = useState(false)
 
   const handleSendLineEmail = async () => {
     setLineEmailConfirmOpen(false)
