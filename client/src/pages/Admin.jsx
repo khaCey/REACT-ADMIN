@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
+import CalendarEventsModal from '../components/CalendarEventsModal'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import { api } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -29,6 +30,7 @@ function formatMonthlyScheduleDateTime(date, start) {
 export default function Admin() {
   const { success } = useToast()
   const [showBackfillModal, setShowBackfillModal] = useState(false)
+  const [showCalendarEvents, setShowCalendarEvents] = useState(false)
   const [backups, setBackups] = useState([])
   const [backupsLoading, setBackupsLoading] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
@@ -461,14 +463,27 @@ export default function Admin() {
           <p className="text-sm text-gray-600 mb-4">
             Fetch past lessons from Google Calendar or from the MonthlySchedule sheet and sync them to the database. Existing rows are updated (upsert).
           </p>
-          <button
-            type="button"
-            onClick={() => setShowBackfillModal(true)}
-            className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Backfill past schedule
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowBackfillModal(true)}
+              className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm font-medium cursor-pointer flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Backfill past schedule
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCalendarEvents(true)}
+              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-semibold cursor-pointer flex items-center gap-2"
+            >
+              <Calendar className="w-4 h-4" />
+              Calendar Events
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Calendar Events compares this month with Google Calendar (add missing / remove local-only). Also on Dashboard for all staff.
+          </p>
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -896,6 +911,12 @@ export default function Admin() {
 
       {showBackfillModal && (
         <BackfillScheduleModal onClose={() => setShowBackfillModal(false)} />
+      )}
+      {showCalendarEvents && (
+        <CalendarEventsModal
+          onClose={() => setShowCalendarEvents(false)}
+          onApplied={() => loadMonthlyRows(monthlyOffset, { silent: true })}
+        />
       )}
       {restoreTarget != null && (
         <ConfirmActionModal

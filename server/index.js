@@ -19,7 +19,7 @@ process.on('unhandledRejection', (reason, promise) => {
 import express from 'express';
 import cors from 'cors';
 import { query, runMigrations } from './db/index.js';
-import { upsertMonthlySchedule } from './lib/calendarSync.js';
+import { upsertMonthlySchedule, compareMonthSchedule, removeDisappearedForMonth } from './lib/calendarSync.js';
 import { fetchMonthlyScheduleFromSheet } from './lib/googleSheets.js';
 import studentsRouter from './routes/students.js';
 import paymentsRouter from './routes/payments.js';
@@ -1010,7 +1010,7 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
         : year && /^\d{4}$/.test(String(year))
           ? { reconcileOnlyYear: String(year) }
           : {};
-    const { upserted, months } = await upsertMonthlySchedule(data, reconcileOpts);
+    const { upserted, months, deletedOrphans } = await upsertMonthlySchedule(data, reconcileOpts);
 
     // Keep teacher_schedules in sync so booking UI has correct capacity/constraints.
     // (Booking grid calls GET /schedule/week which reads teacher_schedules from DB.)
@@ -1029,12 +1029,194 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
       upserted,
       months,
       fetched: data.length,
+      deletedOrphans: deletedOrphans || 0,
       backfill: json.backfill,
       teacherSchedulesRefresh,
     });
   } catch (err) {
     const detail = formatFetchError(err);
     console.error('[calendar-poll/backfill] error:', detail);
+    res.status(500).json({ error: detail });
+  }
+});
+
+/**
+ * Month reconcile against Calendar:
+ * - action=compare (default): list missing (Calendar-only) and disappeared (local-only); no writes
+ * - action=add: upsert Calendar snapshot (no orphan deletes)
+ * - action=remove: delete local synced rows missing from Calendar (forceReconcile);
+ *   optional body.entries [{event_id, student_name}] limits delete to those orphan rows
+ */
+app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => {
+  try {
+    const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
+    const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
+    if (!url || !key) {
+      return res.status(400).json({
+        error: 'Set CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY in .env (project root)',
+      });
+    }
+    let month = String(req.body?.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      const jstNow = new Date(Date.now() + JST_OFFSET_MS);
+      month = `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+    const action = String(req.body?.action || 'compare').trim().toLowerCase();
+    if (!['compare', 'add', 'remove'].includes(action)) {
+      return res.status(400).json({ error: 'action must be compare, add, or remove' });
+    }
+
+    const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1&month=${encodeURIComponent(month)}`;
+    let fetchRes;
+    try {
+      fetchRes = await fetch(gasUrl);
+    } catch (err) {
+      const detail = formatFetchError(err);
+      throw new Error(`Failed to reach Calendar GAS: ${detail}`);
+    }
+    const json = await fetchRes.json().catch(() => ({}));
+    if (!fetchRes.ok) {
+      const msg = json?.error || `GAS responded with ${fetchRes.status}`;
+      return res.status(502).json({ error: msg });
+    }
+    if (json.error) {
+      return res.status(400).json({ error: json.error });
+    }
+    const data = Array.isArray(json.data) ? json.data : [];
+
+    if (action === 'compare') {
+      const comparison = await compareMonthSchedule(data, month);
+      console.log(
+        '[calendar-poll/reconcile-month] compare',
+        month,
+        'fetched',
+        comparison.fetched,
+        'missing',
+        comparison.missing.length,
+        'disappeared',
+        comparison.disappeared.length
+      );
+      return res.json({ ok: true, action: 'compare', ...comparison });
+    }
+
+    const before = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM monthly_schedule
+        WHERE date IS NOT NULL
+          AND to_char(date, 'YYYY-MM') = $1
+          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      [month]
+    );
+    const localBefore = Number(before.rows?.[0]?.n) || 0;
+
+    let upserted = 0;
+    let deletedOrphans = 0;
+    let skippedDismissed = 0;
+    let months = [];
+
+    if (action === 'add') {
+      const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
+      const onlyKeys = [];
+      if (entries && entries.length > 0) {
+        for (const e of entries) {
+          const eid = String(e?.event_id ?? e?.eventId ?? '').trim();
+          const sn = String(e?.student_name ?? e?.studentName ?? '').trim();
+          if (eid && sn) onlyKeys.push(`${eid}\t${sn}`);
+        }
+        if (onlyKeys.length === 0) {
+          return res.status(400).json({ error: 'entries must include event_id and student_name' });
+        }
+      }
+      const result = await upsertMonthlySchedule(data, {
+        reconcile: false,
+        reconcileMonthsAllowlist: [month],
+        ignoreDismissals: true,
+        ...(onlyKeys.length > 0 ? { onlyKeys } : {}),
+      });
+      upserted = result.upserted;
+      skippedDismissed = result.skippedDismissed || 0;
+      months = result.months || [];
+    } else {
+      // remove — delete orphans only; do not upsert (avoids also adding missing)
+      const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
+      const onlyKeys = [];
+      if (entries && entries.length > 0) {
+        for (const e of entries) {
+          const eid = String(e?.event_id ?? e?.eventId ?? '').trim();
+          const sn = String(e?.student_name ?? e?.studentName ?? '').trim();
+          if (eid && sn) onlyKeys.push(`${eid}\t${sn}`);
+        }
+        if (onlyKeys.length === 0) {
+          return res.status(400).json({ error: 'entries must include event_id and student_name' });
+        }
+      }
+      deletedOrphans = await removeDisappearedForMonth(data, month, {
+        ...(onlyKeys.length > 0 ? { onlyKeys } : {}),
+      });
+      months = [month];
+    }
+
+    const after = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM monthly_schedule
+        WHERE date IS NOT NULL
+          AND to_char(date, 'YYYY-MM') = $1
+          AND COALESCE(calendar_sync_status, 'synced') = 'synced'`,
+      [month]
+    );
+    const localAfter = Number(after.rows?.[0]?.n) || 0;
+    const removed = deletedOrphans || 0;
+    const added = action === 'add' ? Math.max(0, localAfter - localBefore) : 0;
+
+    let teacherSchedulesRefresh = null;
+    try {
+      teacherSchedulesRefresh = await refreshTeacherSchedulesFromGASForMonth(month);
+    } catch (err) {
+      console.warn('[calendar-poll/reconcile-month] teacher schedule refresh failed:', err.message);
+      teacherSchedulesRefresh = { ok: false, error: err.message };
+    }
+
+    // Fresh compare after apply so UI can refresh lists
+    const comparison = await compareMonthSchedule(data, month);
+
+    console.log(
+      '[calendar-poll/reconcile-month]',
+      action,
+      month,
+      'upserted',
+      upserted,
+      'removed',
+      removed,
+      'local',
+      localBefore,
+      '→',
+      localAfter
+    );
+    res.json({
+      ok: true,
+      action,
+      month,
+      fetched: data.length,
+      upserted,
+      skippedDismissed,
+      removed,
+      added,
+      localBefore,
+      localAfter,
+      months,
+      teacherSchedulesRefresh,
+      missing: comparison.missing,
+      disappeared: comparison.disappeared,
+      calendar_only: comparison.calendar_only || comparison.missing,
+      local_only: comparison.local_only || comparison.disappeared,
+      calendar: comparison.calendar || [],
+      local: comparison.local || [],
+      calendarCount: comparison.calendarCount,
+      localCount: comparison.localCount,
+    });
+  } catch (err) {
+    const detail = formatFetchError(err);
+    console.error('[calendar-poll/reconcile-month] error:', detail);
     res.status(500).json({ error: detail });
   }
 });

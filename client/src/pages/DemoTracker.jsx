@@ -20,12 +20,22 @@ function getMondayJstStr() {
   return `${mon.getUTCFullYear()}-${String(mon.getUTCMonth() + 1).padStart(2, '0')}-${String(mon.getUTCDate()).padStart(2, '0')}`
 }
 
+function getCurrentYearJst() {
+  return String(new Date(Date.now() + JST_OFFSET_MS).getUTCFullYear())
+}
+
 function monthOptions() {
   const cur = getCurrentYyyyMmJst()
+  const [curY] = cur.split('-').map(Number)
+  const janThisYear = `${curY}-01`
   const opts = []
+  const next = addOneMonthYyyyMm(cur)
+  if (next) opts.push(next)
   let ym = cur
-  for (let i = 0; i < 6; i += 1) {
+  // Current month back through January of this (JST) year
+  while (ym && ym >= janThisYear) {
     opts.push(ym)
+    if (ym === janThisYear) break
     const [y, m] = ym.split('-').map(Number)
     let nm = m - 1
     let ny = y
@@ -35,17 +45,18 @@ function monthOptions() {
     }
     ym = `${ny}-${String(nm).padStart(2, '0')}`
   }
-  const next = addOneMonthYyyyMm(cur)
-  if (next) opts.unshift(next)
   return [...new Set(opts)]
 }
 
 export default function DemoTracker() {
   const { success } = useToast()
-  const [mode, setMode] = useState('month') // month | week
+  const [mode, setMode] = useState('month') // month | week | year
   const [month, setMonth] = useState(getCurrentYyyyMmJst)
+  const [year, setYear] = useState(getCurrentYearJst)
+  const [yearOptions, setYearOptions] = useState(() => [getCurrentYearJst()])
   const [weekStart] = useState(getMondayJstStr)
   const [rows, setRows] = useState([])
+  const [teachers, setTeachers] = useState([])
   const [counts, setCounts] = useState({ total: 0, signed_up: 0, not_signed_up: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -62,20 +73,30 @@ export default function DemoTracker() {
   const [adding, setAdding] = useState(false)
 
   const months = useMemo(() => monthOptions(), [])
+  const isYearMode = mode === 'year'
 
   const fetchList = useCallback(() => {
     setLoading(true)
     setError(null)
-    const params = mode === 'week' ? { weekStart } : { month }
+    const params =
+      mode === 'year' ? { year } : mode === 'week' ? { weekStart } : { month }
     api
       .getDemoTracker(params)
       .then((res) => {
-        setRows(Array.isArray(res?.rows) ? res.rows : [])
         setCounts(res?.counts || { total: 0, signed_up: 0, not_signed_up: 0 })
+        if (mode === 'year') {
+          setTeachers(Array.isArray(res?.teachers) ? res.teachers : [])
+          setRows([])
+          const yrs = Array.isArray(res?.years) ? res.years.map(String) : []
+          if (yrs.length) setYearOptions(yrs)
+        } else {
+          setRows(Array.isArray(res?.rows) ? res.rows : [])
+          setTeachers([])
+        }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [mode, month, weekStart])
+  }, [mode, month, weekStart, year])
 
   useEffect(() => {
     fetchList()
@@ -89,6 +110,7 @@ export default function DemoTracker() {
         if (cancelled) return
         const staff = Array.isArray(staffRes?.staff) ? staffRes.staff : []
         const names = staff
+          .filter((s) => s?.staff_type === 'english_teacher' && s.active !== false)
           .map((s) => String(s.name || s.Name || '').trim())
           .filter(Boolean)
         setStaffNames([...new Set(names)].sort((a, b) => a.localeCompare(b)))
@@ -257,14 +279,16 @@ export default function DemoTracker() {
             <Download className={`h-4 w-4 ${importing ? 'animate-pulse' : ''}`} />
             {importing ? 'Importing…' : 'Import past demos'}
           </button>
-          <button
-            type="button"
-            onClick={() => setAddOpen((o) => !o)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer"
-          >
-            <Plus className="h-4 w-4" />
-            Add demo event
-          </button>
+          {!isYearMode && (
+            <button
+              type="button"
+              onClick={() => setAddOpen((o) => !o)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              Add demo event
+            </button>
+          )}
         </div>
       </header>
 
@@ -272,7 +296,10 @@ export default function DemoTracker() {
         <div className="inline-flex rounded-lg border border-gray-200 p-0.5">
           <button
             type="button"
-            onClick={() => setMode('month')}
+            onClick={() => {
+              setMode('month')
+              setAddOpen(false)
+            }}
             className={`rounded-md px-3 py-1.5 text-sm font-medium cursor-pointer ${
               mode === 'month' ? 'bg-green-600 text-white' : 'text-gray-700 hover:bg-gray-50'
             }`}
@@ -281,12 +308,27 @@ export default function DemoTracker() {
           </button>
           <button
             type="button"
-            onClick={() => setMode('week')}
+            onClick={() => {
+              setMode('week')
+              setAddOpen(false)
+            }}
             className={`rounded-md px-3 py-1.5 text-sm font-medium cursor-pointer ${
               mode === 'week' ? 'bg-green-600 text-white' : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
             This week
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('year')
+              setAddOpen(false)
+            }}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium cursor-pointer ${
+              mode === 'year' ? 'bg-green-600 text-white' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Year
           </button>
         </div>
         {mode === 'month' ? (
@@ -302,8 +344,24 @@ export default function DemoTracker() {
               </option>
             ))}
           </select>
-        ) : (
+        ) : mode === 'week' ? (
           <span className="text-sm text-gray-600">Week of {weekStart}</span>
+        ) : (
+          <>
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                  {y === getCurrentYearJst() ? ' (current)' : ''}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500">Past demos only (future not counted)</span>
+          </>
         )}
         <div className="ml-auto flex flex-wrap gap-4 text-sm">
           <span className="text-gray-600">
@@ -318,7 +376,7 @@ export default function DemoTracker() {
         </div>
       </div>
 
-      {addOpen && (
+      {addOpen && !isYearMode && (
         <div className="rounded-xl border border-green-200 bg-green-50/50 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Add demo event</h2>
@@ -406,86 +464,131 @@ export default function DemoTracker() {
           </div>
         )}
         <div className="overflow-x-auto max-h-[65vh]">
-          <table className="min-w-full">
-            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Student</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Teacher</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">Signed up</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {!loading && rows.length === 0 && (
+          {isYearMode ? (
+            <table className="min-w-full">
+              <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-500">
-                    No demo events in this range. Try Import past demos or Add demo event.
-                  </td>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Teacher
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Demos
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Signed up
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Rate
+                  </th>
                 </tr>
-              )}
-              {rows.map((r, index) => {
-                const rowBusy = busyId === r.id
-                return (
-                  <tr
-                    key={r.id}
-                    className={index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'}
-                  >
-                    <td className="px-4 py-3 text-sm tabular-nums text-gray-800">{r.demo_date}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => setDetailStudentId(r.student_id)}
-                        className="text-sm font-semibold text-green-700 hover:underline cursor-pointer"
-                      >
-                        {r.student_name || '—'}
-                      </button>
-                      {r.student_kanji ? (
-                        <div className="text-xs text-gray-500">{r.student_kanji}</div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <input
-                        list="demo-tracker-teachers"
-                        defaultValue={r.teacher_name || ''}
-                        key={`${r.id}-${r.teacher_name || ''}`}
-                        disabled={rowBusy}
-                        placeholder="Set teacher…"
-                        onBlur={(e) => handleTeacherSave(r, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur()
-                        }}
-                        className="w-full min-w-[8rem] max-w-[12rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-gray-800 hover:border-gray-300 focus:border-green-500 focus:bg-white focus:outline-none disabled:opacity-50"
-                        aria-label={`Teacher for ${r.student_name || r.id}`}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{r.student_status || '—'}</td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="inline-flex justify-center">
-                        <ToggleSwitch
-                          checked={!!r.signed_up}
-                          disabled={rowBusy}
-                          onChange={(next) => handleSignedUpChange(r, next)}
-                          aria-label={`Signed up ${r.student_name || r.id}`}
-                        />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        disabled={rowBusy}
-                        onClick={() => handleDelete(r)}
-                        className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {!loading && teachers.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-12 text-center text-sm text-gray-500">
+                      No past demos for {year}. Future demos are excluded from Year totals.
                     </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                )}
+                {teachers.map((t, index) => (
+                  <tr
+                    key={t.teacher_name}
+                    className={index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'}
+                  >
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{t.teacher_name}</td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-gray-800">{t.demos}</td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-green-700">
+                      {t.signed_up}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right font-semibold text-gray-900">
+                      {t.rate}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="min-w-full">
+              <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Student</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Teacher</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold tracking-wide text-gray-500">Signed up</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-500">
+                      No demo events in this range. Try Import past demos or Add demo event.
+                    </td>
+                  </tr>
+                )}
+                {rows.map((r, index) => {
+                  const rowBusy = busyId === r.id
+                  return (
+                    <tr
+                      key={r.id}
+                      className={index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'}
+                    >
+                      <td className="px-4 py-3 text-sm tabular-nums text-gray-800">{r.demo_date}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setDetailStudentId(r.student_id)}
+                          className="text-sm font-semibold text-green-700 hover:underline cursor-pointer"
+                        >
+                          {r.student_name || '—'}
+                        </button>
+                        {r.student_kanji ? (
+                          <div className="text-xs text-gray-500">{r.student_kanji}</div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          list="demo-tracker-teachers"
+                          defaultValue={r.teacher_name || ''}
+                          key={`${r.id}-${r.teacher_name || ''}`}
+                          disabled={rowBusy}
+                          placeholder="Set teacher…"
+                          onBlur={(e) => handleTeacherSave(r, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
+                          }}
+                          className="w-full min-w-[8rem] max-w-[12rem] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 placeholder:text-gray-400 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:opacity-50"
+                          aria-label={`Teacher for ${r.student_name || r.id}`}
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{r.student_status || '—'}</td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="inline-flex justify-center">
+                          <ToggleSwitch
+                            checked={!!r.signed_up}
+                            disabled={rowBusy}
+                            onChange={(next) => handleSignedUpChange(r, next)}
+                            aria-label={`Signed up ${r.student_name || r.id}`}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          disabled={rowBusy}
+                          onClick={() => handleDelete(r)}
+                          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

@@ -32,6 +32,7 @@ export const api = {
     fetchApi(`/students/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   getDemoTracker: (params = {}) => {
     const q = new URLSearchParams()
+    if (params.year) q.set('year', String(params.year))
     if (params.month) q.set('month', params.month)
     if (params.weekStart) q.set('weekStart', params.weekStart)
     const qs = q.toString()
@@ -324,6 +325,10 @@ export const api = {
   /** Server-side backfill (uses .env on server; no client build needed) */
   backfillFromCalendar: (body) =>
     fetchApi('/calendar-poll/backfill', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** Month reconcile: action=compare|add|remove (default compare lists missing/disappeared). */
+  reconcileCalendarMonth: (body = {}) =>
+    fetchApi('/calendar-poll/reconcile-month', { method: 'POST', body: JSON.stringify(body) }),
 
   syncFromSheet: () =>
     fetchApi('/calendar-poll/sync-from-sheet', { method: 'POST' }),

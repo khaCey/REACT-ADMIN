@@ -267,6 +267,40 @@ export async function recordScheduleSlotDismissals(rows) {
   }
 }
 
+/**
+ * Clear dismissals so an explicit "Add to local" can recreate the slot.
+ * @param {Array<{ studentName?: string, student_name?: string, date?: string, startTs?: string, start?: Date|string }>} rows
+ */
+export async function clearScheduleSlotDismissals(rows) {
+  for (const row of rows || []) {
+    const studentName = normalizeName(row.studentName ?? row.student_name);
+    const dateVal = row.date;
+    const startVal = row.startTs ?? row.start;
+    if (!studentName || !dateVal || !startVal) continue;
+    const dateStr =
+      dateVal instanceof Date
+        ? dateVal.toISOString().slice(0, 10)
+        : String(dateVal).trim().slice(0, 10);
+    const startDate = startVal instanceof Date ? startVal : new Date(startVal);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || Number.isNaN(startDate.getTime())) continue;
+    try {
+      await query(
+        `DELETE FROM schedule_slot_dismissals
+          WHERE REGEXP_REPLACE(TRIM(student_name), '\\s+', ' ', 'g')
+              = REGEXP_REPLACE(TRIM($1::text), '\\s+', ' ', 'g')
+            AND lesson_date = $2::date
+            AND start_time_utc = $3::timestamptz`,
+        [studentName, dateStr, startDate.toISOString()]
+      );
+    } catch (err) {
+      if (String(err?.message || '').includes('schedule_slot_dismissals')) {
+        return;
+      }
+      throw err;
+    }
+  }
+}
+
 async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
   const months = new Set();
@@ -340,10 +374,18 @@ async function buildMonthlyScheduleRows(data) {
 
     if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
 
-    const status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
+    const title = (r.title || '').toString().trim();
+    // Prefer title markers over poll color→status (GAS once mapped graphite to cancelled, and
+    // only recognized legacy [RESCHEDULED] — not "Moved to/from").
+    let status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
+    if (
+      /Moved\s+(to|from)\s+(\?{3}|\d{1,2}(?:st|nd|rd|th))/i.test(title) ||
+      /\[RESCHEDULED\]/i.test(title)
+    ) {
+      status = 'rescheduled';
+    }
     const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
       r.isKidsLesson === true || r.is_kids_lesson === true;
-    const title = (r.title || '').toString().trim();
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
     const lessonKind = normalizeLessonKind(r.lessonKind ?? r.lesson_kind);
     const lessonMode = normalizeLessonMode(
@@ -397,8 +439,9 @@ async function buildMonthlyScheduleRows(data) {
  * @param {Set<string>} months - YYYY-MM
  * @param {Set<string>} incomingKeys - `${eventId}\t${studentName}`
  * @param {Set<string>} incomingSlotKeys - student+JST date+UTC HH-mm-ss from start (see lessonSlotKey)
+ * @param {Set<string>|null} [onlyKeys] - when set, only delete these `${eventId}\t${studentName}` rows (still must be orphans)
  */
-async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys) {
+async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys, onlyKeys = null) {
   let deleted = 0;
   for (const ym of months) {
     const existing = await query(
@@ -411,6 +454,9 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys)
     );
     for (const r of existing.rows || []) {
       const k = `${r.event_id}\t${r.student_name}`;
+      if (onlyKeys && !onlyKeys.has(k)) {
+        continue;
+      }
       if (incomingKeys.has(k)) {
         continue;
       }
@@ -437,6 +483,171 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys)
     }
   }
   return deleted;
+}
+
+function mapCompareLessonRow(row) {
+  const startIso =
+    row.startTs ||
+    (row.start instanceof Date
+      ? row.start.toISOString()
+      : row.start
+        ? new Date(row.start).toISOString()
+        : null);
+  const endIso =
+    row.endTs ||
+    (row.end instanceof Date
+      ? row.end.toISOString()
+      : row.end
+        ? new Date(row.end).toISOString()
+        : null);
+  const date =
+    row.date instanceof Date
+      ? row.date.toISOString().slice(0, 10)
+      : row.date
+        ? String(row.date).slice(0, 10)
+        : null;
+  return {
+    event_id: row.eventId || row.event_id || null,
+    student_name: row.studentName || row.student_name || null,
+    title: row.title || null,
+    date,
+    start: startIso,
+    end: endIso,
+    teacher_name: row.teacherName || row.teacher_name || null,
+    lesson_kind: row.lessonKind || row.lesson_kind || null,
+    status: row.status || null,
+  };
+}
+
+/**
+ * Compare GAS month snapshot to local synced monthly_schedule rows.
+ * Missing = on Calendar, not local. Disappeared = local synced, not on Calendar.
+ * @param {Array<Record<string, unknown>>} data
+ * @param {string} month YYYY-MM
+ */
+export async function compareMonthSchedule(data, month) {
+  const ym = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(ym)) {
+    throw new Error('month must be YYYY-MM');
+  }
+  const { rows, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
+    Array.isArray(data) ? data : []
+  );
+  const calendarRows = rows.filter((r) => r.date && String(r.date).slice(0, 7) === ym);
+
+  const existing = await query(
+    `SELECT ms.event_id, ms.student_name, ms.title, ms.date, ms.start, ms."end",
+            ms.teacher_name, ms.lesson_kind, ms.status
+       FROM monthly_schedule ms
+      WHERE ms.date IS NOT NULL
+        AND to_char(ms.date, 'YYYY-MM') = $1
+        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
+      ORDER BY ms.start ASC NULLS LAST, ms.student_name ASC`,
+    [ym]
+  );
+  const localRows = existing.rows || [];
+  const localKeys = new Set(localRows.map((r) => `${r.event_id}\t${r.student_name}`));
+  const localSlotKeys = new Set();
+  for (const r of localRows) {
+    const sk = lessonSlotKey(r.student_name, r.start);
+    if (sk) localSlotKeys.add(sk);
+  }
+  const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(new Set([ym]));
+
+  const missingKeys = new Set();
+  const missing = [];
+  for (const row of calendarRows) {
+    const k = `${row.eventId}\t${row.studentName}`;
+    if (localKeys.has(k)) continue;
+    const slot = lessonSlotKey(row.studentName, row.startTs);
+    if (slot && localSlotKeys.has(slot)) continue;
+    const dismissed = !!(slot && dismissedSlotKeys.has(slot));
+    const mapped = {
+      ...mapCompareLessonRow(row),
+      source: 'calendar_only',
+      dismissed,
+    };
+    missing.push(mapped);
+    missingKeys.add(k);
+    if (slot) missingKeys.add(`slot:${slot}`);
+  }
+
+  const disappearedKeys = new Set();
+  const disappeared = [];
+  for (const r of localRows) {
+    const k = `${r.event_id}\t${r.student_name}`;
+    if (incomingKeys.has(k)) continue;
+    const slot = lessonSlotKey(r.student_name, r.start);
+    if (slot && incomingSlotKeys.has(slot)) continue;
+    const block = await query(
+      `SELECT 1 FROM reschedules rs
+         WHERE TRIM(rs.from_event_id) = TRIM($1::text)
+           AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+             = REGEXP_REPLACE(TRIM($2::text), '\\s+', ' ', 'g')
+         LIMIT 1`,
+      [r.event_id, r.student_name]
+    );
+    if ((block.rows || []).length > 0) continue;
+    const mapped = { ...mapCompareLessonRow(r), source: 'local_only' };
+    disappeared.push(mapped);
+    disappearedKeys.add(k);
+  }
+
+  const calendar = calendarRows.map((row) => {
+    const k = `${row.eventId}\t${row.studentName}`;
+    const slot = lessonSlotKey(row.studentName, row.startTs);
+    const only = missingKeys.has(k) || (slot && missingKeys.has(`slot:${slot}`));
+    return {
+      ...mapCompareLessonRow(row),
+      source: only ? 'calendar_only' : 'both',
+    };
+  });
+
+  const local = localRows.map((r) => {
+    const k = `${r.event_id}\t${r.student_name}`;
+    return {
+      ...mapCompareLessonRow(r),
+      source: disappearedKeys.has(k) ? 'local_only' : 'both',
+    };
+  });
+
+  return {
+    month: ym,
+    fetched: Array.isArray(data) ? data.length : 0,
+    calendarCount: calendarRows.length,
+    localCount: localRows.length,
+    calendar,
+    local,
+    missing,
+    disappeared,
+    calendar_only: missing,
+    local_only: disappeared,
+  };
+}
+
+/**
+ * Delete local synced rows for a month that are missing from the Calendar snapshot.
+ * @param {Array<Record<string, unknown>>} data
+ * @param {string} month YYYY-MM
+ * @param {{ onlyKeys?: Set<string> | string[] }} [options]
+ *   onlyKeys: optional `${eventId}\\t${studentName}` allowlist — delete only those orphan rows
+ */
+export async function removeDisappearedForMonth(data, month, options = {}) {
+  const ym = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(ym)) {
+    throw new Error('month must be YYYY-MM');
+  }
+  const { incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
+    Array.isArray(data) ? data : []
+  );
+  const onlyKeysOpt = options?.onlyKeys;
+  const onlyKeys =
+    onlyKeysOpt instanceof Set
+      ? onlyKeysOpt
+      : Array.isArray(onlyKeysOpt) && onlyKeysOpt.length > 0
+        ? new Set(onlyKeysOpt.map((k) => String(k)))
+        : null;
+  return reconcileMonthsToSnapshot(new Set([ym]), incomingKeys, incomingSlotKeys, onlyKeys);
 }
 
 /**
@@ -540,21 +751,53 @@ function monthsEligibleForReconcile(months, options) {
  * @param {{
  *   removed?: Array<{ eventID?: string, event_id?: string, studentName?: string, student_name?: string }>,
  *   reconcile?: boolean,
+ *   forceReconcile?: boolean,
  *   reconcileMonthsAllowlist?: string[],
  *   reconcileOnlyYear?: string,
+ *   onlyKeys?: Set<string> | string[],
+ *   ignoreDismissals?: boolean,
  * }} [options]
  * - reconcile: delete DB rows in snapshot months not in `data` (default true).
+ * - forceReconcile: when true, orphan deletes run even if CALENDAR_RECONCILE_ORPHANS is off (explicit admin reconcile).
  * - reconcileMonthsAllowlist: only these YYYY-MM months are reconciled (intersected with months from payload).
  * - reconcileOnlyYear: only months starting with this YYYY (after allowlist filter).
+ * - onlyKeys: optional `${eventId}\\t${studentName}` allowlist — upsert only those rows.
+ * - ignoreDismissals: when true (explicit Add to local), clear dismissals and insert even if previously removed in-app.
  */
 export async function upsertMonthlySchedule(data, options = {}) {
-  const { removed = [], reconcile = true } = options;
+  const {
+    removed = [],
+    reconcile = true,
+    forceReconcile = false,
+    onlyKeys: onlyKeysOpt,
+    ignoreDismissals = false,
+  } = options;
   const removedStats = await applyRemovedFromPoll(removed);
 
-  const { rows, months, incomingKeys, incomingSlotKeys } = await buildMonthlyScheduleRows(
-    Array.isArray(data) ? data : []
-  );
-  const dismissedSlotKeys = await loadDismissedSlotKeysForMonths(months);
+  const built = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);
+  let { rows, months, incomingKeys, incomingSlotKeys } = built;
+  const onlyKeys =
+    onlyKeysOpt instanceof Set
+      ? onlyKeysOpt
+      : Array.isArray(onlyKeysOpt) && onlyKeysOpt.length > 0
+        ? new Set(onlyKeysOpt.map((k) => String(k)))
+        : null;
+  if (onlyKeys && onlyKeys.size > 0) {
+    rows = rows.filter((r) => onlyKeys.has(`${r.eventId}\t${r.studentName}`));
+    months = new Set(rows.map((r) => (r.date ? String(r.date).slice(0, 7) : '')).filter((m) => /^\d{4}-\d{2}$/.test(m)));
+    incomingKeys = new Set(rows.map((r) => `${r.eventId}\t${r.studentName}`));
+    incomingSlotKeys = new Set();
+    for (const r of rows) {
+      const sk = lessonSlotKey(r.studentName, r.startTs);
+      if (sk) incomingSlotKeys.add(sk);
+    }
+  }
+  const dismissedSlotKeys = ignoreDismissals
+    ? new Set()
+    : await loadDismissedSlotKeysForMonths(months);
+  if (ignoreDismissals && rows.length > 0) {
+    await clearScheduleSlotDismissals(rows);
+  }
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
   const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '0').trim() === '1';
 
@@ -602,7 +845,18 @@ export async function upsertMonthlySchedule(data, options = {}) {
          calendar_source_event_id = COALESCE(EXCLUDED.calendar_source_event_id, monthly_schedule.calendar_source_event_id),
          lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
          title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
-         status = EXCLUDED.status, is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
+         status = CASE
+           WHEN EXISTS (
+             SELECT 1 FROM reschedules rs
+             WHERE TRIM(rs.from_event_id) = TRIM(monthly_schedule.event_id)
+               AND REGEXP_REPLACE(TRIM(rs.from_student_name), '\\s+', ' ', 'g')
+                 = REGEXP_REPLACE(TRIM(monthly_schedule.student_name), '\\s+', ' ', 'g')
+           )
+           AND LOWER(TRIM(EXCLUDED.status)) IN ('scheduled', 'cancelled')
+             THEN 'rescheduled'
+           ELSE EXCLUDED.status
+         END,
+         is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
          calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
          awaiting_reschedule_date = CASE
            WHEN $13::boolean IS NULL THEN monthly_schedule.awaiting_reschedule_date
@@ -652,7 +906,8 @@ export async function upsertMonthlySchedule(data, options = {}) {
   let deletedOrphans = 0;
   // Reconcile after upsert so rows are updated/inserted before we compare keys; avoids wiping lessons
   // that are present in this payload but still keyed by an older event_id string.
-  if (reconcile && envAllowReconcile && monthsToReconcile.size > 0) {
+  // forceReconcile: explicit admin "sync this month" bypasses CALENDAR_RECONCILE_ORPHANS=0.
+  if (reconcile && (envAllowReconcile || forceReconcile) && monthsToReconcile.size > 0) {
     deletedOrphans = await reconcileMonthsToSnapshot(monthsToReconcile, incomingKeys, incomingSlotKeys);
   }
 
