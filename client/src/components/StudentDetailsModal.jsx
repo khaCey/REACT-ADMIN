@@ -448,12 +448,8 @@ ${linkUrl}
 Green Square`
 
       const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-      const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 
-      const opened = window.open(gmailUrl, '_blank', 'noopener,noreferrer')
-      if (!opened) {
-        window.location.href = mailtoUrl
-      }
+      window.open(gmailUrl, '_blank', 'noopener,noreferrer')
 
       setLineEmailResult({
         type: 'success',
