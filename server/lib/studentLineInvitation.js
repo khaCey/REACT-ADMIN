@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 30000;
+const LINE_LINK_PUBLIC_BASE_URL = 'https://booking.kaelenoer.com/link/';
 
 export function getStudentLineLinkApiUrl() {
   return String(process.env.LINE_LINK_API_URL || '').trim();
@@ -14,9 +15,41 @@ function getTimeoutMs() {
   return Math.min(Math.max(Math.round(raw), 1000), 120000);
 }
 
+function normalizePublicInvitationLink(rawLink) {
+  const link = String(rawLink || '').trim();
+  if (!/^https:\/\//i.test(link)) {
+    const err = new Error('LINE linking API did not return a valid HTTPS link');
+    err.code = 'LINE_LINK_API_INVALID_RESPONSE';
+    throw err;
+  }
+
+  let url;
+  try {
+    url = new URL(link);
+  } catch {
+    const err = new Error('LINE linking API did not return a valid HTTPS link');
+    err.code = 'LINE_LINK_API_INVALID_RESPONSE';
+    throw err;
+  }
+
+  const match = url.pathname.match(/^\/link\/([^/?#]+)\/?$/i);
+  const token = match?.[1] ? decodeURIComponent(match[1]) : '';
+  if (!token) {
+    const err = new Error('LINE linking API did not return a valid invitation token');
+    err.code = 'LINE_LINK_API_INVALID_RESPONSE';
+    throw err;
+  }
+
+  return `${LINE_LINK_PUBLIC_BASE_URL}${encodeURIComponent(token)}`;
+}
+
 /**
  * Ask the bound Google Apps Script API to create a single-use, 24-hour
  * invitation for a student. No API key is sent in this first implementation.
+ *
+ * The GAS response owns the invitation token. For the current development
+ * phase, REACT-ADMIN normalizes the public host to booking.kaelenoer.com while
+ * preserving that exact generated token.
  *
  * @param {number|string} studentNumber
  * @param {number|string|null|undefined} staffId
@@ -75,12 +108,7 @@ export async function createStudentLineLinkInvitation(
       throw err;
     }
 
-    const link = String(payload.link || '').trim();
-    if (!/^https:\/\//i.test(link)) {
-      const err = new Error('LINE linking API did not return a valid HTTPS link');
-      err.code = 'LINE_LINK_API_INVALID_RESPONSE';
-      throw err;
-    }
+    const link = normalizePublicInvitationLink(payload.link);
 
     return {
       ok: true,
