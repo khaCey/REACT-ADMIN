@@ -12,6 +12,7 @@ import {
   Coffee,
   MessageSquareQuote,
   ClipboardList,
+  Tags,
 } from 'lucide-react'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
@@ -95,12 +96,23 @@ export default function Sidebar({
             </Link>
           </li>
           {isAdmin && (
-            <li>
-              <Link to="/admin" className={navItemClass(path === '/admin')}>
-                <Shield className="w-5 h-5" />
-                <span>Admin</span>
-              </Link>
-            </li>
+            <>
+              <li>
+                <Link to="/admin" className={navItemClass(path === '/admin')}>
+                  <Shield className="w-5 h-5" />
+                  <span>Admin</span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/admin/calendar-student-id-backfill"
+                  className={navItemClass(path === '/admin/calendar-student-id-backfill')}
+                >
+                  <Tags className="w-5 h-5" />
+                  <span>Calendar ID Backfill</span>
+                </Link>
+              </li>
+            </>
           )}
           {isKhacey && (
             <li>
