@@ -2,14 +2,15 @@ import { clearStoredSession, getStoredToken } from '../utils/authSession'
 
 const API_BASE = '/api'
 
-async function fetchJson(path) {
+async function fetchJson(path, options = {}) {
   const token = getStoredToken()
-  const headers = {}
+  const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) }
   if (token) headers.Authorization = `Bearer ${token}`
 
   const res = await fetch(`${API_BASE}${path}`, {
-    method: 'GET',
+    method: options.method || 'GET',
     headers,
+    body: options.body,
     cache: 'no-store',
   })
 
@@ -27,4 +28,11 @@ export function getCalendarStudentIdBackfillPreview(month) {
   if (month) params.set('month', String(month))
   const qs = params.toString()
   return fetchJson(`/calendar/student-id-backfill/preview${qs ? `?${qs}` : ''}`)
+}
+
+export function applyCalendarStudentIdBackfill(month) {
+  return fetchJson('/calendar/student-id-backfill/apply', {
+    method: 'POST',
+    body: JSON.stringify({ month }),
+  })
 }
