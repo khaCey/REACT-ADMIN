@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CalendarSearch, CheckCircle2, Info, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CalendarSearch, CheckCircle2, Info, ShieldCheck, Tags } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { getCalendarStudentIdBackfillPreview } from '../api/calendarStudentIdBackfillApi'
+import {
+  applyCalendarStudentIdBackfill,
+  getCalendarStudentIdBackfillPreview,
+} from '../api/calendarStudentIdBackfillApi'
 import { getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const STATUS_META = {
@@ -23,6 +26,10 @@ const STATUS_META = {
   },
   ambiguous_calendar_match: {
     label: 'Ambiguous',
+    className: 'bg-red-100 text-red-800 border-red-200',
+  },
+  api_error: {
+    label: 'API error',
     className: 'bg-red-100 text-red-800 border-red-200',
   },
   not_synced: {
@@ -69,8 +76,10 @@ function StatusBadge({ status }) {
 export default function CalendarStudentIdBackfill() {
   const [month, setMonth] = useState(() => getCurrentYyyyMmJst())
   const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [applyResult, setApplyResult] = useState(null)
   const [statusFilter, setStatusFilter] = useState('')
 
   const runPreview = async () => {
@@ -87,6 +96,31 @@ export default function CalendarStudentIdBackfill() {
     }
   }
 
+  const applySafeTags = async () => {
+    const safeCount = Number(result?.counts?.safe_to_tag || 0)
+    if (safeCount <= 0) return
+
+    const confirmed = window.confirm(
+      `Add [GS_STUDENT_IDS:...] to ${safeCount} safe Calendar event${safeCount === 1 ? '' : 's'}?\n\n` +
+      'This operation can only change the event description. It cannot create, delete, move, rename, recolor, or change recurrence.'
+    )
+    if (!confirmed) return
+
+    setApplying(true)
+    setError('')
+    setApplyResult(null)
+    try {
+      const applied = await applyCalendarStudentIdBackfill(month)
+      setApplyResult(applied)
+      const refreshed = await getCalendarStudentIdBackfillPreview(month)
+      setResult(refreshed)
+    } catch (err) {
+      setError(err.message || 'Failed to apply student number tags')
+    } finally {
+      setApplying(false)
+    }
+  }
+
   const filteredItems = useMemo(() => {
     const items = Array.isArray(result?.items) ? result.items : []
     if (!statusFilter) return items
@@ -98,7 +132,9 @@ export default function CalendarStudentIdBackfill() {
     (counts.tag_mismatch || 0) +
     (counts.calendar_missing || 0) +
     (counts.ambiguous_calendar_match || 0) +
+    (counts.api_error || 0) +
     (counts.missing_student_id || 0)
+  const safeCount = Number(counts.safe_to_tag || 0)
 
   return (
     <div className="w-full space-y-5 pb-8">
@@ -109,12 +145,12 @@ export default function CalendarStudentIdBackfill() {
             Calendar Student ID Backfill
           </h2>
           <p className="mt-1 text-sm text-gray-600">
-            Read-only migration preview for matching monthly_schedule student IDs to existing Google Calendar events.
+            Match monthly_schedule student IDs to existing Calendar lessons and add the canonical student-number tag.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
           <ShieldCheck className="h-4 w-4" />
-          READ ONLY
+          DESCRIPTION ONLY
         </div>
       </div>
 
@@ -122,9 +158,9 @@ export default function CalendarStudentIdBackfill() {
         <div className="flex gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="font-semibold">This page cannot modify Google Calendar.</p>
+            <p className="font-semibold">Calendar changes are deliberately restricted.</p>
             <p className="mt-1">
-              It uses Calendar read-only access and only reports which events would be safe to tag later. No create, update, patch, or delete operation is available here.
+              Preview is read-only. Apply can only add or normalize <code>[GS_STUDENT_IDS:...]</code> in the existing event description. The dedicated API has no create, delete, move, title, color, attendee, location, or recurrence actions.
             </p>
           </div>
         </div>
@@ -137,33 +173,57 @@ export default function CalendarStudentIdBackfill() {
             <input
               type="month"
               value={month}
-              onChange={(e) => setMonth(e.target.value)}
+              onChange={(e) => {
+                setMonth(e.target.value)
+                setResult(null)
+                setApplyResult(null)
+              }}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
             />
           </label>
           <button
             type="button"
             onClick={runPreview}
-            disabled={loading || !/^\d{4}-\d{2}$/.test(month)}
+            disabled={loading || applying || !/^\d{4}-\d{2}$/.test(month)}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? <LoadingSpinner size="xs" /> : <CalendarSearch className="h-4 w-4" />}
-            {loading ? 'Scanning…' : 'Run read-only preview'}
+            {loading ? 'Scanning…' : 'Run preview'}
           </button>
+          {result && safeCount > 0 && (
+            <button
+              type="button"
+              onClick={applySafeTags}
+              disabled={loading || applying}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {applying ? <LoadingSpinner size="xs" /> : <Tags className="h-4 w-4" />}
+              {applying ? 'Tagging…' : `Tag ${safeCount} safe event${safeCount === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       </section>
+
+      {applyResult && (
+        <section className={`rounded-lg border p-4 text-sm ${applyResult.failed > 0 ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-emerald-200 bg-emerald-50 text-emerald-950'}`}>
+          <p className="font-semibold">Tagging finished</p>
+          <p className="mt-1">
+            Tagged: {applyResult.tagged || 0} · Already tagged during re-check: {applyResult.alreadyTagged || 0} · Failed: {applyResult.failed || 0} · Skipped as unsafe: {applyResult.skipped || 0}
+          </p>
+        </section>
+      )}
 
       {result && (
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar events fetched</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">{result.calendarEventsFetched || 0}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Lesson events scanned</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">{result.lessonEventsScanned || 0}</p>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Safe to tag later</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-900">{counts.safe_to_tag || 0}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Safe to tag</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-900">{safeCount}</p>
             </div>
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Already tagged</p>
@@ -205,7 +265,7 @@ export default function CalendarStudentIdBackfill() {
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Event</th>
                       <th className="px-4 py-3">Student IDs</th>
-                      <th className="px-4 py-3">Calendar IDs</th>
+                      <th className="px-4 py-3">Existing tag IDs</th>
                       <th className="px-4 py-3">Reason</th>
                     </tr>
                   </thead>
@@ -247,14 +307,14 @@ export default function CalendarStudentIdBackfill() {
           <div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <Info className="mt-0.5 h-5 w-5 shrink-0" />
             <p>
-              Only <strong>Safe to tag</strong> rows should ever be eligible for the later write phase. Mismatches, missing Calendar events, local-only rows, and ambiguous matches must remain skipped until reviewed.
+              Apply always re-runs the preview first. Only rows that are still <strong>Safe to tag</strong> are sent to the dedicated metadata API. Mismatches, missing events, local rows, and ambiguous recurring lessons are skipped.
             </p>
           </div>
 
-          {issueCount === 0 && (counts.safe_to_tag || 0) > 0 && (
+          {issueCount === 0 && safeCount > 0 && (
             <div className="flex gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>The preview found no blocking mismatches in this month. No Calendar data has been changed.</p>
+              <p>The preview found no blocking mismatches in this month. Review the rows above before applying the tags.</p>
             </div>
           )}
         </>
