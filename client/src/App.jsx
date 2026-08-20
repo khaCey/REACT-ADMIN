@@ -10,6 +10,7 @@ import StudentDetail from './pages/StudentDetail'
 import Staff from './pages/Staff'
 import ChangeHistory from './pages/ChangeHistory'
 import Admin from './pages/Admin'
+import CalendarStudentIdBackfill from './pages/CalendarStudentIdBackfill'
 import DemoTracker from './pages/DemoTracker'
 import Notifications from './pages/Notifications'
 import Messages from './pages/Messages'
@@ -43,6 +44,14 @@ function App() {
         />
         <Route path="change-history" element={<ChangeHistory />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
+        <Route
+          path="admin/calendar-student-id-backfill"
+          element={
+            <AdminRoute>
+              <CalendarStudentIdBackfill />
+            </AdminRoute>
+          }
+        />
         <Route
           path="admin/demo-tracker"
           element={
