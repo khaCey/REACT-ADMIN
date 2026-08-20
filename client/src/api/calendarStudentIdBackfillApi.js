@@ -30,6 +30,13 @@ export function getCalendarStudentIdBackfillPreview(month) {
   return fetchJson(`/calendar/student-id-backfill/preview${qs ? `?${qs}` : ''}`)
 }
 
+export function applyOneCalendarStudentIdBackfill(month, groupKey) {
+  return fetchJson('/calendar/student-id-backfill/apply-one', {
+    method: 'POST',
+    body: JSON.stringify({ month, groupKey }),
+  })
+}
+
 export function applyCalendarStudentIdBackfill(month) {
   return fetchJson('/calendar/student-id-backfill/apply', {
     method: 'POST',
