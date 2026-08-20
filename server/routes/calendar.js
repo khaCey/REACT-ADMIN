@@ -3,6 +3,8 @@ import { google } from 'googleapis';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { requireAdmin } from '../middleware/auth.js';
+import calendarStudentIdBackfillRouter from './calendarStudentIdBackfill.js';
 
 const __dirnameCalendar = dirname(fileURLToPath(import.meta.url));
 
@@ -99,6 +101,13 @@ router.get('/events', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * Admin-only, READ-ONLY Calendar student-ID migration preview.
+ * This route cannot mutate Calendar because both this router and the preview
+ * helper authenticate with the calendar.readonly OAuth scope.
+ */
+router.use('/student-id-backfill', requireAdmin, calendarStudentIdBackfillRouter);
 
 /** POST /api/calendar/webhook - receive Google Calendar push notification; fetch and cache events. */
 router.post('/webhook', async (req, res) => {
