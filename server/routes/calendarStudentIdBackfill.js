@@ -172,6 +172,7 @@ function makeGasRequest(group, action) {
 
 function baseItem(group) {
   return {
+    groupKey: group.key,
     eventId: group.eventId,
     title: group.titles[0] || '',
     start: group.startIso,
@@ -380,6 +381,92 @@ router.get('/preview', async (req, res) => {
     console.error('[calendar-student-id-backfill/preview]', err.message);
     res.status(err.statusCode || 500).json({
       error: err.message || 'Failed to build Calendar student ID backfill preview',
+    });
+  }
+});
+
+/**
+ * Apply the student-number tag to one exact preview group.
+ *
+ * Safety:
+ * - browser sends only month + an opaque DB-derived group key
+ * - server reloads monthly_schedule and finds that exact group again
+ * - server re-runs the Calendar preview check for that one group
+ * - update is refused unless it is STILL safe_to_tag
+ * - the dedicated GAS then performs description-only mutation
+ */
+router.post('/apply-one', async (req, res) => {
+  try {
+    const month = String(req.body?.month || '').trim();
+    const groupKey = String(req.body?.groupKey || '');
+
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month must be YYYY-MM' });
+    }
+    if (!groupKey) {
+      return res.status(400).json({ error: 'groupKey is required' });
+    }
+
+    requireTagGasConfig();
+
+    const rows = await loadMonthRows(month);
+    const groups = groupMonthlyRows(rows);
+    const group = groups.find((candidate) => candidate.key === groupKey);
+
+    if (!group) {
+      return res.status(404).json({
+        error: 'That preview event no longer exists in monthly_schedule. Run the preview again.',
+      });
+    }
+
+    const checked = await previewRemoteGroup(group);
+    if (!checked.safeGroup || checked.item?.status !== 'safe_to_tag') {
+      return res.status(409).json({
+        error: `Event is no longer safe to tag: ${checked.item?.reason || checked.item?.status || 'unknown reason'}`,
+        status: checked.item?.status || 'unsafe',
+        item: checked.item || null,
+      });
+    }
+
+    const result = await callTagGas(makeGasRequest(group, 'student_number_tag_update'));
+    if (!result?.ok) {
+      return res.status(409).json({
+        error: result?.error || 'Student number tag update failed',
+        code: result?.code || null,
+      });
+    }
+
+    const verify = await previewRemoteGroup(group);
+    const verified = verify.item?.status === 'already_tagged';
+
+    console.log(
+      '[calendar-student-id-backfill/apply-one]',
+      month,
+      group.eventId,
+      `action=${String(result.actionTaken || '')}`,
+      `verified=${verified}`
+    );
+
+    return res.json({
+      ok: verified,
+      month,
+      tagged: result.actionTaken === 'tagged' ? 1 : 0,
+      alreadyTagged: result.actionTaken === 'already_tagged' ? 1 : 0,
+      failed: verified ? 0 : 1,
+      skipped: 0,
+      verified,
+      result: {
+        eventId: group.eventId,
+        studentIds: group.studentIds,
+        calendarEventId: result.eventId || verify.item?.calendarEventId || '',
+        actionTaken: result.actionTaken || null,
+      },
+      item: verify.item || null,
+    });
+  } catch (err) {
+    console.error('[calendar-student-id-backfill/apply-one]', err.message);
+    return res.status(err.statusCode || 500).json({
+      error: err.message || 'Failed to apply student number tag to one Calendar event',
     });
   }
 });
