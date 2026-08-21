@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, CalendarSearch, CheckCircle2, Info, ShieldCheck, Tags } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
-  applyCalendarStudentIdBackfill,
   applyOneCalendarStudentIdBackfill,
   getCalendarStudentIdBackfillPreview,
 } from '../api/calendarStudentIdBackfillApi'
@@ -77,7 +76,6 @@ function StatusBadge({ status }) {
 export default function CalendarStudentIdBackfill() {
   const [month, setMonth] = useState(() => getCurrentYyyyMmJst())
   const [loading, setLoading] = useState(false)
-  const [applying, setApplying] = useState(false)
   const [applyingOneKey, setApplyingOneKey] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -106,7 +104,7 @@ export default function CalendarStudentIdBackfill() {
       : item.studentIds?.join(', ') || 'this student'
     const confirmed = window.confirm(
       `Tag only this Calendar event?\n\n${item.title || '(untitled)'}\n${formatDateTime(item.start)}\n${studentLabel}\n\n` +
-      'Google Calendar is accessed only now. The exact event is checked, only its description can be changed, and the same event is verified afterward.'
+      'Google Calendar is accessed only now. After exact verification, the student ID is saved to MonthlySchedule.'
     )
     if (!confirmed) return
 
@@ -125,31 +123,6 @@ export default function CalendarStudentIdBackfill() {
     }
   }
 
-  const applySafeTags = async () => {
-    const safeCount = Number(result?.counts?.safe_to_tag || 0)
-    if (safeCount <= 0) return
-
-    const confirmed = window.confirm(
-      `Add [GS_STUDENT_IDS:...] to ${safeCount} ready event${safeCount === 1 ? '' : 's'}?\n\n` +
-      'Each tagging operation may access Google Calendar, but can only change the event description.'
-    )
-    if (!confirmed) return
-
-    setApplying(true)
-    setError('')
-    setApplyResult(null)
-    try {
-      const applied = await applyCalendarStudentIdBackfill(month)
-      setApplyResult(applied)
-      const refreshed = await getCalendarStudentIdBackfillPreview(month)
-      setResult(refreshed)
-    } catch (err) {
-      setError(err.message || 'Failed to apply student number tags')
-    } finally {
-      setApplying(false)
-    }
-  }
-
   const filteredItems = useMemo(() => {
     const items = Array.isArray(result?.items) ? result.items : []
     if (!statusFilter) return items
@@ -164,7 +137,7 @@ export default function CalendarStudentIdBackfill() {
     (counts.api_error || 0) +
     (counts.missing_student_id || 0)
   const safeCount = Number(counts.safe_to_tag || 0)
-  const busy = loading || applying || !!applyingOneKey
+  const busy = loading || !!applyingOneKey
 
   return (
     <div className="w-full space-y-5 pb-8">
@@ -175,7 +148,7 @@ export default function CalendarStudentIdBackfill() {
             Calendar Student ID Backfill
           </h2>
           <p className="mt-1 text-sm text-gray-600">
-            Use cached monthly_schedule data to prepare student-number tags. Google Calendar is contacted only when an event is tagged.
+            Check MonthlySchedule student IDs and tag only the Calendar events that still need them.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
@@ -190,7 +163,7 @@ export default function CalendarStudentIdBackfill() {
           <div>
             <p className="font-semibold">Calendar access is deliberately restricted.</p>
             <p className="mt-1">
-              Run preview uses cached data only and does not access Google Calendar. Tagging can only add or normalize <code>[GS_STUDENT_IDS:...]</code> in the existing event description. The dedicated API has no create, delete, move, title, color, attendee, location, or recurrence actions.
+              Preview reads MonthlySchedule and PostgreSQL only. Google Calendar is contacted only when you click <strong>Tag this event</strong>. After the exact event is verified, its student ID is saved back into the Sheet.
             </p>
           </div>
         </div>
@@ -219,19 +192,8 @@ export default function CalendarStudentIdBackfill() {
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? <LoadingSpinner size="xs" /> : <CalendarSearch className="h-4 w-4" />}
-            {loading ? 'Loading cache…' : 'Run preview'}
+            {loading ? 'Loading Sheet…' : 'Run preview'}
           </button>
-          {result && safeCount > 0 && (
-            <button
-              type="button"
-              onClick={applySafeTags}
-              disabled={busy}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {applying ? <LoadingSpinner size="xs" /> : <Tags className="h-4 w-4" />}
-              {applying ? 'Tagging…' : `Tag ${safeCount} ready event${safeCount === 1 ? '' : 's'}`}
-            </button>
-          )}
         </div>
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       </section>
@@ -240,8 +202,11 @@ export default function CalendarStudentIdBackfill() {
         <section className={`rounded-lg border p-4 text-sm ${applyResult.failed > 0 ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-emerald-200 bg-emerald-50 text-emerald-950'}`}>
           <p className="font-semibold">Tagging finished</p>
           <p className="mt-1">
-            Tagged: {applyResult.tagged || 0} · Already tagged during re-check: {applyResult.alreadyTagged || 0} · Failed: {applyResult.failed || 0} · Skipped as unsafe: {applyResult.skipped || 0}
+            Tagged: {applyResult.tagged || 0} · Already tagged in Calendar: {applyResult.alreadyTagged || 0} · Failed: {applyResult.failed || 0}
           </p>
+          {applyResult.sheetUpdated && (
+            <p className="mt-1">MonthlySchedule studentID saved successfully.</p>
+          )}
         </section>
       )}
 
@@ -257,7 +222,7 @@ export default function CalendarStudentIdBackfill() {
               <p className="mt-1 text-2xl font-bold text-emerald-900">{safeCount}</p>
             </div>
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Tagged this session</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Already tagged</p>
               <p className="mt-1 text-2xl font-bold text-blue-900">{counts.already_tagged || 0}</p>
             </div>
             <div className={`rounded-lg border p-4 shadow-sm ${issueCount > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
@@ -269,9 +234,9 @@ export default function CalendarStudentIdBackfill() {
           <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="font-semibold text-gray-900">Cached preview results</h3>
+                <h3 className="font-semibold text-gray-900">MonthlySchedule preview</h3>
                 <p className="text-xs text-gray-500">
-                  {result.monthlyScheduleRows || 0} monthly_schedule rows loaded for {result.month}. No direct Calendar fetch is performed here.
+                  {result.monthlyScheduleRows || 0} PostgreSQL rows and {result.sheetRows || 0} Sheet rows checked for {result.month}. No Calendar fetch is performed here.
                 </p>
               </div>
               <select
@@ -296,8 +261,8 @@ export default function CalendarStudentIdBackfill() {
                     <tr>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Event</th>
-                      <th className="px-4 py-3">Student IDs</th>
-                      <th className="px-4 py-3">Verified tag IDs</th>
+                      <th className="px-4 py-3">Expected student IDs</th>
+                      <th className="px-4 py-3">Sheet student IDs</th>
                       <th className="px-4 py-3">Reason</th>
                       <th className="px-4 py-3">Action</th>
                     </tr>
@@ -320,7 +285,7 @@ export default function CalendarStudentIdBackfill() {
                           )}
                         </td>
                         <td className="min-w-[10rem] px-4 py-3">
-                          <p className="font-mono text-xs text-gray-900">{item.calendarStudentIds?.join(', ') || '—'}</p>
+                          <p className="font-mono text-xs text-gray-900">{item.sheetStudentIds?.join(', ') || '—'}</p>
                           {item.description && (
                             <details className="mt-2">
                               <summary className="cursor-pointer text-xs font-medium text-gray-500">Verified Calendar description</summary>
@@ -355,14 +320,14 @@ export default function CalendarStudentIdBackfill() {
           <div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <Info className="mt-0.5 h-5 w-5 shrink-0" />
             <p>
-              <strong>Run preview</strong> reads cached monthly_schedule data only. <strong>Tag this event</strong> is where Google Calendar is contacted: the dedicated API resolves the exact event, refuses conflicting student IDs, patches description only, and verifies the same event afterward.
+              <strong>Run preview</strong> checks the <code>studentID</code> stored in MonthlySchedule. Blank means ready to tag; matching IDs mean already tagged. <strong>Tag this event</strong> is the only action that contacts Google Calendar.
             </p>
           </div>
 
           {issueCount === 0 && safeCount > 0 && (
             <div className="flex gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>The cached schedule data has no blocking issues for these rows. Calendar-side validation still happens when each event is tagged.</p>
+              <p>The Sheet cache has no blocking mismatches for these rows. Calendar-side validation still happens when each event is tagged.</p>
             </div>
           )}
         </>
