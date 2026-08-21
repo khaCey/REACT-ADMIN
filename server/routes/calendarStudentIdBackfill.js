@@ -7,6 +7,7 @@ const TAG_GAS_TIMEOUT_MS = 45000;
 const MIRROR_POST_WRITE_VERIFY_DELAYS_MS = [0, 250, 750, 1500, 3000, 5000];
 const DB_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
 const INSTANCE_SUFFIX_RE = /_\d{8}T\d{6}Z$/i;
+const LEGACY_RECURRING_UID_SUFFIX_RE = /_R\d{8}T\d{6}Z?$/i;
 
 function currentYyyyMmJst() {
   const jst = new Date(Date.now() + JST_OFFSET_MS);
@@ -42,8 +43,14 @@ function stripInstanceSuffix(value) {
   return String(value || '').trim().replace(INSTANCE_SUFFIX_RE, '');
 }
 
+function stripLegacyRecurringUidSuffix(value) {
+  return String(value || '').trim().replace(LEGACY_RECURRING_UID_SUFFIX_RE, '');
+}
+
 function normalizeAdminCalendarBaseId(value) {
-  return stripInstanceSuffix(stripGoogleUidSuffix(stripDbSuffix(value)));
+  return stripLegacyRecurringUidSuffix(
+    stripInstanceSuffix(stripGoogleUidSuffix(stripDbSuffix(value)))
+  );
 }
 
 function googleInstanceUtcSuffix(startIso) {
@@ -249,7 +256,8 @@ function legacyExactGoogleEventIdCandidates(group) {
     : [];
 
   // directIds covers one-off events (and any row that already contains an exact API id).
-  // recurringOccurrenceIds covers legacy recurring CalendarApp IDs such as xxx@google.com.
+  // recurringOccurrenceIds covers both simple legacy IDs (xxx@google.com) and
+  // CalendarApp recurring UIDs such as xxx_R20250308T020000@google.com.
   return uniqueSortedStrings([...directIds, ...recurringOccurrenceIds]);
 }
 
