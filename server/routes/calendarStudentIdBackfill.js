@@ -4,6 +4,7 @@ import { query } from '../db/index.js';
 const router = Router();
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const TAG_GAS_TIMEOUT_MS = 45000;
+const MIRROR_POST_WRITE_VERIFY_DELAYS_MS = [0, 250, 750, 1500];
 const DB_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
 const INSTANCE_SUFFIX_RE = /_\d{8}T\d{6}Z$/i;
 
@@ -109,6 +110,38 @@ async function readMirrorMonth(month) {
     throw err;
   }
   return result;
+}
+
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function verifyMirrorAfterWrite(month, group) {
+  let lastItem = null;
+  let lastError = null;
+
+  for (let index = 0; index < MIRROR_POST_WRITE_VERIFY_DELAYS_MS.length; index += 1) {
+    const delayMs = MIRROR_POST_WRITE_VERIFY_DELAYS_MS[index];
+    if (delayMs > 0) await waitMs(delayMs);
+
+    try {
+      const mirror = await readMirrorMonth(month);
+      lastItem = classifyGroup(group, mirror.rows || []);
+      lastError = null;
+      if (lastItem.status === 'already_tagged') {
+        return { ok: true, item: lastItem, attempts: index + 1 };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  return {
+    ok: false,
+    item: lastItem,
+    attempts: MIRROR_POST_WRITE_VERIFY_DELAYS_MS.length,
+    error: lastError,
+  };
 }
 
 function groupMonthlyRows(rows) {
@@ -512,14 +545,16 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
-    const mirrorAfter = await readMirrorMonth(month);
-    const after = classifyGroup(group, mirrorAfter.rows || []);
-    if (after.status !== 'already_tagged') {
+    const postVerify = await verifyMirrorAfterWrite(month, group);
+    const after = postVerify.item;
+    if (!postVerify.ok || !after) {
+      const detail = after?.reason || postVerify.error?.message || 'monthlyLessons did not return the verified student ID set';
       return res.status(502).json({
-        error: `Calendar was verified, but monthlyLessons did not verify afterward: ${after.reason}`,
+        error: `Calendar was verified, but monthlyLessons did not verify afterward: ${detail}`,
         code: 'MIRROR_POST_WRITE_VERIFY_FAILED',
         calendarVerified: true,
         mirrorUpdated: true,
+        mirrorVerifyAttempts: postVerify.attempts,
         item: after,
       });
     }
@@ -535,6 +570,7 @@ router.post('/apply-one', async (req, res) => {
       skipped: 0,
       verified: true,
       mirrorUpdated: true,
+      mirrorVerifyAttempts: postVerify.attempts,
       result: {
         eventId: group.eventId,
         calendarGoogleEventId: group.calendarGoogleEventIds[0] || '',
