@@ -5,7 +5,6 @@ import { gasCalendarEventIdFromMonthly } from '../lib/calendarEventId.js';
 const router = Router();
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const TAG_GAS_TIMEOUT_MS = 45000;
-const PREVIEW_CONCURRENCY = 6;
 const UPDATE_CONCURRENCY = 3;
 
 function currentYyyyMmJst() {
@@ -16,12 +15,6 @@ function currentYyyyMmJst() {
 function uniqueSortedStrings(values) {
   return [...new Set((values || []).map((value) => String(value).trim()).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-}
-
-function sameStringSet(a, b) {
-  const left = uniqueSortedStrings(a);
-  const right = uniqueSortedStrings(b);
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function getTagGasConfig() {
@@ -183,7 +176,9 @@ function baseItem(group) {
     calendarSyncStatuses: group.calendarSyncStatuses,
     lessonKind: group.lessonKinds[0] || 'regular',
     description: '',
-    calendarEventId: '',
+    calendarEventId: group.calendarSourceEventIds.length === 1
+      ? group.calendarSourceEventIds[0]
+      : group.eventId,
   };
 }
 
@@ -192,7 +187,7 @@ function classifyLocalGroup(group) {
     return {
       ...baseItem(group),
       status: 'local_only',
-      reason: 'Local/optimistic booking ID is not a confirmed Google Calendar event.',
+      reason: 'Local/optimistic booking ID is not a confirmed synced event.',
     };
   }
 
@@ -208,7 +203,7 @@ function classifyLocalGroup(group) {
     return {
       ...baseItem(group),
       status: 'missing_student_id',
-      reason: 'The matched monthly_schedule rows do not contain a student_id.',
+      reason: 'The cached monthly_schedule rows do not contain a student_id.',
     };
   }
 
@@ -216,89 +211,25 @@ function classifyLocalGroup(group) {
     return {
       ...baseItem(group),
       status: 'ambiguous_calendar_match',
-      reason: 'monthly_schedule has more than one Calendar source event ID for this lesson.',
+      reason: 'Cached monthly_schedule has more than one Calendar source event ID for this lesson.',
     };
   }
 
   return null;
 }
 
-function statusForGasError(code) {
-  if (code === 'EVENT_NOT_FOUND') return 'calendar_missing';
-  if (code === 'AMBIGUOUS_RECURRING_EVENT') return 'ambiguous_calendar_match';
-  return 'api_error';
-}
+function localPreviewGroup(group) {
+  const blocked = classifyLocalGroup(group);
+  if (blocked) return { item: blocked, safeGroup: null };
 
-async function previewRemoteGroup(group) {
-  const localClassification = classifyLocalGroup(group);
-  if (localClassification) return { item: localClassification, safeGroup: null };
-
-  try {
-    const result = await callTagGas(makeGasRequest(group, 'student_number_tag_preview'));
-    if (!result?.ok) {
-      return {
-        item: {
-          ...baseItem(group),
-          status: statusForGasError(result?.code),
-          reason: result?.error || 'Student number tag API could not resolve this event.',
-          calendarEventId: result?.eventId || '',
-        },
-        safeGroup: null,
-      };
-    }
-
-    const existingIds = uniqueSortedStrings(result.existingStudentIds || []);
-    const common = {
+  return {
+    item: {
       ...baseItem(group),
-      title: result.summary || group.titles[0] || '',
-      start: result?.start?.dateTime || result?.start?.date || group.startIso,
-      end: result?.end?.dateTime || result?.end?.date || '',
-      calendarStatus: result.status || '',
-      calendarEventId: result.eventId || '',
-      calendarStudentIds: existingIds,
-      description: String(result.description || ''),
-    };
-
-    if (existingIds.length === 0) {
-      return {
-        item: {
-          ...common,
-          status: 'safe_to_tag',
-          reason: 'Exact Calendar event found and no existing student-ID metadata was detected.',
-        },
-        safeGroup: group,
-      };
-    }
-
-    if (sameStringSet(existingIds, group.studentIds)) {
-      return {
-        item: {
-          ...common,
-          status: 'already_tagged',
-          reason: 'Calendar description already contains the same student ID set.',
-        },
-        safeGroup: null,
-      };
-    }
-
-    return {
-      item: {
-        ...common,
-        status: 'tag_mismatch',
-        reason: 'Calendar description contains student IDs that do not match monthly_schedule.',
-      },
-      safeGroup: null,
-    };
-  } catch (err) {
-    return {
-      item: {
-        ...baseItem(group),
-        status: 'api_error',
-        reason: err.message || 'Student number tag API request failed.',
-      },
-      safeGroup: null,
-    };
-  }
+      status: 'safe_to_tag',
+      reason: 'Cached schedule data is ready. Google Calendar will be checked only if you tag this event.',
+    },
+    safeGroup: group,
+  };
 }
 
 async function loadMonthRows(month) {
@@ -317,14 +248,11 @@ async function loadMonthRows(month) {
 function sortItems(items) {
   const order = {
     safe_to_tag: 0,
-    tag_mismatch: 1,
-    already_tagged: 2,
-    calendar_missing: 3,
-    ambiguous_calendar_match: 4,
-    api_error: 5,
-    not_synced: 6,
-    local_only: 7,
-    missing_student_id: 8,
+    already_tagged: 1,
+    ambiguous_calendar_match: 2,
+    not_synced: 3,
+    local_only: 4,
+    missing_student_id: 5,
   };
 
   return [...items].sort((a, b) => {
@@ -341,12 +269,10 @@ function countStatuses(items) {
 }
 
 async function buildPreview(month) {
-  // Fail early with a clear config message before doing DB work.
-  requireTagGasConfig();
-
+  // Intentionally local-only. Preview must never call Google Calendar or GAS.
   const rows = await loadMonthRows(month);
   const groups = groupMonthlyRows(rows);
-  const resolved = await mapWithConcurrency(groups, PREVIEW_CONCURRENCY, previewRemoteGroup);
+  const resolved = groups.map(localPreviewGroup);
   const items = sortItems(resolved.map((entry) => entry.item));
   const safeGroups = resolved.map((entry) => entry.safeGroup).filter(Boolean);
 
@@ -371,6 +297,8 @@ router.get('/preview', async (req, res) => {
     res.json({
       ok: true,
       readOnly: true,
+      source: 'monthly_schedule_cache',
+      directCalendarAccess: false,
       month,
       monthlyScheduleRows: preview.rows.length,
       lessonEventsScanned: preview.groups.length,
@@ -380,20 +308,16 @@ router.get('/preview', async (req, res) => {
   } catch (err) {
     console.error('[calendar-student-id-backfill/preview]', err.message);
     res.status(err.statusCode || 500).json({
-      error: err.message || 'Failed to build Calendar student ID backfill preview',
+      error: err.message || 'Failed to build student ID backfill preview',
     });
   }
 });
 
 /**
- * Apply the student-number tag to one exact preview group.
- *
- * Safety:
- * - browser sends only month + an opaque DB-derived group key
- * - server reloads monthly_schedule and finds that exact group again
- * - server re-runs the Calendar preview check for that one group
- * - update is refused unless it is STILL safe_to_tag
- * - the dedicated GAS then performs description-only mutation
+ * Tag one event.
+ * This is intentionally the only normal UI path that reaches Google Calendar.
+ * The dedicated GAS performs all Calendar-side safety checks, patches description
+ * only, then re-reads the exact same event and returns verified:true.
  */
 router.post('/apply-one', async (req, res) => {
   try {
@@ -415,71 +339,76 @@ router.post('/apply-one', async (req, res) => {
 
     if (!group) {
       return res.status(404).json({
-        error: 'That preview event no longer exists in monthly_schedule. Run the preview again.',
+        error: 'That cached event no longer exists in monthly_schedule. Run preview again.',
       });
     }
 
-    const checked = await previewRemoteGroup(group);
-    if (!checked.safeGroup || checked.item?.status !== 'safe_to_tag') {
+    const blocked = classifyLocalGroup(group);
+    if (blocked) {
       return res.status(409).json({
-        error: `Event is no longer safe to tag: ${checked.item?.reason || checked.item?.status || 'unknown reason'}`,
-        status: checked.item?.status || 'unsafe',
-        item: checked.item || null,
+        error: `Cached event is not eligible for tagging: ${blocked.reason}`,
+        status: blocked.status,
+        item: blocked,
       });
     }
 
     const result = await callTagGas(makeGasRequest(group, 'student_number_tag_update'));
-    if (!result?.ok) {
+    if (!result?.ok || result?.verified !== true) {
       return res.status(409).json({
-        error: result?.error || 'Student number tag update failed',
-        code: result?.code || null,
+        error: result?.error || 'Exact Calendar tag verification failed',
+        code: result?.code || 'CALENDAR_VERIFY_FAILED',
       });
     }
 
-    const verify = await previewRemoteGroup(group);
-    const verified = verify.item?.status === 'already_tagged';
+    const wasTaggedNow = result.actionTaken === 'tagged';
+    const wasAlreadyTagged = result.actionTaken === 'already_tagged';
+    const item = {
+      ...baseItem(group),
+      status: 'already_tagged',
+      reason: wasAlreadyTagged
+        ? 'Google Calendar already contained the same student ID tag and exact verification passed.'
+        : 'Google Calendar description was tagged and exact verification passed.',
+      calendarEventId: result.eventId || baseItem(group).calendarEventId,
+      calendarStudentIds: group.studentIds,
+      description: String(result.description || ''),
+    };
 
     console.log(
       '[calendar-student-id-backfill/apply-one]',
       month,
       group.eventId,
       `action=${String(result.actionTaken || '')}`,
-      `verified=${verified}`
+      'verified=true'
     );
 
     return res.json({
-      ok: verified,
+      ok: true,
       month,
-      tagged: result.actionTaken === 'tagged' ? 1 : 0,
-      alreadyTagged: result.actionTaken === 'already_tagged' ? 1 : 0,
-      failed: verified ? 0 : 1,
+      tagged: wasTaggedNow ? 1 : 0,
+      alreadyTagged: wasAlreadyTagged ? 1 : 0,
+      failed: 0,
       skipped: 0,
-      verified,
+      verified: true,
       result: {
         eventId: group.eventId,
         studentIds: group.studentIds,
-        calendarEventId: result.eventId || verify.item?.calendarEventId || '',
+        calendarEventId: result.eventId || '',
         actionTaken: result.actionTaken || null,
       },
-      item: verify.item || null,
+      item,
     });
   } catch (err) {
     console.error('[calendar-student-id-backfill/apply-one]', err.message);
     return res.status(err.statusCode || 500).json({
-      error: err.message || 'Failed to apply student number tag to one Calendar event',
+      error: err.message || 'Failed to tag one Calendar event',
     });
   }
 });
 
 /**
- * Apply canonical student-number tags to SAFE events only.
- *
- * Safety:
- * - re-runs the preview immediately before writing
- * - updates only events that are still safe_to_tag
- * - the dedicated GAS itself refuses conflicting IDs
- * - GAS mutation is description-only
- * - no Calendar ID is accepted from the browser
+ * Bulk tagging endpoint. It is currently blocked by the React client while the
+ * one-event workflow is being validated. If enabled later, every request here is
+ * still a tagging operation, so direct Calendar access is intentional.
  */
 router.post('/apply', async (req, res) => {
   try {
@@ -488,6 +417,7 @@ router.post('/apply', async (req, res) => {
       return res.status(400).json({ error: 'month must be YYYY-MM' });
     }
 
+    requireTagGasConfig();
     const preview = await buildPreview(month);
     const safeGroups = preview.safeGroups;
 
@@ -497,14 +427,15 @@ router.post('/apply', async (req, res) => {
       async (group) => {
         try {
           const result = await callTagGas(makeGasRequest(group, 'student_number_tag_update'));
+          const verified = !!result?.ok && result?.verified === true;
           return {
             eventId: group.eventId,
             studentIds: group.studentIds,
-            ok: !!result?.ok,
-            actionTaken: result?.actionTaken || null,
+            ok: verified,
+            actionTaken: verified ? (result?.actionTaken || null) : null,
             calendarEventId: result?.eventId || '',
-            code: result?.code || null,
-            error: result?.ok ? null : (result?.error || 'Tag update failed'),
+            code: verified ? null : (result?.code || 'CALENDAR_VERIFY_FAILED'),
+            error: verified ? null : (result?.error || 'Exact Calendar tag verification failed'),
           };
         } catch (err) {
           return {
@@ -523,15 +454,6 @@ router.post('/apply', async (req, res) => {
     const tagged = updateResults.filter((item) => item.ok && item.actionTaken === 'tagged').length;
     const alreadyTagged = updateResults.filter((item) => item.ok && item.actionTaken === 'already_tagged').length;
     const failed = updateResults.filter((item) => !item.ok).length;
-
-    console.log(
-      '[calendar-student-id-backfill/apply]',
-      month,
-      `safe=${safeGroups.length}`,
-      `tagged=${tagged}`,
-      `alreadyTagged=${alreadyTagged}`,
-      `failed=${failed}`
-    );
 
     res.json({
       ok: failed === 0,
