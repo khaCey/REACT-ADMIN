@@ -45,8 +45,11 @@ function normalizeAdminCalendarBaseId(value) {
   return stripInstanceSuffix(stripGoogleUidSuffix(stripDbSuffix(value)));
 }
 
-function normalizeMirrorCalendarBaseId(value) {
-  return stripInstanceSuffix(stripGoogleUidSuffix(value));
+function googleInstanceUtcSuffix(startIso) {
+  if (!startIso) return '';
+  const d = new Date(startIso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
 function getTagGasConfig() {
@@ -193,38 +196,36 @@ function parseMirrorStudentIds(value) {
   return uniqueSortedStrings(String(value || '').split(','));
 }
 
-function startCloseEnough(groupStartIso, mirrorStart) {
-  if (!groupStartIso || !mirrorStart) return true;
-  const left = new Date(groupStartIso).getTime();
-  const right = new Date(mirrorStart).getTime();
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
-  return Math.abs(left - right) <= 6 * 60 * 1000;
-}
-
 function adminCalendarBaseIds(group) {
   const sourceIds = group.calendarSourceEventIds.length ? group.calendarSourceEventIds : [group.eventId];
   return uniqueSortedStrings(sourceIds.map(normalizeAdminCalendarBaseId));
 }
 
-// Legacy bridge used only to populate calendar_google_event_id once.
-function legacyRowMatchesEventIdentity(group, row) {
-  const adminIds = new Set(adminCalendarBaseIds(group));
-  if (adminIds.size === 0) return false;
+// One-time bridge for old React Admin rows.
+// Build the exact Calendar API occurrence ID from the old CalendarApp/iCal series ID
+// plus this lesson's UTC start, then compare that exact value to monthlyLessons.googleEventId.
+function legacyExactGoogleEventIdCandidates(group) {
+  const sourceIds = group.calendarSourceEventIds.length ? group.calendarSourceEventIds : [group.eventId];
+  const directIds = uniqueSortedStrings(
+    sourceIds.map((value) => stripGoogleUidSuffix(stripDbSuffix(value)))
+  );
+  const baseIds = adminCalendarBaseIds(group);
+  const occurrenceSuffix = googleInstanceUtcSuffix(group.startIso);
+  const recurringOccurrenceIds = occurrenceSuffix
+    ? baseIds.map((baseId) => `${baseId}_${occurrenceSuffix}`)
+    : [];
 
-  const recurringId = normalizeMirrorCalendarBaseId(row.recurringEventId);
-  const googleEventId = normalizeMirrorCalendarBaseId(row.googleEventId);
-  if (recurringId) {
-    if (!adminIds.has(recurringId)) return false;
-    return startCloseEnough(group.startIso, row.originalStartTime || row.start);
-  }
-  if (!googleEventId || !adminIds.has(googleEventId)) return false;
-  return startCloseEnough(group.startIso, row.start);
+  // directIds covers one-off events (and any row that already contains an exact API id).
+  // recurringOccurrenceIds covers legacy recurring CalendarApp IDs such as xxx@google.com.
+  return uniqueSortedStrings([...directIds, ...recurringOccurrenceIds]);
 }
 
 function legacyMatchingMirrorRows(group, mirrorRows) {
+  const candidates = new Set(legacyExactGoogleEventIdCandidates(group));
+  if (candidates.size === 0) return [];
   return preferSingleMirrorSource(
     group,
-    (mirrorRows || []).filter((row) => legacyRowMatchesEventIdentity(group, row))
+    (mirrorRows || []).filter((row) => candidates.has(String(row.googleEventId || '').trim()))
   );
 }
 
