@@ -36,29 +36,19 @@ export async function applyOneCalendarStudentIdBackfill(month, groupKey) {
     body: JSON.stringify({ month, groupKey }),
   })
 
-  // The server performs a post-write Calendar verification. Some deployed GAS
-  // versions may return ok:true without the optional actionTaken field. If the
-  // event is verified as already_tagged after starting from safe_to_tag, the
-  // single-event write succeeded even when the raw counters are both zero.
-  if (
-    result?.verified === true &&
-    Number(result?.tagged || 0) === 0 &&
-    Number(result?.alreadyTagged || 0) === 0 &&
-    Number(result?.failed || 0) === 0
-  ) {
-    return {
-      ...result,
-      tagged: 1,
-      verifiedByCalendar: true,
-    }
+  // Fail closed. Do not turn ambiguous/zero-count responses into success.
+  // The standalone GAS now verifies the exact patched Calendar event itself;
+  // REACT-ADMIN must still refuse any response that its server did not verify.
+  if (result?.ok !== true || result?.verified !== true) {
+    throw new Error('Exact Calendar post-write verification did not succeed. No success was recorded.')
   }
 
   return result
 }
 
-export function applyCalendarStudentIdBackfill(month) {
-  return fetchJson('/calendar/student-id-backfill/apply', {
-    method: 'POST',
-    body: JSON.stringify({ month }),
-  })
+export function applyCalendarStudentIdBackfill() {
+  // Temporarily disabled while the exact single-event path is being validated.
+  // Keeping this guard here prevents accidental mass writes even if an older UI
+  // still renders the bulk button.
+  return Promise.reject(new Error('Bulk student-number tagging is temporarily disabled. Verify one event successfully first.'))
 }
