@@ -116,10 +116,12 @@ async function readMirrorMonth(month) {
 
 function groupMonthlyRows(rows) {
   const groups = new Map();
+
   for (const row of rows || []) {
     const eventId = String(row.event_id || '').trim();
     const startIso = isoOrEmpty(row.start);
     const key = `${eventId}\t${startIso}`;
+
     if (!groups.has(key)) {
       groups.set(key, {
         key,
@@ -135,6 +137,7 @@ function groupMonthlyRows(rows) {
         localOnly: false,
       });
     }
+
     const group = groups.get(key);
     if (row.calendar_source_event_id) group.calendarSourceEventIds.push(String(row.calendar_source_event_id));
     if (row.student_id != null && row.student_id !== '') group.studentIds.push(String(row.student_id));
@@ -165,6 +168,7 @@ function makeGasTagRequest(group) {
     group.startIso || null,
     sourceId || null
   );
+
   return {
     action: 'student_number_tag_update',
     eventId: resolvedEventId || group.eventId,
@@ -178,10 +182,11 @@ function makeGasTagRequest(group) {
 }
 
 function expectedMirrorSource(group) {
-  const kind = String(group.lessonKinds[0] || 'regular').toLowerCase();
+  const kind = String(group.lessonKinds[0] || '').toLowerCase();
   if (kind === 'demo') return 'demo';
   if (kind === 'owner') return 'owner';
-  return 'main';
+  if (kind === 'regular') return 'main';
+  return '';
 }
 
 function parseMirrorStudentIds(value) {
@@ -196,19 +201,27 @@ function startCloseEnough(groupStartIso, mirrorStart) {
   return Math.abs(left - right) <= 6 * 60 * 1000;
 }
 
-function matchingMirrorRows(group, mirrorRows) {
+function rowMatchesEventIdentity(group, row) {
   const wantedIds = new Set(eventIdVariants([group.eventId, ...group.calendarSourceEventIds]));
-  const wantedSource = expectedMirrorSource(group);
-  return (mirrorRows || []).filter((row) => {
-    if (String(row.calendarSource || '').toLowerCase() !== wantedSource) return false;
-    const rowIds = eventIdVariants([
-      row.googleEventId,
-      row.recurringEventId,
-      row.eventKey,
-    ]);
-    if (!rowIds.some((id) => wantedIds.has(id))) return false;
-    return startCloseEnough(group.startIso, row.start || row.originalStartTime);
-  });
+  const rowIds = eventIdVariants([row.googleEventId, row.recurringEventId]);
+  if (!rowIds.some((id) => wantedIds.has(id))) return false;
+  return startCloseEnough(group.startIso, row.start || row.originalStartTime);
+}
+
+function matchingMirrorRows(group, mirrorRows) {
+  // Event ID + occurrence time is the identity. Do not reject a real event just
+  // because legacy PostgreSQL lesson_kind disagrees with the mirror source.
+  const identityMatches = (mirrorRows || []).filter((row) => rowMatchesEventIdentity(group, row));
+  if (identityMatches.length <= 1) return identityMatches;
+
+  // If an event ID happens to exist in more than one source, use lesson_kind only
+  // as a tie-breaker. Ambiguity is preserved if it still cannot be resolved.
+  const preferredSource = expectedMirrorSource(group);
+  if (!preferredSource) return identityMatches;
+  const preferred = identityMatches.filter(
+    (row) => String(row.calendarSource || '').toLowerCase() === preferredSource
+  );
+  return preferred.length === 1 ? preferred : identityMatches;
 }
 
 function baseItem(group) {
@@ -248,10 +261,18 @@ function classifyGroup(group, mirrorRows) {
 
   const matches = matchingMirrorRows(group, mirrorRows);
   if (matches.length === 0) {
-    return { ...baseItem(group), status: 'mirror_missing', reason: 'This lesson is missing from the new monthlyLessons mirror. Run the new mirror sync.' };
+    return {
+      ...baseItem(group),
+      status: 'mirror_missing',
+      reason: 'No monthlyLessons row matched this Calendar event ID and occurrence time.',
+    };
   }
   if (matches.length > 1) {
-    return { ...baseItem(group), status: 'ambiguous_calendar_match', reason: 'More than one monthlyLessons row matched this lesson.' };
+    return {
+      ...baseItem(group),
+      status: 'ambiguous_calendar_match',
+      reason: 'More than one monthlyLessons row matched this Calendar event identity.',
+    };
   }
 
   const mirror = matches[0];
@@ -311,6 +332,7 @@ function sortItems(items) {
     local_only: 6,
     missing_student_id: 7,
   };
+
   return [...items].sort((a, b) => {
     const rank = (order[a.status] ?? 99) - (order[b.status] ?? 99);
     if (rank !== 0) return rank;
@@ -339,6 +361,7 @@ router.get('/preview', async (req, res) => {
   try {
     const month = String(req.query.month || currentYyyyMmJst()).trim();
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+
     const preview = await buildPreview(month);
     return res.json({
       ok: true,
@@ -393,7 +416,6 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
-    // Prove the persisted Sheet mirror now contains the expected IDs. Still no Calendar read here.
     const mirrorAfter = await readMirrorMonth(month);
     const after = classifyGroup(group, mirrorAfter);
     if (after.status !== 'already_tagged') {
@@ -432,7 +454,6 @@ router.post('/apply-one', async (req, res) => {
   }
 });
 
-// Bulk stays disabled until the single-event mirror flow is proven.
 router.post('/apply', (_req, res) => {
   return res.status(409).json({
     error: 'Bulk student-number tagging is temporarily disabled. Use Tag this event.',
