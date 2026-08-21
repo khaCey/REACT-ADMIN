@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CalendarSearch, CheckCircle2, Info, ShieldCheck, Tags } from 'lucide-react'
+import { AlertTriangle, CalendarSearch, CheckCircle2, Info, ShieldCheck, Tags, X } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
   applyOneCalendarStudentIdBackfill,
@@ -73,14 +73,195 @@ function StatusBadge({ status }) {
   )
 }
 
+function CalendarTagModal({ modal, onClose, onConfirm }) {
+  if (!modal.open || !modal.item) return null
+
+  const item = modal.item
+  const working = modal.phase === 'working'
+  const studentLabel = item.studentNames?.length
+    ? item.studentNames.join(', ')
+    : item.studentIds?.join(', ') || '—'
+  const exactEventId = item.calendarGoogleEventId || item.calendarEventId || item.eventId || '—'
+
+  const title = modal.phase === 'success'
+    ? 'Student ID tagged'
+    : modal.phase === 'error'
+      ? 'Tagging failed'
+      : working
+        ? 'Tagging Calendar event…'
+        : 'Tag this Calendar event?'
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[1px]"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !working) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="calendar-tag-modal-title"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+              modal.phase === 'success'
+                ? 'bg-emerald-100 text-emerald-700'
+                : modal.phase === 'error'
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              {modal.phase === 'success' ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : modal.phase === 'error' ? (
+                <AlertTriangle className="h-5 w-5" />
+              ) : working ? (
+                <LoadingSpinner size="xs" />
+              ) : (
+                <Tags className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <h3 id="calendar-tag-modal-title" className="text-lg font-bold text-gray-900">{title}</h3>
+              <p className="mt-0.5 text-sm text-gray-500">
+                {modal.phase === 'success'
+                  ? 'The exact Calendar event and monthlyLessons mirror were verified.'
+                  : modal.phase === 'error'
+                    ? 'No success has been recorded for this action.'
+                    : working
+                      ? 'Please keep this window open while verification completes.'
+                      : 'Only this exact Calendar event will be updated.'}
+              </p>
+            </div>
+          </div>
+          {!working && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="font-semibold text-gray-900">{item.title || '(untitled)'}</p>
+            <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Date & time</p>
+                <p className="mt-1 text-gray-700">{formatDateTime(item.start)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Student</p>
+                <p className="mt-1 text-gray-700">{studentLabel}</p>
+              </div>
+            </div>
+            <div className="mt-3 border-t border-gray-200 pt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Exact Google event ID</p>
+              <p className="mt-1 break-all font-mono text-[11px] text-gray-600">{exactEventId}</p>
+            </div>
+          </div>
+
+          {modal.phase === 'confirm' && (
+            <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-950">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>
+                Google Calendar is accessed only after you confirm. Only the event description is changed. After exact verification, the <code>monthlyLessons</code> mirror is updated and checked again.
+              </p>
+            </div>
+          )}
+
+          {working && (
+            <div className="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+              <LoadingSpinner size="sm" />
+              <div>
+                <p className="font-semibold">Verifying exact Calendar event</p>
+                <p className="mt-0.5 text-blue-800">Writing the student tag and confirming the mirror update…</p>
+              </div>
+            </div>
+          )}
+
+          {modal.phase === 'success' && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+              <p className="font-semibold">Tagging completed successfully.</p>
+              <p className="mt-1">
+                {modal.result?.tagged ? 'The student ID was added to Calendar.' : 'Calendar already contained the expected student ID.'}
+                {' '}The exact event was verified and <code>monthlyLessons</code> was confirmed afterward.
+              </p>
+            </div>
+          )}
+
+          {modal.phase === 'error' && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p className="font-semibold">The event was not marked as successfully tagged.</p>
+              <p className="mt-1 break-words">{modal.message || 'Failed to tag this Calendar event.'}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-4 sm:flex-row sm:justify-end">
+          {modal.phase === 'confirm' ? (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              >
+                <Tags className="h-4 w-4" />
+                Tag this event
+              </button>
+            </>
+          ) : working ? (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500"
+            >
+              <LoadingSpinner size="xs" />
+              Tagging…
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function CalendarStudentIdBackfill() {
   const [month, setMonth] = useState(() => getCurrentYyyyMmJst())
   const [loading, setLoading] = useState(false)
   const [applyingOneKey, setApplyingOneKey] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
-  const [applyResult, setApplyResult] = useState(null)
   const [statusFilter, setStatusFilter] = useState('')
+  const [tagModal, setTagModal] = useState({
+    open: false,
+    phase: 'confirm',
+    item: null,
+    message: '',
+    result: null,
+  })
 
   const runPreview = async () => {
     setLoading(true)
@@ -96,28 +277,47 @@ export default function CalendarStudentIdBackfill() {
     }
   }
 
-  const applyOneTag = async (item) => {
+  const openTagModal = (item) => {
     if (!item?.groupKey || item.status !== 'safe_to_tag') return
+    setTagModal({
+      open: true,
+      phase: 'confirm',
+      item,
+      message: '',
+      result: null,
+    })
+  }
 
-    const studentLabel = item.studentNames?.length
-      ? item.studentNames.join(', ')
-      : item.studentIds?.join(', ') || 'this student'
-    const confirmed = window.confirm(
-      `Tag only this Calendar event?\n\n${item.title || '(untitled)'}\n${formatDateTime(item.start)}\n${studentLabel}\n\n` +
-      'Google Calendar is accessed only now. After exact verification, the student ID is saved to MonthlySchedule.'
-    )
-    if (!confirmed) return
+  const closeTagModal = () => {
+    if (tagModal.phase === 'working') return
+    setTagModal({
+      open: false,
+      phase: 'confirm',
+      item: null,
+      message: '',
+      result: null,
+    })
+  }
+
+  const confirmTag = async () => {
+    const item = tagModal.item
+    if (!item?.groupKey || item.status !== 'safe_to_tag' || tagModal.phase !== 'confirm') return
 
     setApplyingOneKey(item.groupKey)
     setError('')
-    setApplyResult(null)
+    setTagModal((current) => ({ ...current, phase: 'working', message: '', result: null }))
+
     try {
       const applied = await applyOneCalendarStudentIdBackfill(month, item.groupKey)
-      setApplyResult(applied)
       const refreshed = await getCalendarStudentIdBackfillPreview(month)
       setResult(refreshed)
+      setTagModal((current) => ({ ...current, phase: 'success', result: applied }))
     } catch (err) {
-      setError(err.message || 'Failed to tag this Calendar event')
+      setTagModal((current) => ({
+        ...current,
+        phase: 'error',
+        message: err.message || 'Failed to tag this Calendar event',
+      }))
     } finally {
       setApplyingOneKey('')
     }
@@ -148,7 +348,7 @@ export default function CalendarStudentIdBackfill() {
             Calendar Student ID Backfill
           </h2>
           <p className="mt-1 text-sm text-gray-600">
-            Check MonthlySchedule student IDs and tag only the Calendar events that still need them.
+            Check PostgreSQL student IDs against the monthlyLessons mirror and tag only the Calendar events that still need them.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
@@ -163,7 +363,7 @@ export default function CalendarStudentIdBackfill() {
           <div>
             <p className="font-semibold">Calendar access is deliberately restricted.</p>
             <p className="mt-1">
-              Preview reads MonthlySchedule and PostgreSQL only. Google Calendar is contacted only when you click <strong>Tag this event</strong>. After the exact event is verified, its student ID is saved back into the Sheet.
+              Preview reads PostgreSQL and the <code>monthlyLessons</code> mirror only. Google Calendar is contacted only when you click <strong>Tag this event</strong>. After the exact event is verified, its student ID is saved back into the mirror.
             </p>
           </div>
         </div>
@@ -179,7 +379,6 @@ export default function CalendarStudentIdBackfill() {
               onChange={(e) => {
                 setMonth(e.target.value)
                 setResult(null)
-                setApplyResult(null)
               }}
               disabled={busy}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 disabled:opacity-50"
@@ -197,18 +396,6 @@ export default function CalendarStudentIdBackfill() {
         </div>
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       </section>
-
-      {applyResult && (
-        <section className={`rounded-lg border p-4 text-sm ${applyResult.failed > 0 ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-emerald-200 bg-emerald-50 text-emerald-950'}`}>
-          <p className="font-semibold">Tagging finished</p>
-          <p className="mt-1">
-            Tagged: {applyResult.tagged || 0} · Already tagged in Calendar: {applyResult.alreadyTagged || 0} · Failed: {applyResult.failed || 0}
-          </p>
-          {applyResult.sheetUpdated && (
-            <p className="mt-1">MonthlySchedule studentID saved successfully.</p>
-          )}
-        </section>
-      )}
 
       {result && (
         <>
@@ -234,9 +421,9 @@ export default function CalendarStudentIdBackfill() {
           <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="font-semibold text-gray-900">MonthlySchedule preview</h3>
+                <h3 className="font-semibold text-gray-900">monthlyLessons preview</h3>
                 <p className="text-xs text-gray-500">
-                  {result.monthlyScheduleRows || 0} PostgreSQL rows and {result.sheetRows || 0} Sheet rows checked for {result.month}. No Calendar fetch is performed here.
+                  {result.monthlyScheduleRows || 0} PostgreSQL rows and {result.sheetRows || 0} mirror rows checked for {result.month}. No Calendar fetch is performed here.
                 </p>
               </div>
               <select
@@ -298,7 +485,7 @@ export default function CalendarStudentIdBackfill() {
                           {item.status === 'safe_to_tag' ? (
                             <button
                               type="button"
-                              onClick={() => applyOneTag(item)}
+                              onClick={() => openTagModal(item)}
                               disabled={busy}
                               className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-700 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
@@ -320,18 +507,24 @@ export default function CalendarStudentIdBackfill() {
           <div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <Info className="mt-0.5 h-5 w-5 shrink-0" />
             <p>
-              <strong>Run preview</strong> checks the <code>studentID</code> stored in MonthlySchedule. Blank means ready to tag; matching IDs mean already tagged. <strong>Tag this event</strong> is the only action that contacts Google Calendar.
+              <strong>Run preview</strong> compares PostgreSQL student IDs with the <code>monthlyLessons</code> mirror. Blank mirror IDs mean ready to tag; matching IDs mean already tagged. <strong>Tag this event</strong> is the only action that contacts Google Calendar.
             </p>
           </div>
 
           {issueCount === 0 && safeCount > 0 && (
             <div className="flex gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>The Sheet cache has no blocking mismatches for these rows. Calendar-side validation still happens when each event is tagged.</p>
+              <p>The mirror has no blocking mismatches for these rows. Calendar-side validation still happens when each event is tagged.</p>
             </div>
           )}
         </>
       )}
+
+      <CalendarTagModal
+        modal={tagModal}
+        onClose={closeTagModal}
+        onConfirm={confirmTag}
+      />
     </div>
   )
 }
