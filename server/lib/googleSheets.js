@@ -1,7 +1,11 @@
 /**
- * Fetch MonthlySchedule from Google Sheets (Admin spreadsheet).
- * Requires GOOGLE_SERVICE_ACCOUNT_KEY_PATH or GOOGLE_SERVICE_ACCOUNT_JSON
- * and GOOGLE_ADMIN_SHEET_ID. Share the spreadsheet with the service account email.
+ * Google Sheets helpers used by REACT-ADMIN.
+ *
+ * - MonthlySchedule belongs to the existing Admin/legacy sync path.
+ * - monthlyLessons belongs to the rebuilt Booking API Calendar mirror.
+ *
+ * Preview/read code may read Sheets directly. Google Calendar is not contacted by
+ * these helpers.
  */
 import { google } from 'googleapis';
 import { readFileSync } from 'fs';
@@ -9,6 +13,9 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirnameHere = dirname(fileURLToPath(import.meta.url));
+
+// Booking API / new Calendar Mirror spreadsheet. Sheet IDs are not secrets.
+const DEFAULT_CALENDAR_MIRROR_SHEET_ID = '17zXtRW5Ue-u4DQwW-sa0lvMQmKnEGcjTyPskaByjF0s';
 
 function getSheetsAuth() {
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
@@ -97,6 +104,95 @@ export async function fetchMonthlyScheduleFromSheet() {
     console.error('[sheets] fetch error:', err.message);
     return [];
   }
+}
+
+/**
+ * Read the rebuilt Calendar mirror directly from the Booking API spreadsheet.
+ * This deliberately bypasses the GAS web-app read endpoint so preview cannot
+ * accidentally inspect a different/stale bound spreadsheet deployment.
+ */
+export async function fetchCalendarMirrorMonthFromSheet(month) {
+  const ym = String(month || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(ym)) throw new Error('month must be YYYY-MM');
+
+  const auth = getSheetsAuth();
+  if (!auth) {
+    const err = new Error('Google Sheets service account is not configured');
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const spreadsheetId = String(
+    process.env.GOOGLE_CALENDAR_MIRROR_SHEET_ID || DEFAULT_CALENDAR_MIRROR_SHEET_ID
+  ).trim();
+  const sheets = google.sheets({ version: 'v4', auth });
+
+  let values;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: "'monthlyLessons'!A:Z",
+    });
+    values = res.data.values || [];
+  } catch (err) {
+    const wrapped = new Error(`Could not read Booking API monthlyLessons: ${err.message}`);
+    wrapped.statusCode = err?.code === 403 ? 503 : 502;
+    throw wrapped;
+  }
+
+  if (values.length === 0) {
+    return { spreadsheetId, rows: [] };
+  }
+
+  const headers = (values[0] || []).map((value) => String(value || '').trim());
+  const headerIndex = new Map(headers.map((header, index) => [header.toLowerCase(), index]));
+  const getValue = (row, name) => {
+    const index = headerIndex.get(String(name).toLowerCase());
+    return index == null || row[index] == null ? '' : String(row[index]).trim();
+  };
+
+  // These fields are the stable mirror identity required by the backfill page.
+  if (!headerIndex.has('googleeventid') || !headerIndex.has('date') || !headerIndex.has('start')) {
+    const err = new Error('Booking API monthlyLessons is missing required mirror headers');
+    err.statusCode = 502;
+    throw err;
+  }
+
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] || [];
+    const date = getValue(row, 'date');
+    if (!date.startsWith(ym)) continue;
+
+    const googleEventId = getValue(row, 'googleEventId');
+    const eventKey = getValue(row, 'eventKey');
+    if (!googleEventId && !eventKey) continue;
+
+    rows.push({
+      eventKey,
+      calendarSource: getValue(row, 'calendarSource'),
+      googleEventId,
+      recurringEventId: getValue(row, 'recurringEventId'),
+      originalStartTime: getValue(row, 'originalStartTime'),
+      iCalUID: getValue(row, 'iCalUID'),
+      studentId: getValue(row, 'studentId'),
+      studentName: getValue(row, 'studentName'),
+      teacherId: getValue(row, 'teacherId'),
+      teacherName: getValue(row, 'teacherName'),
+      lessonKind: getValue(row, 'lessonKind'),
+      title: getValue(row, 'title'),
+      start: getValue(row, 'start'),
+      end: getValue(row, 'end'),
+      date,
+      time: getValue(row, 'time'),
+      status: getValue(row, 'status'),
+      location: getValue(row, 'location'),
+      updatedAt: getValue(row, 'updatedAt'),
+      lastSyncedAt: getValue(row, 'lastSyncedAt'),
+    });
+  }
+
+  return { spreadsheetId, rows };
 }
 
 export function isSheetsConfigured() {
