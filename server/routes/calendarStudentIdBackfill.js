@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
-import { fetchCalendarMirrorMonthFromSheet } from '../lib/googleSheets.js';
 
 const router = Router();
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -42,12 +41,6 @@ function stripInstanceSuffix(value) {
   return String(value || '').trim().replace(INSTANCE_SUFFIX_RE, '');
 }
 
-/**
- * Admin's legacy monthly_schedule stores Calendar identity using its own column
- * names and sometimes adds @google.com/date/instance suffixes. Reduce that to the
- * underlying Calendar event/series base ID so it can be compared with the new
- * mirror's googleEventId / recurringEventId fields.
- */
 function normalizeAdminCalendarBaseId(value) {
   const withoutDbSuffix = stripDbSuffix(value);
   const withoutGoogleUid = stripGoogleUidSuffix(withoutDbSuffix);
@@ -109,7 +102,18 @@ async function callTagGas(body) {
 }
 
 async function readMirrorMonth(month) {
-  return fetchCalendarMirrorMonthFromSheet(month);
+  const result = await callTagGas({
+    action: 'calendar_mirror_read_month',
+    month,
+  });
+
+  if (result?.ok !== true || !Array.isArray(result?.rows)) {
+    const err = new Error(result?.error || 'New Calendar mirror could not be read through GAS');
+    err.statusCode = 502;
+    throw err;
+  }
+
+  return result;
 }
 
 function groupMonthlyRows(rows) {
@@ -159,11 +163,6 @@ function groupMonthlyRows(rows) {
   }));
 }
 
-/**
- * Once Admin has matched a DB lesson to a monthlyLessons row, use the IDs FROM
- * monthlyLessons for the Calendar mutation. Do not reconstruct a Google event ID
- * from Admin's legacy event_id/calendar_source_event_id columns.
- */
 function makeGasTagRequest(group, mirrorRow) {
   const exactGoogleEventId = String(mirrorRow?.googleEventId || '').trim();
   if (!exactGoogleEventId) throw new Error('Matched monthlyLessons row has no googleEventId');
@@ -207,14 +206,6 @@ function adminCalendarBaseIds(group) {
   return uniqueSortedStrings(sourceIds.map(normalizeAdminCalendarBaseId));
 }
 
-/**
- * Mapping rule:
- * - recurring mirror row: Admin Calendar source ID -> monthlyLessons.recurringEventId
- * - one-off mirror row: Admin Calendar source ID -> monthlyLessons.googleEventId
- * - occurrence start must also match for recurring events.
- *
- * iCalUID is optional compatibility data, not required for this join.
- */
 function rowMatchesEventIdentity(group, row) {
   const adminIds = new Set(adminCalendarBaseIds(group));
   if (adminIds.size === 0) return false;
@@ -222,11 +213,14 @@ function rowMatchesEventIdentity(group, row) {
   const recurringId = normalizeMirrorCalendarBaseId(row.recurringEventId);
   const googleEventId = normalizeMirrorCalendarBaseId(row.googleEventId);
 
+  // Recurring lesson: stored Admin Calendar source ID -> recurringEventId,
+  // then identify the exact occurrence by its original start time.
   if (recurringId) {
     if (!adminIds.has(recurringId)) return false;
     return startCloseEnough(group.startIso, row.originalStartTime || row.start);
   }
 
+  // One-off lesson: stored Admin Calendar source ID -> exact googleEventId.
   if (!googleEventId || !adminIds.has(googleEventId)) return false;
   return startCloseEnough(group.startIso, row.start);
 }
@@ -283,14 +277,14 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...baseItem(group),
       status: 'mirror_missing',
-      reason: 'No Booking API monthlyLessons row matched the stored Calendar source ID and occurrence time.',
+      reason: 'No monthlyLessons row matched the stored Calendar source ID and occurrence time.',
     };
   }
   if (matches.length > 1) {
     return {
       ...baseItem(group),
       status: 'ambiguous_calendar_match',
-      reason: 'More than one Booking API monthlyLessons row matched this Calendar source ID and occurrence.',
+      reason: 'More than one monthlyLessons row matched this Calendar source ID and occurrence.',
     };
   }
 
@@ -312,20 +306,20 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...common,
       status: 'safe_to_tag',
-      reason: 'Booking API monthlyLessons has this event but no student ID. Calendar is contacted only when you tag it.',
+      reason: 'monthlyLessons has this event but no student ID. Calendar is contacted only when you tag it.',
     };
   }
   if (sameStringSet(mirrorIds, group.studentIds)) {
     return {
       ...common,
       status: 'already_tagged',
-      reason: 'Booking API monthlyLessons already contains the expected student ID(s).',
+      reason: 'monthlyLessons already contains the expected student ID(s).',
     };
   }
   return {
     ...common,
     status: 'tag_mismatch',
-    reason: 'Booking API monthlyLessons contains student ID(s) that do not match PostgreSQL.',
+    reason: 'monthlyLessons contains student ID(s) that do not match PostgreSQL.',
   };
 }
 
@@ -378,7 +372,6 @@ async function buildPreview(month) {
   return {
     rows,
     mirrorRows,
-    mirrorSpreadsheetId: mirror.spreadsheetId || '',
     groups,
     items,
     counts: countStatuses(items),
@@ -394,12 +387,11 @@ router.get('/preview', async (req, res) => {
     return res.json({
       ok: true,
       readOnly: true,
-      source: 'booking_api_monthlyLessons_direct_sheet_read',
+      source: 'monthlyLessons_via_new_gas',
       directCalendarAccess: false,
       month,
       monthlyScheduleRows: preview.rows.length,
       mirrorRows: preview.mirrorRows.length,
-      mirrorSpreadsheetId: preview.mirrorSpreadsheetId,
       lessonEventsScanned: preview.groups.length,
       counts: preview.counts,
       items: preview.items,
@@ -442,7 +434,6 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
-    // The Calendar mutation uses the exact Google IDs stored by monthlyLessons.
     const gasResult = await callTagGas(makeGasTagRequest(group, targetMatches[0]));
     if (!gasResult?.ok || gasResult?.verified !== true || gasResult?.mirrorUpdated !== true) {
       return res.status(409).json({
@@ -458,7 +449,7 @@ router.post('/apply-one', async (req, res) => {
     const after = classifyGroup(group, mirrorAfter.rows || []);
     if (after.status !== 'already_tagged') {
       return res.status(502).json({
-        error: `Calendar was verified, but Booking API monthlyLessons did not verify afterward: ${after.reason}`,
+        error: `Calendar was verified, but monthlyLessons did not verify afterward: ${after.reason}`,
         code: 'MIRROR_POST_WRITE_VERIFY_FAILED',
         calendarVerified: true,
         mirrorUpdated: true,
