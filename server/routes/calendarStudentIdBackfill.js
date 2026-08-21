@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { gasCalendarEventIdFromMonthly } from '../lib/calendarEventId.js';
+import { fetchCalendarMirrorMonthFromSheet } from '../lib/googleSheets.js';
 
 const router = Router();
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -105,13 +106,9 @@ async function callTagGas(body) {
 }
 
 async function readMirrorMonth(month) {
-  const result = await callTagGas({ action: 'calendar_mirror_read_month', month });
-  if (!result?.ok || !Array.isArray(result.rows)) {
-    const err = new Error(result?.error || 'Calendar mirror could not be read');
-    err.statusCode = 502;
-    throw err;
-  }
-  return result.rows;
+  // Preview/read goes straight to the Booking API spreadsheet. This does not
+  // contact Google Calendar and avoids stale/wrong GAS web-app read deployments.
+  return fetchCalendarMirrorMonthFromSheet(month);
 }
 
 function groupMonthlyRows(rows) {
@@ -213,8 +210,6 @@ function rowMatchesEventIdentity(group, row) {
 }
 
 function matchingMirrorRows(group, mirrorRows) {
-  // Event ID/iCalUID + occurrence time is the identity. Do not reject a real event
-  // merely because legacy PostgreSQL lesson_kind disagrees with the mirror source.
   const identityMatches = (mirrorRows || []).filter((row) => rowMatchesEventIdentity(group, row));
   if (identityMatches.length <= 1) return identityMatches;
 
@@ -266,14 +261,14 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...baseItem(group),
       status: 'mirror_missing',
-      reason: 'No monthlyLessons row matched this Calendar event ID/iCalUID and occurrence time.',
+      reason: 'No Booking API monthlyLessons row matched this Calendar event ID/iCalUID and occurrence time.',
     };
   }
   if (matches.length > 1) {
     return {
       ...baseItem(group),
       status: 'ambiguous_calendar_match',
-      reason: 'More than one monthlyLessons row matched this Calendar event identity.',
+      reason: 'More than one Booking API monthlyLessons row matched this Calendar event identity.',
     };
   }
 
@@ -293,20 +288,20 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...common,
       status: 'safe_to_tag',
-      reason: 'monthlyLessons has this event but no student ID. Calendar is contacted only when you tag it.',
+      reason: 'Booking API monthlyLessons has this event but no student ID. Calendar is contacted only when you tag it.',
     };
   }
   if (sameStringSet(mirrorIds, group.studentIds)) {
     return {
       ...common,
       status: 'already_tagged',
-      reason: 'monthlyLessons already contains the expected student ID(s).',
+      reason: 'Booking API monthlyLessons already contains the expected student ID(s).',
     };
   }
   return {
     ...common,
     status: 'tag_mismatch',
-    reason: 'monthlyLessons contains student ID(s) that do not match PostgreSQL.',
+    reason: 'Booking API monthlyLessons contains student ID(s) that do not match PostgreSQL.',
   };
 }
 
@@ -349,13 +344,21 @@ function countStatuses(items) {
 }
 
 async function buildPreview(month) {
-  const [rows, mirrorRows] = await Promise.all([
+  const [rows, mirror] = await Promise.all([
     loadMonthRows(month),
     readMirrorMonth(month),
   ]);
+  const mirrorRows = mirror.rows || [];
   const groups = groupMonthlyRows(rows);
   const items = sortItems(groups.map((group) => classifyGroup(group, mirrorRows)));
-  return { rows, mirrorRows, groups, items, counts: countStatuses(items) };
+  return {
+    rows,
+    mirrorRows,
+    mirrorSpreadsheetId: mirror.spreadsheetId || '',
+    groups,
+    items,
+    counts: countStatuses(items),
+  };
 }
 
 router.get('/preview', async (req, res) => {
@@ -367,11 +370,12 @@ router.get('/preview', async (req, res) => {
     return res.json({
       ok: true,
       readOnly: true,
-      source: 'new_calendar_mirror_monthlyLessons',
+      source: 'booking_api_monthlyLessons_direct_sheet_read',
       directCalendarAccess: false,
       month,
       monthlyScheduleRows: preview.rows.length,
       mirrorRows: preview.mirrorRows.length,
+      mirrorSpreadsheetId: preview.mirrorSpreadsheetId,
       lessonEventsScanned: preview.groups.length,
       counts: preview.counts,
       items: preview.items,
@@ -396,7 +400,7 @@ router.post('/apply-one', async (req, res) => {
     if (!group) return res.status(404).json({ error: 'That event no longer exists in monthly_schedule. Run preview again.' });
 
     const mirrorBefore = await readMirrorMonth(month);
-    const before = classifyGroup(group, mirrorBefore);
+    const before = classifyGroup(group, mirrorBefore.rows || []);
     if (before.status !== 'safe_to_tag') {
       return res.status(409).json({
         error: `Mirror state is not ready for tagging: ${before.reason}`,
@@ -405,6 +409,7 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
+    // This is the only call in the Admin backfill flow that reaches Google Calendar.
     const gasResult = await callTagGas(makeGasTagRequest(group));
     if (!gasResult?.ok || gasResult?.verified !== true || gasResult?.mirrorUpdated !== true) {
       return res.status(409).json({
@@ -416,11 +421,12 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
+    // Re-read the actual Booking API Sheet and prove persistence there.
     const mirrorAfter = await readMirrorMonth(month);
-    const after = classifyGroup(group, mirrorAfter);
+    const after = classifyGroup(group, mirrorAfter.rows || []);
     if (after.status !== 'already_tagged') {
       return res.status(502).json({
-        error: `Calendar was verified, but the new Sheet mirror did not verify afterward: ${after.reason}`,
+        error: `Calendar was verified, but Booking API monthlyLessons did not verify afterward: ${after.reason}`,
         code: 'MIRROR_POST_WRITE_VERIFY_FAILED',
         calendarVerified: true,
         mirrorUpdated: true,
