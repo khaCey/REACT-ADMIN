@@ -359,11 +359,11 @@ function BatchTagModal({ modal, onClose, onConfirm }) {
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-blue-100">
                   <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${percent}%` }} />
                 </div>
-                <p className="mt-3 text-xs text-blue-800">Completed: {modal.completed} · Tagged: {modal.tagged} · Already tagged: {modal.alreadyTagged} · Failed: {modal.failed}</p>
+                <p className="mt-3 text-xs text-blue-800">Completed: {modal.completed} · Tagged/verified: {modal.tagged} · Already tagged: {modal.alreadyTagged} · Provisional failures: {modal.failed}</p>
               </div>
               <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
                 <LoadingSpinner size="sm" />
-                <p>Each event is re-read and verified before the batch moves to the next one.</p>
+                <p>Each event is re-read and verified before the batch moves to the next one. A final preview reconciles any transient failures.</p>
               </div>
             </>
           )}
@@ -373,7 +373,7 @@ function BatchTagModal({ modal, onClose, onConfirm }) {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
                   <p className="text-2xl font-bold text-emerald-900">{modal.tagged}</p>
-                  <p className="text-xs font-semibold text-emerald-700">Tagged now</p>
+                  <p className="text-xs font-semibold text-emerald-700">Tagged / verified</p>
                 </div>
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center">
                   <p className="text-2xl font-bold text-blue-900">{modal.alreadyTagged}</p>
@@ -388,12 +388,12 @@ function BatchTagModal({ modal, onClose, onConfirm }) {
               {modal.failed === 0 ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
                   <p className="font-semibold">All {modal.total} events completed successfully.</p>
-                  <p className="mt-1">The preview has been refreshed from <code>monthlyLessons</code>.</p>
+                  <p className="mt-1">The final result was reconciled against a fresh <code>monthlyLessons</code> preview.</p>
                 </div>
               ) : (
                 <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
                   <p className="font-semibold">{modal.failed} event{modal.failed === 1 ? '' : 's'} could not be verified.</p>
-                  <p className="mt-1">Successful events were kept. Failed events were not counted as tagged.</p>
+                  <p className="mt-1">The final refreshed mirror still did not show the expected student ID set for these events.</p>
                   {modal.failures.length > 0 && (
                     <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
                       {modal.failures.map((failure, index) => (
@@ -574,7 +574,7 @@ export default function CalendarStudentIdBackfill() {
     let tagged = 0
     let alreadyTagged = 0
     let failed = 0
-    const failures = []
+    let failures = []
 
     setError('')
     setBatchModal((current) => ({
@@ -617,6 +617,37 @@ export default function CalendarStudentIdBackfill() {
     try {
       const refreshed = await getCalendarStudentIdBackfillPreview(month)
       setResult(refreshed)
+
+      // Final mirror state is authoritative. If an individual request reported a
+      // transient post-write verification error but the fresh preview now shows
+      // the exact event as already_tagged, remove that false failure.
+      if (failures.length > 0) {
+        const finalByGroupKey = new Map(
+          (Array.isArray(refreshed?.items) ? refreshed.items : [])
+            .filter((item) => item?.groupKey)
+            .map((item) => [item.groupKey, item])
+        )
+        const stillFailed = []
+        let recovered = 0
+
+        for (const failure of failures) {
+          const finalItem = finalByGroupKey.get(failure.groupKey)
+          if (finalItem?.status === 'already_tagged') {
+            recovered += 1
+            continue
+          }
+          stillFailed.push({
+            ...failure,
+            message: finalItem?.reason || failure.message,
+          })
+        }
+
+        if (recovered > 0) {
+          tagged += recovered
+          failures = stillFailed
+          failed = stillFailed.length
+        }
+      }
     } catch (err) {
       refreshError = err.message || 'Failed to refresh preview after batch tagging'
     }
