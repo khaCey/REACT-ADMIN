@@ -248,6 +248,231 @@ function CalendarTagModal({ modal, onClose, onConfirm }) {
   )
 }
 
+function BatchTagModal({ modal, onClose, onConfirm }) {
+  if (!modal.open) return null
+
+  const working = modal.phase === 'working'
+  const complete = modal.phase === 'complete'
+  const percent = modal.total > 0 ? Math.round((modal.completed / modal.total) * 100) : 0
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[1px]"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !working) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="calendar-batch-tag-modal-title"
+        className="w-full max-w-xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+              complete && modal.failed === 0
+                ? 'bg-emerald-100 text-emerald-700'
+                : complete && modal.failed > 0
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              {complete && modal.failed === 0 ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : complete && modal.failed > 0 ? (
+                <AlertTriangle className="h-5 w-5" />
+              ) : working ? (
+                <LoadingSpinner size="xs" />
+              ) : (
+                <Tags className="h-5 w-5" />
+              )}
+            </div>
+            <div>
+              <h3 id="calendar-batch-tag-modal-title" className="text-lg font-bold text-gray-900">
+                {complete ? 'Batch tagging finished' : working ? 'Batch tagging Calendar events…' : `Batch tag ${modal.total} events?`}
+              </h3>
+              <p className="mt-0.5 text-sm text-gray-500">
+                {complete
+                  ? 'Each event was processed independently with exact Calendar and mirror verification.'
+                  : working
+                    ? 'Events are being processed one at a time. Please keep this window open.'
+                    : 'Only rows currently marked Ready to tag will be included.'}
+              </p>
+            </div>
+          </div>
+          {!working && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          {modal.phase === 'confirm' && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-900">{modal.total}</p>
+                  <p className="text-xs font-semibold text-emerald-700">Ready events</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center">
+                  <p className="text-2xl font-bold text-gray-900">1×</p>
+                  <p className="text-xs font-semibold text-gray-600">At a time</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center">
+                  <p className="text-2xl font-bold text-gray-900">100%</p>
+                  <p className="text-xs font-semibold text-gray-600">Verified</p>
+                </div>
+              </div>
+              <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-950">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+                <p>
+                  This does not use a separate bulk Calendar write. It runs the same single-event tagging operation for each ready row. Every event must independently pass exact-ID matching, Calendar verification, mirror update, and mirror re-read before it counts as successful.
+                </p>
+              </div>
+              <div className="max-h-52 overflow-y-auto rounded-xl border border-gray-200">
+                {modal.items.map((item) => (
+                  <div key={item.groupKey} className="border-b border-gray-100 px-4 py-3 last:border-b-0">
+                    <p className="text-sm font-semibold text-gray-900">{item.title || '(untitled)'}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {formatDateTime(item.start)} · {item.studentNames?.join(', ') || item.studentIds?.join(', ') || '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {working && (
+            <>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold text-blue-950">Processing event {Math.min(modal.completed + 1, modal.total)} of {modal.total}</span>
+                  <span className="font-semibold text-blue-800">{percent}%</span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-blue-100">
+                  <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${percent}%` }} />
+                </div>
+                <p className="mt-3 text-xs text-blue-800">Completed: {modal.completed} · Tagged: {modal.tagged} · Already tagged: {modal.alreadyTagged} · Failed: {modal.failed}</p>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+                <LoadingSpinner size="sm" />
+                <p>Each event is re-read and verified before the batch moves to the next one.</p>
+              </div>
+            </>
+          )}
+
+          {complete && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                  <p className="text-2xl font-bold text-emerald-900">{modal.tagged}</p>
+                  <p className="text-xs font-semibold text-emerald-700">Tagged now</p>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center">
+                  <p className="text-2xl font-bold text-blue-900">{modal.alreadyTagged}</p>
+                  <p className="text-xs font-semibold text-blue-700">Already tagged</p>
+                </div>
+                <div className={`rounded-xl border p-4 text-center ${modal.failed > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
+                  <p className={`text-2xl font-bold ${modal.failed > 0 ? 'text-red-900' : 'text-gray-900'}`}>{modal.failed}</p>
+                  <p className={`text-xs font-semibold ${modal.failed > 0 ? 'text-red-700' : 'text-gray-600'}`}>Failed</p>
+                </div>
+              </div>
+
+              {modal.failed === 0 ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                  <p className="font-semibold">All {modal.total} events completed successfully.</p>
+                  <p className="mt-1">The preview has been refreshed from <code>monthlyLessons</code>.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                  <p className="font-semibold">{modal.failed} event{modal.failed === 1 ? '' : 's'} could not be verified.</p>
+                  <p className="mt-1">Successful events were kept. Failed events were not counted as tagged.</p>
+                  {modal.failures.length > 0 && (
+                    <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
+                      {modal.failures.map((failure, index) => (
+                        <div key={`${failure.groupKey}-${index}`} className="rounded-lg bg-white/70 p-2.5">
+                          <p className="font-semibold">{failure.title || '(untitled)'}</p>
+                          <p className="mt-0.5 break-words text-xs">{failure.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {modal.refreshError && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  <p className="font-semibold">Tagging finished, but the final preview refresh failed.</p>
+                  <p className="mt-1 break-words">{modal.refreshError}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-4 sm:flex-row sm:justify-end">
+          {modal.phase === 'confirm' ? (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              >
+                <Tags className="h-4 w-4" />
+                Batch tag {modal.total}
+              </button>
+            </>
+          ) : working ? (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500"
+            >
+              <LoadingSpinner size="xs" />
+              Tagging {modal.completed}/{modal.total}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const EMPTY_BATCH_MODAL = {
+  open: false,
+  phase: 'confirm',
+  items: [],
+  total: 0,
+  completed: 0,
+  tagged: 0,
+  alreadyTagged: 0,
+  failed: 0,
+  failures: [],
+  refreshError: '',
+}
+
 export default function CalendarStudentIdBackfill() {
   const [month, setMonth] = useState(() => getCurrentYyyyMmJst())
   const [loading, setLoading] = useState(false)
@@ -262,6 +487,7 @@ export default function CalendarStudentIdBackfill() {
     message: '',
     result: null,
   })
+  const [batchModal, setBatchModal] = useState(EMPTY_BATCH_MODAL)
 
   const runPreview = async () => {
     setLoading(true)
@@ -323,6 +549,90 @@ export default function CalendarStudentIdBackfill() {
     }
   }
 
+  const openBatchModal = () => {
+    const readyItems = (Array.isArray(result?.items) ? result.items : [])
+      .filter((item) => item?.groupKey && item.status === 'safe_to_tag')
+    if (readyItems.length === 0) return
+
+    setBatchModal({
+      ...EMPTY_BATCH_MODAL,
+      open: true,
+      items: readyItems,
+      total: readyItems.length,
+    })
+  }
+
+  const closeBatchModal = () => {
+    if (batchModal.phase === 'working') return
+    setBatchModal(EMPTY_BATCH_MODAL)
+  }
+
+  const confirmBatchTag = async () => {
+    if (batchModal.phase !== 'confirm' || batchModal.items.length === 0) return
+
+    const items = [...batchModal.items]
+    let tagged = 0
+    let alreadyTagged = 0
+    let failed = 0
+    const failures = []
+
+    setError('')
+    setBatchModal((current) => ({
+      ...current,
+      phase: 'working',
+      completed: 0,
+      tagged: 0,
+      alreadyTagged: 0,
+      failed: 0,
+      failures: [],
+      refreshError: '',
+    }))
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]
+      try {
+        const applied = await applyOneCalendarStudentIdBackfill(month, item.groupKey)
+        tagged += Number(applied?.tagged || 0)
+        alreadyTagged += Number(applied?.alreadyTagged || 0)
+      } catch (err) {
+        failed += 1
+        failures.push({
+          groupKey: item.groupKey,
+          title: item.title,
+          message: err.message || 'Failed to tag this Calendar event',
+        })
+      }
+
+      setBatchModal((current) => ({
+        ...current,
+        completed: index + 1,
+        tagged,
+        alreadyTagged,
+        failed,
+        failures: [...failures],
+      }))
+    }
+
+    let refreshError = ''
+    try {
+      const refreshed = await getCalendarStudentIdBackfillPreview(month)
+      setResult(refreshed)
+    } catch (err) {
+      refreshError = err.message || 'Failed to refresh preview after batch tagging'
+    }
+
+    setBatchModal((current) => ({
+      ...current,
+      phase: 'complete',
+      completed: items.length,
+      tagged,
+      alreadyTagged,
+      failed,
+      failures: [...failures],
+      refreshError,
+    }))
+  }
+
   const filteredItems = useMemo(() => {
     const items = Array.isArray(result?.items) ? result.items : []
     if (!statusFilter) return items
@@ -337,7 +647,8 @@ export default function CalendarStudentIdBackfill() {
     (counts.api_error || 0) +
     (counts.missing_student_id || 0)
   const safeCount = Number(counts.safe_to_tag || 0)
-  const busy = loading || !!applyingOneKey
+  const batchWorking = batchModal.phase === 'working'
+  const busy = loading || !!applyingOneKey || batchWorking
 
   return (
     <div className="w-full space-y-5 pb-8">
@@ -363,14 +674,14 @@ export default function CalendarStudentIdBackfill() {
           <div>
             <p className="font-semibold">Calendar access is deliberately restricted.</p>
             <p className="mt-1">
-              Preview reads PostgreSQL and the <code>monthlyLessons</code> mirror only. Google Calendar is contacted only when you click <strong>Tag this event</strong>. After the exact event is verified, its student ID is saved back into the mirror.
+              Preview reads PostgreSQL and the <code>monthlyLessons</code> mirror only. Google Calendar is contacted only when you tag events. After each exact event is verified, its student ID is saved back into the mirror.
             </p>
           </div>
         </div>
       </div>
 
       <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-700">Month</span>
             <input
@@ -393,6 +704,17 @@ export default function CalendarStudentIdBackfill() {
             {loading ? <LoadingSpinner size="xs" /> : <CalendarSearch className="h-4 w-4" />}
             {loading ? 'Loading Sheet…' : 'Run preview'}
           </button>
+          {result && (
+            <button
+              type="button"
+              onClick={openBatchModal}
+              disabled={busy || safeCount === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {batchWorking ? <LoadingSpinner size="xs" /> : <Tags className="h-4 w-4" />}
+              {batchWorking ? `Batch tagging ${batchModal.completed}/${batchModal.total}` : `Batch tag ready (${safeCount})`}
+            </button>
+          )}
         </div>
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
       </section>
@@ -507,14 +829,14 @@ export default function CalendarStudentIdBackfill() {
           <div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <Info className="mt-0.5 h-5 w-5 shrink-0" />
             <p>
-              <strong>Run preview</strong> compares PostgreSQL student IDs with the <code>monthlyLessons</code> mirror. Blank mirror IDs mean ready to tag; matching IDs mean already tagged. <strong>Tag this event</strong> is the only action that contacts Google Calendar.
+              <strong>Run preview</strong> compares PostgreSQL student IDs with the <code>monthlyLessons</code> mirror. Blank mirror IDs mean ready to tag; matching IDs mean already tagged. <strong>Tag this event</strong> and <strong>Batch tag ready</strong> are the only actions that contact Google Calendar.
             </p>
           </div>
 
           {issueCount === 0 && safeCount > 0 && (
             <div className="flex gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>The mirror has no blocking mismatches for these rows. Calendar-side validation still happens when each event is tagged.</p>
+              <p>The mirror has no blocking mismatches for these rows. Calendar-side validation still happens independently for every event, including during batch tagging.</p>
             </div>
           )}
         </>
@@ -524,6 +846,11 @@ export default function CalendarStudentIdBackfill() {
         modal={tagModal}
         onClose={closeTagModal}
         onConfirm={confirmTag}
+      />
+      <BatchTagModal
+        modal={batchModal}
+        onClose={closeBatchModal}
+        onConfirm={confirmBatchTag}
       />
     </div>
   )
