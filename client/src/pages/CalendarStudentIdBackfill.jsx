@@ -10,7 +10,7 @@ import { getCurrentYyyyMmJst } from '../utils/jstMonth'
 
 const STATUS_META = {
   safe_to_tag: {
-    label: 'Safe to tag',
+    label: 'Ready to tag',
     className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   },
   already_tagged: {
@@ -106,7 +106,7 @@ export default function CalendarStudentIdBackfill() {
       : item.studentIds?.join(', ') || 'this student'
     const confirmed = window.confirm(
       `Tag only this Calendar event?\n\n${item.title || '(untitled)'}\n${formatDateTime(item.start)}\n${studentLabel}\n\n` +
-      'The server will re-check this exact event first. Only the description can be changed.'
+      'Google Calendar is accessed only now. The exact event is checked, only its description can be changed, and the same event is verified afterward.'
     )
     if (!confirmed) return
 
@@ -130,8 +130,8 @@ export default function CalendarStudentIdBackfill() {
     if (safeCount <= 0) return
 
     const confirmed = window.confirm(
-      `Add [GS_STUDENT_IDS:...] to ${safeCount} safe Calendar event${safeCount === 1 ? '' : 's'}?\n\n` +
-      'This operation can only change the event description. It cannot create, delete, move, rename, recolor, or change recurrence.'
+      `Add [GS_STUDENT_IDS:...] to ${safeCount} ready event${safeCount === 1 ? '' : 's'}?\n\n` +
+      'Each tagging operation may access Google Calendar, but can only change the event description.'
     )
     if (!confirmed) return
 
@@ -175,7 +175,7 @@ export default function CalendarStudentIdBackfill() {
             Calendar Student ID Backfill
           </h2>
           <p className="mt-1 text-sm text-gray-600">
-            Match monthly_schedule student IDs to existing Calendar lessons and add the canonical student-number tag.
+            Use cached monthly_schedule data to prepare student-number tags. Google Calendar is contacted only when an event is tagged.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
@@ -188,9 +188,9 @@ export default function CalendarStudentIdBackfill() {
         <div className="flex gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="font-semibold">Calendar changes are deliberately restricted.</p>
+            <p className="font-semibold">Calendar access is deliberately restricted.</p>
             <p className="mt-1">
-              Preview is read-only. Apply can only add or normalize <code>[GS_STUDENT_IDS:...]</code> in the existing event description. The dedicated API has no create, delete, move, title, color, attendee, location, or recurrence actions.
+              Run preview uses cached data only and does not access Google Calendar. Tagging can only add or normalize <code>[GS_STUDENT_IDS:...]</code> in the existing event description. The dedicated API has no create, delete, move, title, color, attendee, location, or recurrence actions.
             </p>
           </div>
         </div>
@@ -219,7 +219,7 @@ export default function CalendarStudentIdBackfill() {
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? <LoadingSpinner size="xs" /> : <CalendarSearch className="h-4 w-4" />}
-            {loading ? 'Scanning…' : 'Run preview'}
+            {loading ? 'Loading cache…' : 'Run preview'}
           </button>
           {result && safeCount > 0 && (
             <button
@@ -229,7 +229,7 @@ export default function CalendarStudentIdBackfill() {
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {applying ? <LoadingSpinner size="xs" /> : <Tags className="h-4 w-4" />}
-              {applying ? 'Tagging…' : `Tag ${safeCount} safe event${safeCount === 1 ? '' : 's'}`}
+              {applying ? 'Tagging…' : `Tag ${safeCount} ready event${safeCount === 1 ? '' : 's'}`}
             </button>
           )}
         </div>
@@ -249,15 +249,15 @@ export default function CalendarStudentIdBackfill() {
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Lesson events scanned</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cached lesson events</p>
               <p className="mt-1 text-2xl font-bold text-gray-900">{result.lessonEventsScanned || 0}</p>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Safe to tag</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Ready to tag</p>
               <p className="mt-1 text-2xl font-bold text-emerald-900">{safeCount}</p>
             </div>
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Already tagged</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Tagged this session</p>
               <p className="mt-1 text-2xl font-bold text-blue-900">{counts.already_tagged || 0}</p>
             </div>
             <div className={`rounded-lg border p-4 shadow-sm ${issueCount > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
@@ -269,9 +269,9 @@ export default function CalendarStudentIdBackfill() {
           <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="font-semibold text-gray-900">Preview results</h3>
+                <h3 className="font-semibold text-gray-900">Cached preview results</h3>
                 <p className="text-xs text-gray-500">
-                  {result.monthlyScheduleRows || 0} monthly_schedule rows scanned for {result.month}.
+                  {result.monthlyScheduleRows || 0} monthly_schedule rows loaded for {result.month}. No direct Calendar fetch is performed here.
                 </p>
               </div>
               <select
@@ -297,7 +297,7 @@ export default function CalendarStudentIdBackfill() {
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Event</th>
                       <th className="px-4 py-3">Student IDs</th>
-                      <th className="px-4 py-3">Existing tag IDs</th>
+                      <th className="px-4 py-3">Verified tag IDs</th>
                       <th className="px-4 py-3">Reason</th>
                       <th className="px-4 py-3">Action</th>
                     </tr>
@@ -323,7 +323,7 @@ export default function CalendarStudentIdBackfill() {
                           <p className="font-mono text-xs text-gray-900">{item.calendarStudentIds?.join(', ') || '—'}</p>
                           {item.description && (
                             <details className="mt-2">
-                              <summary className="cursor-pointer text-xs font-medium text-gray-500">Current description</summary>
+                              <summary className="cursor-pointer text-xs font-medium text-gray-500">Verified Calendar description</summary>
                               <pre className="mt-2 max-w-sm whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-[11px] text-gray-600">{item.description}</pre>
                             </details>
                           )}
@@ -355,14 +355,14 @@ export default function CalendarStudentIdBackfill() {
           <div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <Info className="mt-0.5 h-5 w-5 shrink-0" />
             <p>
-              <strong>Tag this event</strong> re-checks only that exact lesson before writing. The bulk Apply also re-runs the full preview first. Only rows that are still <strong>Safe to tag</strong> are sent to the dedicated metadata API.
+              <strong>Run preview</strong> reads cached monthly_schedule data only. <strong>Tag this event</strong> is where Google Calendar is contacted: the dedicated API resolves the exact event, refuses conflicting student IDs, patches description only, and verifies the same event afterward.
             </p>
           </div>
 
           {issueCount === 0 && safeCount > 0 && (
             <div className="flex gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>The preview found no blocking mismatches in this month. You can test one event first using the row-level button before considering the bulk action.</p>
+              <p>The cached schedule data has no blocking issues for these rows. Calendar-side validation still happens when each event is tagged.</p>
             </div>
           )}
         </>
