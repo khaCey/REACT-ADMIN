@@ -30,11 +30,30 @@ export function getCalendarStudentIdBackfillPreview(month) {
   return fetchJson(`/calendar/student-id-backfill/preview${qs ? `?${qs}` : ''}`)
 }
 
-export function applyOneCalendarStudentIdBackfill(month, groupKey) {
-  return fetchJson('/calendar/student-id-backfill/apply-one', {
+export async function applyOneCalendarStudentIdBackfill(month, groupKey) {
+  const result = await fetchJson('/calendar/student-id-backfill/apply-one', {
     method: 'POST',
     body: JSON.stringify({ month, groupKey }),
   })
+
+  // The server performs a post-write Calendar verification. Some deployed GAS
+  // versions may return ok:true without the optional actionTaken field. If the
+  // event is verified as already_tagged after starting from safe_to_tag, the
+  // single-event write succeeded even when the raw counters are both zero.
+  if (
+    result?.verified === true &&
+    Number(result?.tagged || 0) === 0 &&
+    Number(result?.alreadyTagged || 0) === 0 &&
+    Number(result?.failed || 0) === 0
+  ) {
+    return {
+      ...result,
+      tagged: 1,
+      verifiedByCalendar: true,
+    }
+  }
+
+  return result
 }
 
 export function applyCalendarStudentIdBackfill(month) {
