@@ -14,8 +14,10 @@ import { fileURLToPath } from 'url';
 
 const __dirnameHere = dirname(fileURLToPath(import.meta.url));
 
-// Booking API / new Calendar Mirror spreadsheet. Sheet IDs are not secrets.
-const DEFAULT_CALENDAR_MIRROR_SHEET_ID = '17zXtRW5Ue-u4DQwW-sa0lvMQmKnEGcjTyPskaByjF0s';
+// Booking API / new Calendar Mirror spreadsheet. This is the mirror used by the
+// rebuilt booking API; do not allow an unrelated env var to silently redirect the
+// student-ID backfill preview to another spreadsheet.
+const CALENDAR_MIRROR_SHEET_ID = '17zXtRW5Ue-u4DQwW-sa0lvMQmKnEGcjTyPskaByjF0s';
 
 function getSheetsAuth() {
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
@@ -122,9 +124,7 @@ export async function fetchCalendarMirrorMonthFromSheet(month) {
     throw err;
   }
 
-  const spreadsheetId = String(
-    process.env.GOOGLE_CALENDAR_MIRROR_SHEET_ID || DEFAULT_CALENDAR_MIRROR_SHEET_ID
-  ).trim();
+  const spreadsheetId = CALENDAR_MIRROR_SHEET_ID;
   const sheets = google.sheets({ version: 'v4', auth });
 
   let values;
@@ -151,7 +151,6 @@ export async function fetchCalendarMirrorMonthFromSheet(month) {
     return index == null || row[index] == null ? '' : String(row[index]).trim();
   };
 
-  // These fields are the stable mirror identity required by the backfill page.
   if (!headerIndex.has('googleeventid') || !headerIndex.has('date') || !headerIndex.has('start')) {
     const err = new Error('Booking API monthlyLessons is missing required mirror headers');
     err.statusCode = 502;
