@@ -36,6 +36,12 @@ export async function runMigrations() {
   const schemaPath = join(__dirname, 'schema.sql');
   const schema = readFileSync(schemaPath, 'utf8');
   await pool.query(schema);
+
+  // Additive migration for the rebuilt Calendar mirror/tagging flow.
+  // Existing event_id / calendar_source_event_id infrastructure is untouched.
+  const exactGoogleEventIdPath = join(__dirname, 'add_calendar_google_event_id.sql');
+  const exactGoogleEventIdMigration = readFileSync(exactGoogleEventIdPath, 'utf8');
+  await pool.query(exactGoogleEventIdMigration);
 }
 
 export { pool };
