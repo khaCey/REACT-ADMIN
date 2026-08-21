@@ -203,19 +203,21 @@ function startCloseEnough(groupStartIso, mirrorStart) {
 
 function rowMatchesEventIdentity(group, row) {
   const wantedIds = new Set(eventIdVariants([group.eventId, ...group.calendarSourceEventIds]));
-  const rowIds = eventIdVariants([row.googleEventId, row.recurringEventId]);
+  const rowIds = eventIdVariants([
+    row.googleEventId,
+    row.iCalUID,
+    row.recurringEventId,
+  ]);
   if (!rowIds.some((id) => wantedIds.has(id))) return false;
   return startCloseEnough(group.startIso, row.start || row.originalStartTime);
 }
 
 function matchingMirrorRows(group, mirrorRows) {
-  // Event ID + occurrence time is the identity. Do not reject a real event just
-  // because legacy PostgreSQL lesson_kind disagrees with the mirror source.
+  // Event ID/iCalUID + occurrence time is the identity. Do not reject a real event
+  // merely because legacy PostgreSQL lesson_kind disagrees with the mirror source.
   const identityMatches = (mirrorRows || []).filter((row) => rowMatchesEventIdentity(group, row));
   if (identityMatches.length <= 1) return identityMatches;
 
-  // If an event ID happens to exist in more than one source, use lesson_kind only
-  // as a tie-breaker. Ambiguity is preserved if it still cannot be resolved.
   const preferredSource = expectedMirrorSource(group);
   if (!preferredSource) return identityMatches;
   const preferred = identityMatches.filter(
@@ -264,7 +266,7 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...baseItem(group),
       status: 'mirror_missing',
-      reason: 'No monthlyLessons row matched this Calendar event ID and occurrence time.',
+      reason: 'No monthlyLessons row matched this Calendar event ID/iCalUID and occurrence time.',
     };
   }
   if (matches.length > 1) {
@@ -347,7 +349,6 @@ function countStatuses(items) {
 }
 
 async function buildPreview(month) {
-  // Reads PostgreSQL + the NEW GAS Sheet mirror. No direct Calendar read happens here.
   const [rows, mirrorRows] = await Promise.all([
     loadMonthRows(month),
     readMirrorMonth(month),
@@ -404,7 +405,6 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
-    // This is the only request in this UI flow that may directly access Calendar.
     const gasResult = await callTagGas(makeGasTagRequest(group));
     if (!gasResult?.ok || gasResult?.verified !== true || gasResult?.mirrorUpdated !== true) {
       return res.status(409).json({
