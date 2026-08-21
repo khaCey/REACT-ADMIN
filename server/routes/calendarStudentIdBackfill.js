@@ -42,14 +42,11 @@ function stripInstanceSuffix(value) {
 }
 
 function normalizeAdminCalendarBaseId(value) {
-  const withoutDbSuffix = stripDbSuffix(value);
-  const withoutGoogleUid = stripGoogleUidSuffix(withoutDbSuffix);
-  return stripInstanceSuffix(withoutGoogleUid);
+  return stripInstanceSuffix(stripGoogleUidSuffix(stripDbSuffix(value)));
 }
 
 function normalizeMirrorCalendarBaseId(value) {
-  const withoutGoogleUid = stripGoogleUidSuffix(value);
-  return stripInstanceSuffix(withoutGoogleUid);
+  return stripInstanceSuffix(stripGoogleUidSuffix(value));
 }
 
 function getTagGasConfig() {
@@ -102,17 +99,12 @@ async function callTagGas(body) {
 }
 
 async function readMirrorMonth(month) {
-  const result = await callTagGas({
-    action: 'calendar_mirror_read_month',
-    month,
-  });
-
+  const result = await callTagGas({ action: 'calendar_mirror_read_month', month });
   if (result?.ok !== true || !Array.isArray(result?.rows)) {
     const err = new Error(result?.error || 'New Calendar mirror could not be read through GAS');
     err.statusCode = 502;
     throw err;
   }
-
   return result;
 }
 
@@ -130,6 +122,7 @@ function groupMonthlyRows(rows) {
         eventId,
         startIso,
         calendarSourceEventIds: [],
+        calendarGoogleEventIds: [],
         studentIds: [],
         studentNames: [],
         titles: [],
@@ -142,6 +135,7 @@ function groupMonthlyRows(rows) {
 
     const group = groups.get(key);
     if (row.calendar_source_event_id) group.calendarSourceEventIds.push(String(row.calendar_source_event_id));
+    if (row.calendar_google_event_id) group.calendarGoogleEventIds.push(String(row.calendar_google_event_id));
     if (row.student_id != null && row.student_id !== '') group.studentIds.push(String(row.student_id));
     if (row.student_name) group.studentNames.push(String(row.student_name));
     if (row.title) group.titles.push(String(row.title));
@@ -154,6 +148,7 @@ function groupMonthlyRows(rows) {
   return [...groups.values()].map((group) => ({
     ...group,
     calendarSourceEventIds: uniqueSortedStrings(group.calendarSourceEventIds),
+    calendarGoogleEventIds: uniqueSortedStrings(group.calendarGoogleEventIds),
     studentIds: uniqueSortedStrings(group.studentIds),
     studentNames: uniqueSortedStrings(group.studentNames),
     titles: uniqueSortedStrings(group.titles),
@@ -172,8 +167,7 @@ function makeGasTagRequest(group, mirrorRow) {
     eventId: exactGoogleEventId,
     calendarSourceEventId: exactGoogleEventId,
     seriesMasterId: String(mirrorRow?.recurringEventId || '').trim() || undefined,
-    occurrenceStartIso:
-      String(mirrorRow?.originalStartTime || mirrorRow?.start || group.startIso || '').trim() || undefined,
+    occurrenceStartIso: String(mirrorRow?.originalStartTime || mirrorRow?.start || group.startIso || '').trim() || undefined,
     lessonKind: String(mirrorRow?.lessonKind || group.lessonKinds[0] || 'regular').toLowerCase(),
     studentIds: group.studentIds,
   };
@@ -185,6 +179,14 @@ function expectedMirrorSource(group) {
   if (kind === 'owner') return 'owner';
   if (kind === 'regular') return 'main';
   return '';
+}
+
+function preferSingleMirrorSource(group, rows) {
+  if (rows.length <= 1) return rows;
+  const preferredSource = expectedMirrorSource(group);
+  if (!preferredSource) return rows;
+  const preferred = rows.filter((row) => String(row.calendarSource || '').toLowerCase() === preferredSource);
+  return preferred.length === 1 ? preferred : rows;
 }
 
 function parseMirrorStudentIds(value) {
@@ -200,44 +202,107 @@ function startCloseEnough(groupStartIso, mirrorStart) {
 }
 
 function adminCalendarBaseIds(group) {
-  const sourceIds = group.calendarSourceEventIds.length
-    ? group.calendarSourceEventIds
-    : [group.eventId];
+  const sourceIds = group.calendarSourceEventIds.length ? group.calendarSourceEventIds : [group.eventId];
   return uniqueSortedStrings(sourceIds.map(normalizeAdminCalendarBaseId));
 }
 
-function rowMatchesEventIdentity(group, row) {
+// Legacy bridge used only to populate calendar_google_event_id once.
+function legacyRowMatchesEventIdentity(group, row) {
   const adminIds = new Set(adminCalendarBaseIds(group));
   if (adminIds.size === 0) return false;
 
   const recurringId = normalizeMirrorCalendarBaseId(row.recurringEventId);
   const googleEventId = normalizeMirrorCalendarBaseId(row.googleEventId);
-
-  // Recurring lesson: stored Admin Calendar source ID -> recurringEventId,
-  // then identify the exact occurrence by its original start time.
   if (recurringId) {
     if (!adminIds.has(recurringId)) return false;
     return startCloseEnough(group.startIso, row.originalStartTime || row.start);
   }
-
-  // One-off lesson: stored Admin Calendar source ID -> exact googleEventId.
   if (!googleEventId || !adminIds.has(googleEventId)) return false;
   return startCloseEnough(group.startIso, row.start);
 }
 
-function matchingMirrorRows(group, mirrorRows) {
-  const identityMatches = (mirrorRows || []).filter((row) => rowMatchesEventIdentity(group, row));
-  if (identityMatches.length <= 1) return identityMatches;
-
-  const preferredSource = expectedMirrorSource(group);
-  if (!preferredSource) return identityMatches;
-  const preferred = identityMatches.filter(
-    (row) => String(row.calendarSource || '').toLowerCase() === preferredSource
+function legacyMatchingMirrorRows(group, mirrorRows) {
+  return preferSingleMirrorSource(
+    group,
+    (mirrorRows || []).filter((row) => legacyRowMatchesEventIdentity(group, row))
   );
-  return preferred.length === 1 ? preferred : identityMatches;
+}
+
+// Steady-state join: exact Google occurrence ID on both sides.
+function exactMatchingMirrorRows(group, mirrorRows) {
+  if (group.calendarGoogleEventIds.length !== 1) return [];
+  const exactId = group.calendarGoogleEventIds[0];
+  return preferSingleMirrorSource(
+    group,
+    (mirrorRows || []).filter((row) => String(row.googleEventId || '').trim() === exactId)
+  );
+}
+
+function matchingMirrorRows(group, mirrorRows) {
+  return group.calendarGoogleEventIds.length === 1
+    ? exactMatchingMirrorRows(group, mirrorRows)
+    : legacyMatchingMirrorRows(group, mirrorRows);
+}
+
+async function saveExactGoogleEventId(group, mirrorRow) {
+  const exactId = String(mirrorRow?.googleEventId || '').trim();
+  if (!exactId) return false;
+
+  if (group.calendarGoogleEventIds.length > 1) {
+    throw new Error(`Conflicting calendar_google_event_id values already exist for ${group.eventId}`);
+  }
+  if (group.calendarGoogleEventIds.length === 1) {
+    if (group.calendarGoogleEventIds[0] !== exactId) {
+      throw new Error(`Stored exact Google event ID conflicts with monthlyLessons for ${group.eventId}`);
+    }
+    return false;
+  }
+
+  const result = await query(
+    `UPDATE monthly_schedule
+        SET calendar_google_event_id = $1
+      WHERE event_id = $2
+        AND (calendar_google_event_id IS NULL OR TRIM(calendar_google_event_id) = '')`,
+    [exactId, group.eventId]
+  );
+
+  if ((result.rowCount ?? 0) > 0) {
+    group.calendarGoogleEventIds = [exactId];
+    return true;
+  }
+  return false;
+}
+
+async function enrichExactGoogleEventIds(groups, mirrorRows) {
+  let savedGroups = 0;
+  let skippedAmbiguous = 0;
+  let skippedMissing = 0;
+
+  for (const group of groups) {
+    if (group.localOnly || group.calendarGoogleEventIds.length > 0) continue;
+    if (group.calendarSourceEventIds.length > 1) {
+      skippedAmbiguous++;
+      continue;
+    }
+
+    const matches = legacyMatchingMirrorRows(group, mirrorRows);
+    if (matches.length !== 1) {
+      if (matches.length > 1) skippedAmbiguous++;
+      else skippedMissing++;
+      continue;
+    }
+    if (!String(matches[0]?.googleEventId || '').trim()) {
+      skippedMissing++;
+      continue;
+    }
+    if (await saveExactGoogleEventId(group, matches[0])) savedGroups++;
+  }
+
+  return { savedGroups, skippedAmbiguous, skippedMissing };
 }
 
 function baseItem(group) {
+  const exactId = group.calendarGoogleEventIds.length === 1 ? group.calendarGoogleEventIds[0] : '';
   return {
     groupKey: group.key,
     eventId: group.eventId,
@@ -251,9 +316,8 @@ function baseItem(group) {
     calendarSyncStatuses: group.calendarSyncStatuses,
     lessonKind: group.lessonKinds[0] || 'regular',
     description: '',
-    calendarEventId: group.calendarSourceEventIds.length === 1
-      ? group.calendarSourceEventIds[0]
-      : group.eventId,
+    calendarGoogleEventId: exactId,
+    calendarEventId: exactId || (group.calendarSourceEventIds.length === 1 ? group.calendarSourceEventIds[0] : group.eventId),
     eventKey: '',
   };
 }
@@ -268,8 +332,8 @@ function classifyGroup(group, mirrorRows) {
   if (group.studentIds.length === 0) {
     return { ...baseItem(group), status: 'missing_student_id', reason: 'PostgreSQL does not contain a student ID for this lesson.' };
   }
-  if (group.calendarSourceEventIds.length > 1) {
-    return { ...baseItem(group), status: 'ambiguous_calendar_match', reason: 'PostgreSQL contains more than one stored Calendar source ID for this lesson.' };
+  if (group.calendarSourceEventIds.length > 1 || group.calendarGoogleEventIds.length > 1) {
+    return { ...baseItem(group), status: 'ambiguous_calendar_match', reason: 'PostgreSQL contains conflicting Calendar identity for this lesson.' };
   }
 
   const matches = matchingMirrorRows(group, mirrorRows);
@@ -277,14 +341,16 @@ function classifyGroup(group, mirrorRows) {
     return {
       ...baseItem(group),
       status: 'mirror_missing',
-      reason: 'No monthlyLessons row matched the stored Calendar source ID and occurrence time.',
+      reason: group.calendarGoogleEventIds.length === 1
+        ? 'No monthlyLessons row has this exact googleEventId.'
+        : 'Exact Google event ID has not been resolved from monthlyLessons yet.',
     };
   }
   if (matches.length > 1) {
     return {
       ...baseItem(group),
       status: 'ambiguous_calendar_match',
-      reason: 'More than one monthlyLessons row matched this Calendar source ID and occurrence.',
+      reason: 'More than one monthlyLessons row has this exact Google event ID.',
     };
   }
 
@@ -294,6 +360,7 @@ function classifyGroup(group, mirrorRows) {
     ...baseItem(group),
     sheetStudentIds: mirrorIds,
     calendarStudentIds: mirrorIds,
+    calendarGoogleEventId: String(mirror.googleEventId || baseItem(group).calendarGoogleEventId),
     calendarEventId: String(mirror.googleEventId || baseItem(group).calendarEventId),
     eventKey: String(mirror.eventKey || ''),
     mirrorRecurringEventId: String(mirror.recurringEventId || ''),
@@ -303,30 +370,19 @@ function classifyGroup(group, mirrorRows) {
   };
 
   if (mirrorIds.length === 0) {
-    return {
-      ...common,
-      status: 'safe_to_tag',
-      reason: 'monthlyLessons has this event but no student ID. Calendar is contacted only when you tag it.',
-    };
+    return { ...common, status: 'safe_to_tag', reason: 'Exact googleEventId matched. monthlyLessons has no student ID yet.' };
   }
   if (sameStringSet(mirrorIds, group.studentIds)) {
-    return {
-      ...common,
-      status: 'already_tagged',
-      reason: 'monthlyLessons already contains the expected student ID(s).',
-    };
+    return { ...common, status: 'already_tagged', reason: 'Exact googleEventId matched and monthlyLessons already contains the expected student ID(s).' };
   }
-  return {
-    ...common,
-    status: 'tag_mismatch',
-    reason: 'monthlyLessons contains student ID(s) that do not match PostgreSQL.',
-  };
+  return { ...common, status: 'tag_mismatch', reason: 'Exact googleEventId matched, but monthlyLessons contains different student ID(s).' };
 }
 
 async function loadMonthRows(month) {
   const result = await query(
-    `SELECT event_id, calendar_source_event_id, student_id, student_name, title,
-            date, start, status, calendar_sync_status, lesson_kind
+    `SELECT event_id, calendar_source_event_id, calendar_google_event_id,
+            student_id, student_name, title, date, start, status,
+            calendar_sync_status, lesson_kind
        FROM monthly_schedule
       WHERE date IS NOT NULL
         AND to_char(date, 'YYYY-MM') = $1
@@ -347,11 +403,9 @@ function sortItems(items) {
     local_only: 6,
     missing_student_id: 7,
   };
-
   return [...items].sort((a, b) => {
     const rank = (order[a.status] ?? 99) - (order[b.status] ?? 99);
-    if (rank !== 0) return rank;
-    return String(a.start || '').localeCompare(String(b.start || ''));
+    return rank !== 0 ? rank : String(a.start || '').localeCompare(String(b.start || ''));
   });
 }
 
@@ -362,20 +416,15 @@ function countStatuses(items) {
 }
 
 async function buildPreview(month) {
-  const [rows, mirror] = await Promise.all([
-    loadMonthRows(month),
-    readMirrorMonth(month),
-  ]);
+  const [rows, mirror] = await Promise.all([loadMonthRows(month), readMirrorMonth(month)]);
   const mirrorRows = mirror.rows || [];
   const groups = groupMonthlyRows(rows);
+
+  // Additive one-time enrichment only. Existing IDs and existing calendar-poll
+  // infrastructure are left untouched.
+  const enrichment = await enrichExactGoogleEventIds(groups, mirrorRows);
   const items = sortItems(groups.map((group) => classifyGroup(group, mirrorRows)));
-  return {
-    rows,
-    mirrorRows,
-    groups,
-    items,
-    counts: countStatuses(items),
-  };
+  return { rows, mirrorRows, groups, items, enrichment, counts: countStatuses(items) };
 }
 
 router.get('/preview', async (req, res) => {
@@ -386,13 +435,19 @@ router.get('/preview', async (req, res) => {
     const preview = await buildPreview(month);
     return res.json({
       ok: true,
-      readOnly: true,
+      readOnly: false,
+      calendarReadOnly: true,
+      idEnrichmentOnly: true,
       source: 'monthlyLessons_via_new_gas',
       directCalendarAccess: false,
       month,
       monthlyScheduleRows: preview.rows.length,
       mirrorRows: preview.mirrorRows.length,
+      sheetRows: preview.mirrorRows.length,
       lessonEventsScanned: preview.groups.length,
+      exactGoogleEventIdsSaved: preview.enrichment.savedGroups,
+      exactGoogleEventIdsSkippedAmbiguous: preview.enrichment.skippedAmbiguous,
+      exactGoogleEventIdsSkippedMissing: preview.enrichment.skippedMissing,
       counts: preview.counts,
       items: preview.items,
     });
@@ -410,13 +465,24 @@ router.post('/apply-one', async (req, res) => {
     if (!groupKey) return res.status(400).json({ error: 'groupKey is required' });
 
     requireTagGasConfig();
+    const mirrorBefore = await readMirrorMonth(month);
+    const mirrorBeforeRows = mirrorBefore.rows || [];
     const rows = await loadMonthRows(month);
     const groups = groupMonthlyRows(rows);
     const group = groups.find((candidate) => candidate.key === groupKey);
     if (!group) return res.status(404).json({ error: 'That event no longer exists in monthly_schedule. Run preview again.' });
 
-    const mirrorBefore = await readMirrorMonth(month);
-    const mirrorBeforeRows = mirrorBefore.rows || [];
+    if (group.calendarGoogleEventIds.length === 0) {
+      const legacyMatches = legacyMatchingMirrorRows(group, mirrorBeforeRows);
+      if (legacyMatches.length !== 1 || !String(legacyMatches[0]?.googleEventId || '').trim()) {
+        return res.status(409).json({
+          error: 'Could not resolve one exact googleEventId for this lesson.',
+          code: 'EXACT_GOOGLE_EVENT_ID_NOT_RESOLVED',
+        });
+      }
+      await saveExactGoogleEventId(group, legacyMatches[0]);
+    }
+
     const before = classifyGroup(group, mirrorBeforeRows);
     if (before.status !== 'safe_to_tag') {
       return res.status(409).json({
@@ -426,10 +492,10 @@ router.post('/apply-one', async (req, res) => {
       });
     }
 
-    const targetMatches = matchingMirrorRows(group, mirrorBeforeRows);
+    const targetMatches = exactMatchingMirrorRows(group, mirrorBeforeRows);
     if (targetMatches.length !== 1) {
       return res.status(409).json({
-        error: 'Could not resolve one exact monthlyLessons target for tagging.',
+        error: 'Could not resolve one exact monthlyLessons googleEventId target for tagging.',
         code: 'MIRROR_TARGET_NOT_EXACT',
       });
     }
@@ -470,6 +536,7 @@ router.post('/apply-one', async (req, res) => {
       mirrorUpdated: true,
       result: {
         eventId: group.eventId,
+        calendarGoogleEventId: group.calendarGoogleEventIds[0] || '',
         studentIds: group.studentIds,
         calendarEventId: gasResult.eventId || '',
         eventKey: after.eventKey || gasResult?.mirror?.eventKey || '',
@@ -484,9 +551,7 @@ router.post('/apply-one', async (req, res) => {
 });
 
 router.post('/apply', (_req, res) => {
-  return res.status(409).json({
-    error: 'Bulk student-number tagging is temporarily disabled. Use Tag this event.',
-  });
+  return res.status(409).json({ error: 'Bulk student-number tagging is temporarily disabled. Use Tag this event.' });
 });
 
 export default router;
