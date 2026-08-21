@@ -3,7 +3,9 @@ import { query } from '../db/index.js';
 import { gasCalendarEventIdFromMonthly } from '../lib/calendarEventId.js';
 import {
   fetchMonthlyScheduleFromSheet,
-  writeMonthlyScheduleStudentIds,
+  fetchCalendarStudentIdsFromSheet,
+  prepareCalendarStudentIdSheet,
+  writeCalendarStudentIds,
 } from '../lib/googleSheets.js';
 
 const router = Router();
@@ -33,9 +35,7 @@ function normalizeName(value) {
 
 function toYmd(value) {
   if (!value) return '';
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
-  }
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   const jst = new Date(d.getTime() + JST_OFFSET_MS);
@@ -67,6 +67,10 @@ function eventIdVariants(values) {
     out.push(stripGoogleUidSuffix(stripDbSuffix(value)));
   }
   return uniqueSortedStrings(out);
+}
+
+function tagCacheKey(eventID, date, studentName) {
+  return `${String(eventID || '').trim()}\t${String(date || '').trim()}\t${normalizeName(studentName)}`;
 }
 
 function getTagGasConfig() {
@@ -105,9 +109,7 @@ async function callTagGas(body) {
     });
 
     const json = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(json?.error || `Student number tag GAS returned HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(json?.error || `Student number tag GAS returned HTTP ${response.status}`);
     return json;
   } catch (err) {
     if (err?.name === 'AbortError') throw new Error('Student number tag GAS timed out');
@@ -148,10 +150,7 @@ function groupMonthlyRows(rows) {
     if (row.student_id != null && row.student_id !== '') group.studentIds.push(String(row.student_id));
     if (row.student_name) group.studentNames.push(String(row.student_name));
     if (row.student_id != null && row.student_id !== '' && row.student_name) {
-      group.students.push({
-        id: String(row.student_id).trim(),
-        name: String(row.student_name).trim(),
-      });
+      group.students.push({ id: String(row.student_id).trim(), name: String(row.student_name).trim() });
     }
     const date = toYmd(row.date);
     if (date) group.dates.push(date);
@@ -166,9 +165,9 @@ function groupMonthlyRows(rows) {
     const seenStudents = new Set();
     const students = [];
     for (const student of group.students) {
-      const key = `${student.id}\t${normalizeName(student.name)}`;
-      if (seenStudents.has(key)) continue;
-      seenStudents.add(key);
+      const studentKey = `${student.id}\t${normalizeName(student.name)}`;
+      if (seenStudents.has(studentKey)) continue;
+      seenStudents.add(studentKey);
       students.push(student);
     }
 
@@ -188,9 +187,7 @@ function groupMonthlyRows(rows) {
 }
 
 function makeGasRequest(group) {
-  const sourceId = group.calendarSourceEventIds.length === 1
-    ? group.calendarSourceEventIds[0]
-    : '';
+  const sourceId = group.calendarSourceEventIds.length === 1 ? group.calendarSourceEventIds[0] : '';
   const resolvedEventId = gasCalendarEventIdFromMonthly(
     group.eventId,
     group.startIso || null,
@@ -231,47 +228,25 @@ function baseItem(group) {
 
 function classifyLocalGroup(group) {
   if (group.localOnly) {
-    return {
-      ...baseItem(group),
-      status: 'local_only',
-      reason: 'Local/optimistic booking ID is not a confirmed synced event.',
-    };
+    return { ...baseItem(group), status: 'local_only', reason: 'Local/optimistic booking ID is not a confirmed synced event.' };
   }
-
   if (group.calendarSyncStatuses.some((status) => status && status !== 'synced')) {
-    return {
-      ...baseItem(group),
-      status: 'not_synced',
-      reason: 'At least one monthly_schedule row is not calendar_sync_status=synced.',
-    };
+    return { ...baseItem(group), status: 'not_synced', reason: 'At least one monthly_schedule row is not calendar_sync_status=synced.' };
   }
-
   if (group.studentIds.length === 0 || group.students.length === 0) {
-    return {
-      ...baseItem(group),
-      status: 'missing_student_id',
-      reason: 'monthly_schedule does not contain a student ID for this lesson.',
-    };
+    return { ...baseItem(group), status: 'missing_student_id', reason: 'monthly_schedule does not contain a student ID for this lesson.' };
   }
-
   if (group.calendarSourceEventIds.length > 1 || group.dates.length > 1) {
-    return {
-      ...baseItem(group),
-      status: 'ambiguous_calendar_match',
-      reason: 'Cached lesson identity is ambiguous; refusing automatic tagging.',
-    };
+    return { ...baseItem(group), status: 'ambiguous_calendar_match', reason: 'Cached lesson identity is ambiguous; refusing automatic tagging.' };
   }
-
   return null;
 }
 
-function matchingSheetRows(group, allSheetRows) {
+function matchingMonthlySheetRows(group, monthlySheetRows) {
   const wantedDate = group.dates[0] || toYmd(group.startIso);
-  const wantedEventIds = new Set(
-    eventIdVariants([group.eventId, ...group.calendarSourceEventIds])
-  );
+  const wantedEventIds = new Set(eventIdVariants([group.eventId, ...group.calendarSourceEventIds]));
 
-  return (allSheetRows || []).filter((row) => {
+  return (monthlySheetRows || []).filter((row) => {
     const rowVariants = eventIdVariants([row.eventID]);
     if (!rowVariants.some((id) => wantedEventIds.has(id))) return false;
     if (wantedDate && String(row.date || '').trim() !== wantedDate) return false;
@@ -279,62 +254,103 @@ function matchingSheetRows(group, allSheetRows) {
   });
 }
 
-function sheetPreviewGroup(group, allSheetRows) {
-  const blocked = classifyLocalGroup(group);
-  if (blocked) return { item: blocked, safeGroup: null };
+function buildTagCacheMap(tagRows) {
+  const map = new Map();
+  for (const row of tagRows || []) {
+    const key = tagCacheKey(row.eventID, row.date, row.studentName);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return map;
+}
 
-  const eventRows = matchingSheetRows(group, allSheetRows);
+function inspectSheetState(group, monthlySheetRows, tagRows) {
+  const blocked = classifyLocalGroup(group);
+  if (blocked) return { item: blocked, safeGroup: null, assignments: [] };
+
+  const eventRows = matchingMonthlySheetRows(group, monthlySheetRows);
   const matched = [];
 
   for (const student of group.students) {
-    const name = normalizeName(student.name);
-    const matches = eventRows.filter((row) => normalizeName(row.studentName) === name);
+    const studentName = normalizeName(student.name);
+    const matches = eventRows.filter((row) => normalizeName(row.studentName) === studentName);
     if (matches.length !== 1) {
       return {
         item: {
           ...baseItem(group),
           status: matches.length === 0 ? 'tag_mismatch' : 'ambiguous_calendar_match',
           reason: matches.length === 0
-            ? `MonthlySchedule Sheet row is missing for ${student.name}.`
-            : `More than one MonthlySchedule Sheet row matched ${student.name}.`,
+            ? `MonthlySchedule row is missing for ${student.name}.`
+            : `More than one MonthlySchedule row matched ${student.name}.`,
         },
         safeGroup: null,
+        assignments: [],
       };
     }
-    matched.push({ student, row: matches[0] });
+    matched.push({ student, monthlyRow: matches[0] });
   }
 
-  const sheetIds = uniqueSortedStrings(matched.map(({ row }) => row.studentID).filter(Boolean));
+  const tagMap = buildTagCacheMap(tagRows);
+  const cached = [];
+  const assignments = [];
+
+  for (const entry of matched) {
+    const eventID = String(entry.monthlyRow.eventID || '').trim();
+    const date = String(entry.monthlyRow.date || '').trim();
+    const studentName = normalizeName(entry.monthlyRow.studentName);
+    const studentID = String(entry.student.id || '').trim();
+    const matches = tagMap.get(tagCacheKey(eventID, date, studentName)) || [];
+
+    if (matches.length > 1) {
+      return {
+        item: {
+          ...baseItem(group),
+          status: 'ambiguous_calendar_match',
+          reason: `CalendarStudentIDs contains duplicate rows for ${studentName} on ${date}.`,
+        },
+        safeGroup: null,
+        assignments: [],
+      };
+    }
+
+    const tagRow = matches[0] || null;
+    cached.push({ studentID, tagRow });
+    assignments.push({ eventID, date, studentName, studentID });
+  }
+
+  const sheetIds = uniqueSortedStrings(cached.map(({ tagRow }) => tagRow?.studentID).filter(Boolean));
   const common = {
     ...baseItem(group),
-    calendarStudentIds: sheetIds,
     sheetStudentIds: sheetIds,
+    calendarStudentIds: sheetIds,
   };
 
-  const allBlank = matched.every(({ row }) => !String(row.studentID || '').trim());
-  if (allBlank) {
+  const allMissing = cached.every(({ tagRow }) => !tagRow);
+  if (allMissing) {
     return {
       item: {
         ...common,
         status: 'safe_to_tag',
-        reason: 'MonthlySchedule.studentID is blank. Calendar will be contacted only when this event is tagged.',
+        reason: 'No student ID is stored for this lesson in CalendarStudentIDs. Calendar will be contacted only if you tag it.',
       },
       safeGroup: group,
+      assignments,
     };
   }
 
-  const exactPerStudent = matched.every(({ student, row }) => (
-    String(row.studentID || '').trim() === String(student.id || '').trim()
+  const allExact = cached.every(({ studentID, tagRow }) => (
+    tagRow && String(tagRow.studentID || '').trim() === studentID
   ));
 
-  if (exactPerStudent && sameStringSet(sheetIds, group.studentIds)) {
+  if (allExact && sameStringSet(sheetIds, group.studentIds)) {
     return {
       item: {
         ...common,
         status: 'already_tagged',
-        reason: 'MonthlySchedule.studentID already contains the expected student ID(s).',
+        reason: 'CalendarStudentIDs already contains the expected student ID(s).',
       },
       safeGroup: null,
+      assignments,
     };
   }
 
@@ -342,9 +358,10 @@ function sheetPreviewGroup(group, allSheetRows) {
     item: {
       ...common,
       status: 'tag_mismatch',
-      reason: 'MonthlySchedule.studentID is partial or does not match the expected student ID(s).',
+      reason: 'CalendarStudentIDs is partial or does not match the expected student ID(s).',
     },
     safeGroup: null,
+    assignments,
   };
 }
 
@@ -371,7 +388,6 @@ function sortItems(items) {
     local_only: 5,
     missing_student_id: 6,
   };
-
   return [...items].sort((a, b) => {
     const rank = (order[a.status] ?? 99) - (order[b.status] ?? 99);
     if (rank !== 0) return rank;
@@ -385,64 +401,59 @@ function countStatuses(items) {
   return counts;
 }
 
-async function buildPreview(month) {
-  // Preview reads Postgres + Google Sheets only. It never calls Google Calendar/GAS.
-  const [rows, sheetRowsAll] = await Promise.all([
+async function loadSheetStateForMonth(month) {
+  const [rows, monthlySheetRowsAll, tagRowsAll] = await Promise.all([
     loadMonthRows(month),
     fetchMonthlyScheduleFromSheet(),
+    fetchCalendarStudentIdsFromSheet(),
   ]);
 
-  if (rows.length > 0 && sheetRowsAll.length === 0) {
+  if (rows.length > 0 && monthlySheetRowsAll.length === 0) {
     const err = new Error('MonthlySchedule could not be read from Google Sheets');
     err.statusCode = 503;
     throw err;
   }
 
-  const sheetRows = sheetRowsAll.filter((row) => !row.date || String(row.date).startsWith(month));
+  return {
+    rows,
+    monthlySheetRows: monthlySheetRowsAll.filter((row) => !row.date || String(row.date).startsWith(month)),
+    tagRows: tagRowsAll.filter((row) => !row.date || String(row.date).startsWith(month)),
+  };
+}
+
+async function buildPreview(month) {
+  // Preview reads PostgreSQL + Google Sheets only. It never calls Google Calendar/GAS.
+  const { rows, monthlySheetRows, tagRows } = await loadSheetStateForMonth(month);
   const groups = groupMonthlyRows(rows);
-  const resolved = groups.map((group) => sheetPreviewGroup(group, sheetRows));
-  const items = sortItems(resolved.map((entry) => entry.item));
-  const safeGroups = resolved.map((entry) => entry.safeGroup).filter(Boolean);
+  const inspected = groups.map((group) => inspectSheetState(group, monthlySheetRows, tagRows));
+  const items = sortItems(inspected.map((entry) => entry.item));
 
   return {
     month,
     rows,
     groups,
-    sheetRows,
+    monthlySheetRows,
+    tagRows,
     items,
-    safeGroups,
     counts: countStatuses(items),
   };
-}
-
-function sheetAssignmentsForGroup(group) {
-  const eventIDs = eventIdVariants([group.eventId, ...group.calendarSourceEventIds]);
-  const date = group.dates[0] || toYmd(group.startIso);
-
-  return group.students.map((student) => ({
-    eventIDs,
-    date,
-    studentName: student.name,
-    studentID: student.id,
-  }));
 }
 
 router.get('/preview', async (req, res) => {
   try {
     const month = String(req.query.month || currentYyyyMmJst()).trim();
-    if (!/^\d{4}-\d{2}$/.test(month)) {
-      return res.status(400).json({ error: 'month must be YYYY-MM' });
-    }
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
 
     const preview = await buildPreview(month);
     return res.json({
       ok: true,
       readOnly: true,
-      source: 'monthly_schedule_sheet_student_id',
+      source: 'monthly_schedule_plus_calendar_student_ids_sheet',
       directCalendarAccess: false,
       month,
       monthlyScheduleRows: preview.rows.length,
-      sheetRows: preview.sheetRows.length,
+      sheetRows: preview.monthlySheetRows.length,
+      studentIdCacheRows: preview.tagRows.length,
       lessonEventsScanned: preview.groups.length,
       counts: preview.counts,
       items: preview.items,
@@ -459,38 +470,49 @@ router.post('/apply-one', async (req, res) => {
   try {
     const month = String(req.body?.month || '').trim();
     const groupKey = String(req.body?.groupKey || '');
-
-    if (!/^\d{4}-\d{2}$/.test(month)) {
-      return res.status(400).json({ error: 'month must be YYYY-MM' });
-    }
-    if (!groupKey) {
-      return res.status(400).json({ error: 'groupKey is required' });
-    }
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+    if (!groupKey) return res.status(400).json({ error: 'groupKey is required' });
 
     requireTagGasConfig();
 
-    const [rows, sheetRows] = await Promise.all([
-      loadMonthRows(month),
-      fetchMonthlyScheduleFromSheet(),
-    ]);
-    const group = groupMonthlyRows(rows).find((candidate) => candidate.key === groupKey);
-
+    const initialState = await loadSheetStateForMonth(month);
+    const group = groupMonthlyRows(initialState.rows).find((candidate) => candidate.key === groupKey);
     if (!group) {
-      return res.status(404).json({
-        error: 'That cached event no longer exists. Run preview again.',
-      });
+      return res.status(404).json({ error: 'That cached event no longer exists. Run preview again.' });
     }
 
-    const before = sheetPreviewGroup(group, sheetRows);
-    if (!before.safeGroup || before.item?.status !== 'safe_to_tag') {
+    let inspected = inspectSheetState(group, initialState.monthlySheetRows, initialState.tagRows);
+    if (!inspected.safeGroup || inspected.item?.status !== 'safe_to_tag') {
       return res.status(409).json({
-        error: `Sheet state is not ready for tagging: ${before.item?.reason || before.item?.status || 'unknown state'}`,
-        status: before.item?.status || 'unsafe',
-        item: before.item || null,
+        error: `Sheet state is not ready for tagging: ${inspected.item?.reason || inspected.item?.status || 'unknown state'}`,
+        status: inspected.item?.status || 'unsafe',
+        item: inspected.item || null,
       });
     }
 
-    // This is the only step that reaches Google Calendar.
+    // Prove the persistent Sheet cache is writable BEFORE touching Calendar.
+    try {
+      await prepareCalendarStudentIdSheet();
+    } catch (sheetPrepErr) {
+      return res.status(503).json({
+        error: `CalendarStudentIDs is not writable: ${sheetPrepErr.message}`,
+        code: 'SHEET_WRITE_PREFLIGHT_FAILED',
+      });
+    }
+
+    // Re-read Sheet state after the write preflight to close the race window.
+    const latestTagRows = (await fetchCalendarStudentIdsFromSheet())
+      .filter((row) => !row.date || String(row.date).startsWith(month));
+    inspected = inspectSheetState(group, initialState.monthlySheetRows, latestTagRows);
+    if (!inspected.safeGroup || inspected.item?.status !== 'safe_to_tag') {
+      return res.status(409).json({
+        error: `Sheet state changed before tagging: ${inspected.item?.reason || inspected.item?.status || 'unknown state'}`,
+        status: inspected.item?.status || 'unsafe',
+        item: inspected.item || null,
+      });
+    }
+
+    // This is the only step in preview/tag workflow that directly reaches Google Calendar.
     const calendarResult = await callTagGas(makeGasRequest(group));
     if (!calendarResult?.ok || calendarResult?.verified !== true) {
       return res.status(409).json({
@@ -501,11 +523,11 @@ router.post('/apply-one', async (req, res) => {
 
     let sheetUpdate;
     try {
-      sheetUpdate = await writeMonthlyScheduleStudentIds(sheetAssignmentsForGroup(group));
+      sheetUpdate = await writeCalendarStudentIds(inspected.assignments);
     } catch (sheetErr) {
-      console.error('[calendar-student-id-backfill/apply-one] Calendar verified but Sheet update failed:', sheetErr.message);
+      console.error('[calendar-student-id-backfill/apply-one] Calendar verified but Sheet cache write failed:', sheetErr.message);
       return res.status(502).json({
-        error: `Calendar tag was verified, but MonthlySchedule.studentID could not be saved: ${sheetErr.message}`,
+        error: `Calendar tag was verified, but CalendarStudentIDs could not be saved: ${sheetErr.message}`,
         code: 'SHEET_STUDENT_ID_WRITE_FAILED',
         calendarTagged: true,
         calendarVerified: true,
@@ -519,7 +541,7 @@ router.post('/apply-one', async (req, res) => {
     const item = {
       ...baseItem(group),
       status: 'already_tagged',
-      reason: 'Calendar tag was verified and MonthlySchedule.studentID was saved.',
+      reason: 'Calendar tag was verified and CalendarStudentIDs was saved.',
       calendarEventId: calendarResult.eventId || baseItem(group).calendarEventId,
       calendarStudentIds: group.studentIds,
       sheetStudentIds: group.studentIds,
@@ -531,6 +553,7 @@ router.post('/apply-one', async (req, res) => {
       month,
       group.eventId,
       `action=${String(calendarResult.actionTaken || '')}`,
+      `sheetInserted=${sheetUpdate.inserted}`,
       `sheetUpdated=${sheetUpdate.updated}`,
       `sheetAlreadyPresent=${sheetUpdate.alreadyPresent}`
     );
@@ -561,7 +584,7 @@ router.post('/apply-one', async (req, res) => {
   }
 });
 
-// Bulk remains deliberately disabled until the single-event Sheet+Calendar flow is validated.
+// Deliberately disabled until the single-event Sheet + Calendar flow is validated.
 router.post('/apply', (_req, res) => {
   return res.status(409).json({
     error: 'Bulk student-number tagging is temporarily disabled. Use Tag this event.',
