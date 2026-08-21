@@ -4,7 +4,7 @@ import { query } from '../db/index.js';
 const router = Router();
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const TAG_GAS_TIMEOUT_MS = 45000;
-const MIRROR_POST_WRITE_VERIFY_DELAYS_MS = [0, 250, 750, 1500];
+const MIRROR_POST_WRITE_VERIFY_DELAYS_MS = [0, 250, 750, 1500, 3000, 5000];
 const DB_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
 const INSTANCE_SUFFIX_RE = /_\d{8}T\d{6}Z$/i;
 
@@ -409,7 +409,11 @@ function classifyGroup(group, mirrorRows) {
   if (sameStringSet(mirrorIds, group.studentIds)) {
     return { ...common, status: 'already_tagged', reason: 'Exact googleEventId matched and monthlyLessons already contains the expected student ID(s).' };
   }
-  return { ...common, status: 'tag_mismatch', reason: 'Exact googleEventId matched, but monthlyLessons contains different student ID(s).' };
+  return {
+    ...common,
+    status: 'tag_mismatch',
+    reason: `Exact googleEventId matched, but student IDs differ. Expected [${group.studentIds.join(',')}], monthlyLessons has [${mirrorIds.join(',')}].`,
+  };
 }
 
 async function loadMonthRows(month) {
@@ -555,6 +559,8 @@ router.post('/apply-one', async (req, res) => {
         calendarVerified: true,
         mirrorUpdated: true,
         mirrorVerifyAttempts: postVerify.attempts,
+        expectedStudentIds: group.studentIds,
+        observedStudentIds: after?.sheetStudentIds || [],
         item: after,
       });
     }
