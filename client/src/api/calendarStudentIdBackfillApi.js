@@ -36,10 +36,10 @@ export async function applyOneCalendarStudentIdBackfill(month, groupKey) {
     body: JSON.stringify({ month, groupKey }),
   })
 
-  // Fail closed. The server accepts success only after the exact Calendar event
-  // is verified and the persistent Sheet student-ID cache is written.
-  if (result?.ok !== true || result?.verified !== true || result?.sheetUpdated !== true) {
-    throw new Error('Calendar/Sheet verification did not complete. No success was recorded.')
+  // Fail closed. Success means the exact Calendar event was verified AND the
+  // new monthlyLessons mirror was updated and re-read successfully.
+  if (result?.ok !== true || result?.verified !== true || result?.mirrorUpdated !== true) {
+    throw new Error('Calendar/mirror verification did not complete. No success was recorded.')
   }
 
   return result
