@@ -3,6 +3,7 @@
  *
  * - MonthlySchedule belongs to the existing Admin/legacy sync path.
  * - monthlyLessons belongs to the rebuilt Booking API Calendar mirror.
+ * - students / studentPayments are write mirrors maintained by REACT-ADMIN.
  *
  * Preview/read code may read Sheets directly. Google Calendar is not contacted by
  * these helpers.
@@ -18,8 +19,21 @@ const __dirnameHere = dirname(fileURLToPath(import.meta.url));
 // rebuilt booking API; do not allow an unrelated env var to silently redirect the
 // student-ID backfill preview to another spreadsheet.
 const CALENDAR_MIRROR_SHEET_ID = '17zXtRW5Ue-u4DQwW-sa0lvMQmKnEGcjTyPskaByjF0s';
+const BOOKING_STUDENTS_HEADERS = ['studentId', 'studentName', 'status', 'createdAt', 'updatedAt'];
+const BOOKING_PAYMENTS_HEADERS = [
+  'paymentKey',
+  'studentId',
+  'billingMonth',
+  'status',
+  'transactionIds',
+  'amount',
+  'total',
+  'paidAt',
+  'sourceUpdatedAt',
+  'lastSyncedAt',
+];
 
-function getSheetsAuth() {
+function getSheetsAuth(scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']) {
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
   const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   let credentials = null;
@@ -41,10 +55,191 @@ function getSheetsAuth() {
     }
   }
   if (!credentials) return null;
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+  return new google.auth.GoogleAuth({ credentials, scopes });
+}
+
+function getWritableSheetsAuth() {
+  return getSheetsAuth(['https://www.googleapis.com/auth/spreadsheets']);
+}
+
+async function ensureBookingPaymentSheets(sheets, spreadsheetId) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties.title',
   });
+  const existing = new Set(
+    (meta.data.sheets || []).map((sheet) => String(sheet?.properties?.title || '').trim()).filter(Boolean)
+  );
+  const requests = [];
+  if (!existing.has('students')) requests.push({ addSheet: { properties: { title: 'students' } } });
+  if (!existing.has('studentPayments')) requests.push({ addSheet: { properties: { title: 'studentPayments' } } });
+  if (requests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+  }
+
+  await Promise.all([
+    sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: "'students'!A1:E1",
+      valueInputOption: 'RAW',
+      requestBody: { values: [BOOKING_STUDENTS_HEADERS] },
+    }),
+    sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: "'studentPayments'!A1:J1",
+      valueInputOption: 'RAW',
+      requestBody: { values: [BOOKING_PAYMENTS_HEADERS] },
+    }),
+  ]);
+}
+
+function normalizeString(value) {
+  return value == null ? '' : String(value).trim();
+}
+
+function normalizeTransactions(value) {
+  if (Array.isArray(value)) return value.map(normalizeString).filter(Boolean).join(',');
+  return normalizeString(value);
+}
+
+/**
+ * Idempotently upsert Booking API student + monthly payment mirror records.
+ * A student is created in `students` automatically before their payment is written.
+ */
+export async function upsertBookingPaymentMirror(records) {
+  const list = Array.isArray(records) ? records : [];
+  const auth = getWritableSheetsAuth();
+  if (!auth) {
+    const err = new Error('Google Sheets service account is not configured');
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const spreadsheetId = CALENDAR_MIRROR_SHEET_ID;
+  const sheets = google.sheets({ version: 'v4', auth });
+  try {
+    await ensureBookingPaymentSheets(sheets, spreadsheetId);
+  } catch (err) {
+    const wrapped = new Error(`Could not prepare Booking API payment sheets: ${err.message}`);
+    wrapped.statusCode = err?.code === 403 ? 503 : 502;
+    throw wrapped;
+  }
+
+  const [studentRes, paymentRes] = await Promise.all([
+    sheets.spreadsheets.values.get({ spreadsheetId, range: "'students'!A:E" }),
+    sheets.spreadsheets.values.get({ spreadsheetId, range: "'studentPayments'!A:J" }),
+  ]);
+
+  const students = (studentRes.data.values || []).slice(1).map((row) => [
+    normalizeString(row[0]),
+    normalizeString(row[1]),
+    normalizeString(row[2]),
+    normalizeString(row[3]),
+    normalizeString(row[4]),
+  ]).filter((row) => row[0]);
+  const payments = (paymentRes.data.values || []).slice(1).map((row) => [
+    normalizeString(row[0]),
+    normalizeString(row[1]),
+    normalizeString(row[2]),
+    normalizeString(row[3]),
+    normalizeString(row[4]),
+    row[5] ?? '',
+    row[6] ?? '',
+    normalizeString(row[7]),
+    normalizeString(row[8]),
+    normalizeString(row[9]),
+  ]).filter((row) => row[0]);
+
+  const studentIndex = new Map(students.map((row, index) => [row[0], index]));
+  const paymentIndex = new Map(payments.map((row, index) => [row[0], index]));
+  const now = new Date().toISOString();
+  let studentsCreated = 0;
+  let studentsExisting = 0;
+  let paymentRowsCreated = 0;
+  let paymentRowsUpdated = 0;
+
+  const deduped = new Map();
+  for (const raw of list) {
+    const studentId = normalizeString(raw?.studentId);
+    const billingMonth = normalizeString(raw?.billingMonth);
+    if (!studentId || !/^\d{4}-\d{2}$/.test(billingMonth)) continue;
+    deduped.set(`${studentId}:${billingMonth}`, { ...raw, studentId, billingMonth });
+  }
+
+  for (const record of deduped.values()) {
+    const studentId = record.studentId;
+    const studentName = normalizeString(record.studentName);
+    const existingStudentIndex = studentIndex.get(studentId);
+    if (existingStudentIndex == null) {
+      studentIndex.set(studentId, students.length);
+      students.push([studentId, studentName, 'active', now, now]);
+      studentsCreated += 1;
+    } else {
+      const row = students[existingStudentIndex];
+      row[1] = studentName || row[1];
+      row[2] = row[2] || 'active';
+      row[3] = row[3] || now;
+      row[4] = now;
+      studentsExisting += 1;
+    }
+
+    const key = `${studentId}:${record.billingMonth}`;
+    const nextPayment = [
+      key,
+      studentId,
+      record.billingMonth,
+      normalizeString(record.status) || 'paid',
+      normalizeTransactions(record.transactionIds),
+      record.amount ?? 0,
+      record.total ?? 0,
+      normalizeString(record.paidAt),
+      normalizeString(record.sourceUpdatedAt),
+      now,
+    ];
+    const existingPaymentIndex = paymentIndex.get(key);
+    if (existingPaymentIndex == null) {
+      paymentIndex.set(key, payments.length);
+      payments.push(nextPayment);
+      paymentRowsCreated += 1;
+    } else {
+      payments[existingPaymentIndex] = nextPayment;
+      paymentRowsUpdated += 1;
+    }
+  }
+
+  try {
+    await Promise.all([
+      sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'students'!A1:E${students.length + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [BOOKING_STUDENTS_HEADERS, ...students] },
+      }),
+      sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'studentPayments'!A1:J${payments.length + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [BOOKING_PAYMENTS_HEADERS, ...payments] },
+      }),
+    ]);
+  } catch (err) {
+    const wrapped = new Error(`Could not write Booking API payment mirror: ${err.message}`);
+    wrapped.statusCode = err?.code === 403 ? 503 : 502;
+    throw wrapped;
+  }
+
+  return {
+    ok: true,
+    spreadsheetId,
+    recordsReceived: deduped.size,
+    studentsCreated,
+    studentsExisting,
+    paymentRowsCreated,
+    paymentRowsUpdated,
+  };
 }
 
 /**
