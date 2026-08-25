@@ -13,6 +13,7 @@ import {
   MessageSquareQuote,
   ClipboardList,
   Tags,
+  CreditCard,
 } from 'lucide-react'
 import { MESSAGES_WIP_DISABLED, NOTIFICATIONS_WIP_DISABLED } from '../guides/wipFlags'
 import { useAuth } from '../context/AuthContext'
@@ -110,6 +111,15 @@ export default function Sidebar({
                 >
                   <Tags className="w-5 h-5" />
                   <span>Calendar ID Backfill</span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/admin/payment-migration"
+                  className={navItemClass(path === '/admin/payment-migration')}
+                >
+                  <CreditCard className="w-5 h-5" />
+                  <span>Payment Migration</span>
                 </Link>
               </li>
             </>
