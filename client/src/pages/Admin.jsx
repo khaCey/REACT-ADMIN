@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Shield, Database, Download, RotateCcw, Trash2, Calendar, Search, Upload } from 'lucide-react'
+import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import BackfillScheduleModal from '../components/BackfillScheduleModal'
 import CalendarEventsModal from '../components/CalendarEventsModal'
