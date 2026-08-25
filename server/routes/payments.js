@@ -2,6 +2,11 @@ import { Router } from 'express';
 import { query, pool } from '../db/index.js';
 import { randomUUID } from 'crypto';
 import { logChange } from '../lib/changeLog.js';
+import {
+  migratePaymentMonthToBookingSheet,
+  previewPaymentMonthMigration,
+  safeSyncPaymentPairsToBookingSheet,
+} from '../lib/paymentSheetSync.js';
 
 const router = Router();
 
@@ -112,6 +117,26 @@ router.get('/', async (req, res) => {
   }
 });
 
+/** Preview one month before copying payment status into the Booking API spreadsheet. */
+router.get('/booking-migration/preview', async (req, res) => {
+  try {
+    const result = await previewPaymentMonthMigration(req.query?.month);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(err?.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** Idempotent month migration. Re-running the same month updates existing student/payment rows. */
+router.post('/booking-migration', async (req, res) => {
+  try {
+    const result = await migratePaymentMonthToBookingSheet(req.body?.month);
+    res.json(result);
+  } catch (err) {
+    res.status(err?.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const body = req.body;
@@ -146,13 +171,17 @@ router.post('/', async (req, res) => {
         },
         req
       );
+      const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet([newRow]);
       return res.status(201).json({
         transaction_id: transactionId,
         replicated_transaction_ids: [],
+        booking_payment_sync: bookingPaymentSync,
       });
     }
 
     const client = await pool.connect();
+    let insertedRows = [];
+    let replicatedIds = [];
     try {
       await client.query('BEGIN');
       const insertResult = await client.query(
@@ -162,6 +191,7 @@ router.post('/', async (req, res) => {
         paymentInsertParams(body, transactionId)
       );
       const primaryRow = insertResult.rows[0];
+      insertedRows.push(primaryRow);
       await logChange(
         {
           entityType: 'payments',
@@ -174,7 +204,7 @@ router.post('/', async (req, res) => {
         client
       );
 
-      const replicatedIds = [];
+      replicatedIds = [];
       const linkedPayments = [{ transactionId, studentId: payerId, isPrimary: true }];
       for (const otherStudentId of peerIds) {
         const tid = newTransactionId();
@@ -186,6 +216,7 @@ router.post('/', async (req, res) => {
           paymentInsertParams(replicaBody, tid)
         );
         const repRow = replicaResult.rows[0];
+        insertedRows.push(repRow);
         await logChange(
           {
             entityType: 'payments',
@@ -221,16 +252,19 @@ router.post('/', async (req, res) => {
       }
 
       await client.query('COMMIT');
-      return res.status(201).json({
-        transaction_id: transactionId,
-        replicated_transaction_ids: replicatedIds,
-      });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
+
+    const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet(insertedRows);
+    return res.status(201).json({
+      transaction_id: transactionId,
+      replicated_transaction_ids: replicatedIds,
+      booking_payment_sync: bookingPaymentSync,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -243,9 +277,11 @@ router.put('/:transactionId', async (req, res) => {
     const linkedGroupId = await getLinkedPaymentGroupId(transactionId);
     if (linkedGroupId) {
       const client = await pool.connect();
+      let oldRows = [];
+      let updatedRows = [];
       try {
         await client.query('BEGIN');
-        const oldRows = await getPaymentsByGroupId(linkedGroupId, client.query.bind(client));
+        oldRows = await getPaymentsByGroupId(linkedGroupId, client.query.bind(client));
         if (oldRows.length === 0) {
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'Payment not found' });
@@ -276,7 +312,8 @@ router.put('/:transactionId', async (req, res) => {
             body.Staff ?? body.staff,
           ]
         );
-        const newRowsById = new Map(updateResult.rows.map((row) => [row.transaction_id, row]));
+        updatedRows = updateResult.rows;
+        const newRowsById = new Map(updatedRows.map((row) => [row.transaction_id, row]));
         for (const oldRow of oldRows) {
           const newRow = newRowsById.get(oldRow.transaction_id);
           if (!newRow) continue;
@@ -293,13 +330,19 @@ router.put('/:transactionId', async (req, res) => {
           );
         }
         await client.query('COMMIT');
-        return res.json({ ok: true, propagated: true, affected_count: updateResult.rows.length });
       } catch (err) {
         await client.query('ROLLBACK');
         throw err;
       } finally {
         client.release();
       }
+      const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet([...oldRows, ...updatedRows]);
+      return res.json({
+        ok: true,
+        propagated: true,
+        affected_count: updatedRows.length,
+        booking_payment_sync: bookingPaymentSync,
+      });
     }
     const oldResult = await query('SELECT * FROM payments WHERE transaction_id = $1', [transactionId]);
     if (oldResult.rows.length === 0) {
@@ -342,7 +385,8 @@ router.put('/:transactionId', async (req, res) => {
       },
       req
     );
-    res.json({ ok: true });
+    const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet([oldRow, newRow]);
+    res.json({ ok: true, booking_payment_sync: bookingPaymentSync });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -354,9 +398,10 @@ router.delete('/:transactionId', async (req, res) => {
     const linkedGroupId = await getLinkedPaymentGroupId(transactionId);
     if (linkedGroupId) {
       const client = await pool.connect();
+      let oldRows = [];
       try {
         await client.query('BEGIN');
-        const oldRows = await getPaymentsByGroupId(linkedGroupId, client.query.bind(client));
+        oldRows = await getPaymentsByGroupId(linkedGroupId, client.query.bind(client));
         if (oldRows.length === 0) {
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'Payment not found' });
@@ -382,13 +427,19 @@ router.delete('/:transactionId', async (req, res) => {
           );
         }
         await client.query('COMMIT');
-        return res.json({ ok: true, propagated: true, deleted_count: oldRows.length });
       } catch (err) {
         await client.query('ROLLBACK');
         throw err;
       } finally {
         client.release();
       }
+      const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet(oldRows);
+      return res.json({
+        ok: true,
+        propagated: true,
+        deleted_count: oldRows.length,
+        booking_payment_sync: bookingPaymentSync,
+      });
     }
     const oldResult = await query('SELECT * FROM payments WHERE transaction_id = $1', [transactionId]);
     if (oldResult.rows.length === 0) {
@@ -406,7 +457,8 @@ router.delete('/:transactionId', async (req, res) => {
       },
       req
     );
-    res.json({ ok: true });
+    const bookingPaymentSync = await safeSyncPaymentPairsToBookingSheet([oldRow]);
+    res.json({ ok: true, booking_payment_sync: bookingPaymentSync });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
