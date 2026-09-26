@@ -9,12 +9,15 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-import { LayoutDashboard, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../api'
 import { useCalendarPollingContext } from '../context/CalendarPollingContext'
 import StudentDetailsModal from '../components/StudentDetailsModal'
 import CalendarEventsModal from '../components/CalendarEventsModal'
 import FullPageLoading from '../components/FullPageLoading'
+import DashboardHeader from '../components/dashboard/DashboardHeader'
+import DashboardStats from '../components/dashboard/DashboardStats'
+import StudentSearch from '../components/dashboard/StudentSearch'
 
 function formatMonthLabel(yyyyMm) {
   if (!yyyyMm) return ''
@@ -178,8 +181,12 @@ export default function Dashboard() {
   const [chartEndMonth, setChartEndMonth] = useState(() => currentMonth)
   const [chartRangeYears, setChartRangeYears] = useState(1)
   const [metrics, setMetrics] = useState(null)
+  const [summaryMetrics, setSummaryMetrics] = useState(null)
   const [todayLessons, setTodayLessons] = useState([])
   const [todayDate, setTodayDate] = useState('')
+  const [students, setStudents] = useState([])
+  const [studentsLoading, setStudentsLoading] = useState(true)
+  const [studentsError, setStudentsError] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -219,14 +226,50 @@ export default function Dashboard() {
     }
   }, [chartEndMonth, chartRangeYears])
 
+  const fetchSummaryMetrics = useCallback(async () => {
+    try {
+      const data = await api.getDashboardMetrics(currentMonth, currentMonth)
+      setSummaryMetrics(data)
+    } catch {
+      setSummaryMetrics(null)
+    }
+  }, [currentMonth])
+
+  const fetchStudents = useCallback(async (opts = {}) => {
+    const silent = opts.silent === true
+    if (!silent) {
+      setStudentsLoading(true)
+      setStudentsError('')
+    }
+    try {
+      const data = await api.getStudents()
+      setStudents(Array.isArray(data) ? data : [])
+      setStudentsError('')
+    } catch (err) {
+      setStudentsError(err.message || 'Failed to load students')
+      if (!silent) setStudents([])
+    } finally {
+      if (!silent) setStudentsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchDashboard()
   }, [fetchDashboard])
 
   useEffect(() => {
+    fetchSummaryMetrics()
+  }, [fetchSummaryMetrics])
+
+  useEffect(() => {
+    fetchStudents()
+  }, [fetchStudents])
+
+  useEffect(() => {
     if (lastSynced == null) return
     fetchDashboard({ silent: true })
-  }, [lastSynced, fetchDashboard])
+    fetchSummaryMetrics()
+  }, [lastSynced, fetchDashboard, fetchSummaryMetrics])
 
   const showPaymentBadges = (lesson) =>
     lesson.is_last_lesson_of_month === true || lesson.is_last_lesson_of_month === 't'
@@ -234,29 +277,40 @@ export default function Dashboard() {
   const isDemoLesson = (lesson) =>
     (lesson.lesson_kind || '').toString().trim().toLowerCase() === 'demo'
 
+  const activeStudentCount = studentsError && students.length === 0
+    ? null
+    : students.filter((student) => String(student?.Status || '').trim().toLowerCase() === 'active').length
+
+  const summaryPoint = mergeMetrics(summaryMetrics).find((point) => point.month === currentMonth)
+  const lessonsThisMonth = summaryPoint?.regularLessons ?? null
+  const demoLessonsThisMonth = summaryPoint?.demoLessons ?? null
+
+  const refreshStudentData = useCallback(() => {
+    fetchDashboard({ silent: true })
+    fetchSummaryMetrics()
+    fetchStudents({ silent: true })
+  }, [fetchDashboard, fetchSummaryMetrics, fetchStudents])
+
   if (loading) {
     return <FullPageLoading />
   }
 
   return (
-    <div className="w-full flex flex-col h-full min-h-0 overflow-hidden">
-      <div className="flex justify-between items-center pt-3 pb-2 mb-3 border-b border-gray-200 gap-3">
-        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <LayoutDashboard className="w-6 h-6 text-green-600" />
-          Dashboard
-        </h2>
-        <button
-          type="button"
-          onClick={() => setShowCalendarEvents(true)}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 cursor-pointer"
-        >
-          <Calendar className="w-4 h-4 text-green-600" />
-          Calendar Events
-        </button>
-      </div>
+    <div className="w-full min-h-0 flex flex-col gap-4 pb-2">
+      <DashboardHeader
+        dateLabel={todayDate ? formatJapaneseDateLabel(todayDate) : ''}
+        onOpenCalendar={() => setShowCalendarEvents(true)}
+      />
+
+      <DashboardStats
+        todayLessons={todayLessons.length}
+        activeStudents={studentsLoading && students.length === 0 ? null : activeStudentCount}
+        lessonsThisMonth={lessonsThisMonth}
+        demoLessons={demoLessonsThisMonth}
+      />
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm border border-red-100 flex items-center justify-between">
+        <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm border border-red-100 flex items-center justify-between">
           <span>{error}</span>
           <button
             type="button"
@@ -269,8 +323,8 @@ export default function Dashboard() {
       )}
 
       {metrics ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full min-h-0">
-          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm h-full min-h-0 flex flex-col">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
+          <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm min-h-[560px] flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Today's lessons</h3>
               <p className="text-xl font-semibold text-gray-700">
@@ -334,7 +388,7 @@ export default function Dashboard() {
                                 )}
                                 {!isDemoLesson(lesson) && showPaymentBadges(lesson) && todayDate && (
                                   <span
-                                    className={`dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 bg-slate-100 text-slate-700`}
+                                    className="dashboard-lesson-card-badge inline-flex rounded font-medium px-1.5 py-0 bg-slate-100 text-slate-700"
                                   >
                                     {(() => {
                                       const [y, m] = todayDate.slice(0, 10).split('-').map(Number)
@@ -362,113 +416,122 @@ export default function Dashboard() {
             )}
           </section>
 
-          <section className="rounded-lg border border-gray-200 bg-white p-6 pb-8 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Metrics per month ({chartRangeYears} {chartRangeYears === 1 ? 'year' : 'years'} ending {formatEndMonthLabel(chartEndMonth)})
-              </h3>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <div className="flex items-center gap-1">
-                <span className="text-sm text-gray-600">Range:</span>
-                <select
-                  value={chartRangeYears}
-                  onChange={(e) => setChartRangeYears(Number(e.target.value))}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900"
-                >
-                  {CHART_RANGE_YEARS_OPTIONS.map((years) => (
-                    <option key={years} value={years}>
-                      {years} {years === 1 ? 'year' : 'years'}
-                    </option>
-                  ))}
-                </select>
+          <div className="flex min-w-0 flex-col gap-4">
+            <StudentSearch
+              students={students}
+              loading={studentsLoading}
+              error={studentsError}
+              onSelectStudent={setSelectedStudentId}
+            />
+
+            <section className="rounded-xl border border-gray-200 bg-white p-6 pb-8 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Metrics per month ({chartRangeYears} {chartRangeYears === 1 ? 'year' : 'years'} ending {formatEndMonthLabel(chartEndMonth)})
+                </h3>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setChartEndMonth((m) => (m <= MIN_CHART_END_MONTH ? m : subtractMonths(m, 1)))}
-                  disabled={chartEndMonth <= MIN_CHART_END_MONTH}
-                  className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                  aria-label="Previous month"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-                <span className="min-w-[5.5rem] text-center text-sm font-medium text-gray-900">
-                  {formatEndMonthLabel(chartEndMonth)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setChartEndMonth((m) => (m >= currentMonth ? m : addOneMonth(m)))}
-                  disabled={chartEndMonth >= currentMonth}
-                  className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                  aria-label="Next month"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500 mb-5">
-              Regular students and lessons, demo lessons, and students who made their first payment in that month.
-            </p>
-            {mergeMetrics(metrics).length === 0 ? (
-              <p className="text-sm text-gray-500 py-8">No data for this period.</p>
-            ) : (
-              <div className="h-52 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={mergeMetrics(metrics)}
-                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-gray-600">Range:</span>
+                  <select
+                    value={chartRangeYears}
+                    onChange={(e) => setChartRangeYears(Number(e.target.value))}
+                    className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900"
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="regularStudents"
-                      name="Students"
-                      stroke="#16a34a"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="regularLessons"
-                      name="Lessons"
-                      stroke="#9333ea"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="demoLessons"
-                      name="Demo lessons"
-                      stroke="#d50000"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="studentsJoined"
-                      name="Joined"
-                      stroke="#2563eb"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                    {CHART_RANGE_YEARS_OPTIONS.map((years) => (
+                      <option key={years} value={years}>
+                        {years} {years === 1 ? 'year' : 'years'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setChartEndMonth((m) => (m <= MIN_CHART_END_MONTH ? m : subtractMonths(m, 1)))}
+                    disabled={chartEndMonth <= MIN_CHART_END_MONTH}
+                    className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    aria-label="Previous month"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <span className="min-w-[5.5rem] text-center text-sm font-medium text-gray-900">
+                    {formatEndMonthLabel(chartEndMonth)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setChartEndMonth((m) => (m >= currentMonth ? m : addOneMonth(m)))}
+                    disabled={chartEndMonth >= currentMonth}
+                    className="p-1.5 rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    aria-label="Next month"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
-            )}
-          </section>
+              <p className="text-sm text-gray-500 mb-5">
+                Regular students and lessons, demo lessons, and students who made their first payment in that month.
+              </p>
+              {mergeMetrics(metrics).length === 0 ? (
+                <p className="text-sm text-gray-500 py-8">No data for this period.</p>
+              ) : (
+                <div className="h-52 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={mergeMetrics(metrics)}
+                      margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="regularStudents"
+                        name="Students"
+                        stroke="#16a34a"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="regularLessons"
+                        name="Lessons"
+                        stroke="#9333ea"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="demoLessons"
+                        name="Demo lessons"
+                        stroke="#d50000"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="studentsJoined"
+                        name="Joined"
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </section>
+          </div>
         </div>
       ) : null}
       {selectedStudentId != null && (
         <StudentDetailsModal
           studentId={selectedStudentId}
           onClose={() => setSelectedStudentId(null)}
-          onStudentDeleted={fetchDashboard}
-          onStudentUpdated={fetchDashboard}
+          onStudentDeleted={refreshStudentData}
+          onStudentUpdated={refreshStudentData}
           onLessonNotesChanged={() => fetchDashboard({ silent: true })}
         />
       )}
