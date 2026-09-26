@@ -11,6 +11,7 @@ import Staff from './pages/Staff'
 import ChangeHistory from './pages/ChangeHistory'
 import Admin from './pages/Admin'
 import CalendarStudentIdBackfill from './pages/CalendarStudentIdBackfill'
+import PaymentMigration from './pages/PaymentMigration'
 import DemoTracker from './pages/DemoTracker'
 import Notifications from './pages/Notifications'
 import Messages from './pages/Messages'
@@ -49,6 +50,14 @@ function App() {
           element={
             <AdminRoute>
               <CalendarStudentIdBackfill />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="admin/payment-migration"
+          element={
+            <AdminRoute>
+              <PaymentMigration />
             </AdminRoute>
           }
         />
