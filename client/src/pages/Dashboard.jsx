@@ -470,56 +470,79 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className="text-sm text-gray-500 mb-5">
-                Regular students and lessons, demo lessons, and students who made their first payment in that month.
+                Students and lessons are charted separately from demo lessons and students who made their first payment that month.
               </p>
               {mergeMetrics(metrics).length === 0 ? (
                 <p className="text-sm text-gray-500 py-8">No data for this period.</p>
               ) : (
-                <div className="h-52 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={mergeMetrics(metrics)}
-                      margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="regularStudents"
-                        name="Students"
-                        stroke="#16a34a"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="regularLessons"
-                        name="Lessons"
-                        stroke="#9333ea"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="demoLessons"
-                        name="Demo lessons"
-                        stroke="#d50000"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="studentsJoined"
-                        name="Joined"
-                        stroke="#2563eb"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="space-y-5">
+                  <div>
+                    <h4 className="mb-2 text-sm font-semibold text-gray-700">Students &amp; lessons</h4>
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={mergeMetrics(metrics)}
+                          margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                          <Tooltip />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="regularStudents"
+                            name="Students"
+                            stroke="#16a34a"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="regularLessons"
+                            name="Lessons"
+                            stroke="#9333ea"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-4">
+                    <h4 className="mb-2 text-sm font-semibold text-gray-700">Demo lessons &amp; joined students</h4>
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={mergeMetrics(metrics)}
+                          margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                          <Tooltip />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="demoLessons"
+                            name="Demo lessons"
+                            stroke="#d50000"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="studentsJoined"
+                            name="Joined"
+                            stroke="#2563eb"
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
