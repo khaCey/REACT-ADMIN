@@ -17,12 +17,14 @@ CREATE TABLE IF NOT EXISTS students (
   group_size INTEGER,
   is_child BOOLEAN DEFAULT FALSE,
   google_contact_resource_name VARCHAR(512),
+  is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Existing DBs (before this column existed)
 ALTER TABLE students ADD COLUMN IF NOT EXISTS google_contact_resource_name VARCHAR(512);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_contacted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_expected_return DATE NULL;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS hiatus_otsukisha BOOLEAN NOT NULL DEFAULT FALSE;

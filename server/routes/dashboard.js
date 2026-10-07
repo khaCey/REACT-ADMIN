@@ -19,7 +19,8 @@ router.get('/unpaid', async (req, res) => {
          ON TRIM(m.student_name) = TRIM(s.name)
          AND to_char(m.date, 'YYYY-MM') = $1
         AND (m.status IS NULL OR lower(trim(m.status)) NOT IN ('cancelled', 'rescheduled'))
-       WHERE NOT EXISTS (
+       WHERE COALESCE(s.is_hidden, FALSE) = FALSE
+       AND NOT EXISTS (
          SELECT 1 FROM payments p
          WHERE p.student_id = s.id AND p.month = $1
        )
@@ -55,6 +56,7 @@ router.get('/unscheduled-lessons', async (req, res) => {
       `SELECT s.id, s.name, s.name_kanji, s.email, s.phone, s.phone_secondary, s.same_day_cancel, s.status, s.payment, s.group_type, s.group_size, s.is_child
        FROM students s
        WHERE s.status = 'Active'
+       AND COALESCE(s.is_hidden, FALSE) = FALSE
        AND NOT EXISTS (
          SELECT 1 FROM monthly_schedule m
          WHERE TRIM(m.student_name) = TRIM(s.name)
@@ -343,7 +345,7 @@ router.get('/stats', async (req, res) => {
       : `${now.getFullYear()}-${String(now.getMonth()).padStart(2, '0')}`;
 
     const [studentsResult, paymentsResult, statsResult] = await Promise.all([
-      query('SELECT COUNT(*) as count FROM students'),
+      query('SELECT COUNT(*) as count FROM students WHERE COALESCE(is_hidden, FALSE) = FALSE'),
       query(
         `SELECT COALESCE(SUM(total), 0) as total FROM payments WHERE month = $1 OR (year = $2 AND month = $1)`,
         [thisMonth, String(now.getFullYear())]

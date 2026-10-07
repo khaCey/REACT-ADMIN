@@ -158,10 +158,12 @@ async function applyUpdate(entity_type, data) {
   if (entity_type === 'students') {
     const o = data;
     const hasGoogleContact = Object.prototype.hasOwnProperty.call(o, 'google_contact_resource_name');
+    const hasHidden = Object.prototype.hasOwnProperty.call(o, 'is_hidden');
     await query(
       `UPDATE students SET name = $2, name_kanji = $3, email = $4, phone = $5, phone_secondary = $6,
         same_day_cancel = $7, status = $8, payment = $9, group_type = $10, group_size = $11, is_child = $12,
         google_contact_resource_name = CASE WHEN $14::boolean THEN $13 ELSE google_contact_resource_name END,
+        is_hidden = CASE WHEN $16::boolean THEN $15 ELSE is_hidden END,
         updated_at = NOW()
        WHERE id = $1`,
       [
@@ -179,6 +181,8 @@ async function applyUpdate(entity_type, data) {
         o.is_child ?? false,
         o.google_contact_resource_name ?? null,
         hasGoogleContact,
+        o.is_hidden ?? false,
+        hasHidden,
       ]
     );
   } else if (entity_type === 'payments') {
@@ -250,13 +254,14 @@ async function applyCreate(entity_type, data) {
   if (entity_type === 'students') {
     const o = data;
     await query(
-      `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child, google_contact_resource_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO students (id, name, name_kanji, email, phone, phone_secondary, same_day_cancel, status, payment, group_type, group_size, is_child, google_contact_resource_name, is_hidden)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name, name_kanji = EXCLUDED.name_kanji, email = EXCLUDED.email,
          phone = EXCLUDED.phone, phone_secondary = EXCLUDED.phone_secondary, same_day_cancel = EXCLUDED.same_day_cancel,
          status = EXCLUDED.status, payment = EXCLUDED.payment, group_type = EXCLUDED.group_type, group_size = EXCLUDED.group_size,
-         is_child = EXCLUDED.is_child, google_contact_resource_name = EXCLUDED.google_contact_resource_name, updated_at = NOW()`,
+         is_child = EXCLUDED.is_child, google_contact_resource_name = EXCLUDED.google_contact_resource_name,
+         is_hidden = EXCLUDED.is_hidden, updated_at = NOW()`,
       [
         o.id,
         o.name ?? '',
@@ -271,6 +276,7 @@ async function applyCreate(entity_type, data) {
         o.group_size ?? null,
         o.is_child ?? false,
         o.google_contact_resource_name ?? null,
+        o.is_hidden ?? false,
       ]
     );
   } else if (entity_type === 'payments') {
@@ -360,7 +366,10 @@ async function applyCreate(entity_type, data) {
 async function applyDelete(entity_type, data) {
   if (!data) return;
   if (entity_type === 'students') {
-    await query('DELETE FROM students WHERE id = $1', [data.id]);
+    await query(
+      'UPDATE students SET is_hidden = TRUE, updated_at = NOW() WHERE id = $1',
+      [data.id]
+    );
   } else if (entity_type === 'payments') {
     await query('DELETE FROM payments WHERE transaction_id = $1', [data.transaction_id]);
   } else if (entity_type === 'notes') {

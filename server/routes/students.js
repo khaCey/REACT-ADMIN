@@ -91,6 +91,7 @@ async function getStudentGroupPayload(studentId, db = query) {
          FROM student_group_members sgm
          INNER JOIN students s ON s.id = sgm.student_id
         WHERE sgm.group_id = $1
+          AND COALESCE(s.is_hidden, FALSE) = FALSE
         ORDER BY sgm.sort_order ASC, s.id ASC`,
       [groupId]
     );
@@ -115,7 +116,7 @@ async function getStudentGroupPayload(studentId, db = query) {
 router.get('/', async (req, res) => {
   try {
     const result = await query(
-      'SELECT * FROM students ORDER BY id'
+      'SELECT * FROM students WHERE COALESCE(is_hidden, FALSE) = FALSE ORDER BY id'
     );
     const students = result.rows.map(mapStudentRow);
     res.json(students);
@@ -129,7 +130,8 @@ router.get('/hiatus', async (req, res) => {
   try {
     const result = await query(
       `SELECT * FROM students
-        WHERE TRIM(COALESCE(status, '')) = $1
+        WHERE COALESCE(is_hidden, FALSE) = FALSE
+          AND TRIM(COALESCE(status, '')) = $1
         ORDER BY hiatus_expected_return NULLS LAST, name ASC NULLS LAST, id ASC`,
       [HIATUS_STATUS]
     );
@@ -144,7 +146,8 @@ router.get('/reviews', async (req, res) => {
   try {
     const result = await query(
       `SELECT * FROM students
-        WHERE has_review = TRUE
+        WHERE COALESCE(is_hidden, FALSE) = FALSE
+          AND has_review = TRUE
         ORDER BY name ASC NULLS LAST, id ASC`
     );
     res.json((result.rows || []).map(mapStudentRow));
@@ -234,6 +237,7 @@ router.put('/:id/group', async (req, res) => {
       `SELECT id, name, is_child
          FROM students
         WHERE id = ANY($1::int[])
+          AND COALESCE(is_hidden, FALSE) = FALSE
         ORDER BY array_position($1::int[], id)`,
       [requestedIds]
     );
@@ -728,7 +732,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Student not found' });
     }
     const oldRow = oldResult.rows[0];
-    await query('DELETE FROM students WHERE id = $1', [id]);
+    await query(
+      'UPDATE students SET is_hidden = TRUE, updated_at = NOW() WHERE id = $1',
+      [id]
+    );
     await logChange(
       { entityType: 'students', entityKey: String(id), action: 'delete', oldData: oldRow, newData: null },
       req
