@@ -96,6 +96,7 @@ export async function getOrderedGroupMembers(groupId, db = query) {
        FROM student_group_members sgm
        INNER JOIN students s ON s.id = sgm.student_id
       WHERE sgm.group_id = $1
+        AND COALESCE(s.is_hidden, FALSE) = FALSE
       ORDER BY sgm.sort_order ASC, s.id ASC`,
     [gid]
   );

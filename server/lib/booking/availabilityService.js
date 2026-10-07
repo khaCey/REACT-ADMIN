@@ -139,7 +139,10 @@ export async function handleGetWeek(req, res) {
     let studentPaymentForGrid = null;
     let studentStatusForGrid = null;
     if (Number.isFinite(studentIdNum)) {
-      const sn = await query('SELECT name, payment, status FROM students WHERE id = $1', [studentIdNum]);
+      const sn = await query(
+        'SELECT name, payment, status FROM students WHERE id = $1 AND COALESCE(is_hidden, FALSE) = FALSE',
+        [studentIdNum]
+      );
       studentNameForGrid = (sn.rows[0]?.name || '').trim() || null;
       studentPaymentForGrid = sn.rows[0]?.payment ?? null;
       studentStatusForGrid = sn.rows[0]?.status ?? null;

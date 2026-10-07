@@ -43,7 +43,13 @@ async function resolveReplicationTargets(payerStudentId, preferredGroupId = null
     groupId = g.rows[0].group_id;
   }
   const m = await db(
-    `SELECT student_id FROM student_group_members WHERE group_id = $1 AND student_id <> $2 ORDER BY student_id`,
+    `SELECT sgm.student_id
+       FROM student_group_members sgm
+       INNER JOIN students s ON s.id = sgm.student_id
+      WHERE sgm.group_id = $1
+        AND sgm.student_id <> $2
+        AND COALESCE(s.is_hidden, FALSE) = FALSE
+      ORDER BY sgm.student_id`,
     [groupId, payerStudentId]
   );
   return { groupId, peerIds: m.rows.map((r) => r.student_id) };

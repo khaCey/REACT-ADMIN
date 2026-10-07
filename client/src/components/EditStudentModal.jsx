@@ -103,7 +103,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
     setError(null)
     try {
       await api.deleteStudent(studentId)
-      success('Student deleted')
+      success('Student removed from lists')
       onDeleted?.()
       onSave?.()
       onClose()
@@ -356,7 +356,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
       {showDeleteConfirm && (
         <ConfirmActionModal
           title="Delete Student"
-          message="Are you sure you want to delete this student? This cannot be undone."
+          message="Hide this student from normal lists? Their notes, payments and lesson history will be kept."
           confirmLabel="Delete"
           destructive
           confirming={deleting}

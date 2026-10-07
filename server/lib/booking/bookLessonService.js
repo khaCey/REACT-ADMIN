@@ -153,7 +153,7 @@ export async function handleBookLesson(req, res) {
         return res.status(400).json({ error: 'student_id must be a number' });
       }
       const studentResult = await query(
-        'SELECT id, name, is_child, status, payment FROM students WHERE id = $1',
+        'SELECT id, name, is_child, status, payment FROM students WHERE id = $1 AND COALESCE(is_hidden, FALSE) = FALSE',
         [anchorStudentId]
       );
       if (studentResult.rows.length === 0) {

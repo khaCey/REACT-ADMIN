@@ -91,7 +91,7 @@ export async function handleCreateReserved(req, res) {
 
     const studentResult = await query(
       `SELECT id, name, is_child, status, payment, group_type, group_size
-         FROM students WHERE id = $1`,
+         FROM students WHERE id = $1 AND COALESCE(is_hidden, FALSE) = FALSE`,
       [studentIdNum]
     );
     if (studentResult.rows.length === 0) {
