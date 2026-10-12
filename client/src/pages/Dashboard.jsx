@@ -391,7 +391,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between gap-2 mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Today's lessons</h3>
               <div className="flex items-center gap-3">
-                {currentHour != null && (
+                {currentHour != null && todayLessons.length > 0 && (
                   <button
                     type="button"
                     onClick={() => {
