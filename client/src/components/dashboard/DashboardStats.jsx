@@ -1,18 +1,18 @@
 import { CalendarDays, GraduationCap, Presentation, Users } from 'lucide-react'
 
-function StatCard({ icon: Icon, iconClassName, iconWrapClassName, label, value, detail }) {
+function StatCard({ icon: Icon, iconClassName, iconWrapClassName, label, value, detail, compact = false }) {
   return (
-    <article className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <article className={`rounded-xl border border-gray-200 bg-white shadow-sm ${compact ? 'min-h-[78px] p-2.5 sm:p-3 xl:p-2.5' : 'p-4'}`}>
+      <div className={`flex items-start justify-between ${compact ? 'gap-1.5' : 'gap-3'}`}>
         <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-500">{label}</p>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-gray-900">
+          <p className={`font-medium text-gray-500 ${compact ? 'text-xs' : 'text-sm'}`}>{label}</p>
+          <p className={`font-bold tracking-tight text-gray-900 ${compact ? 'mt-0.5 text-xl xl:text-2xl' : 'mt-1 text-2xl'}`}>
             {value == null ? '—' : value}
           </p>
-          <p className="mt-1 text-xs text-gray-500">{detail}</p>
+          <p className={`text-gray-500 ${compact ? 'mt-0.5 text-[11px]' : 'mt-1 text-xs'}`}>{detail}</p>
         </div>
-        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconWrapClassName}`}>
-          <Icon className={`h-5 w-5 ${iconClassName}`} />
+        <span className={`inline-flex shrink-0 items-center justify-center rounded-xl ${compact ? 'h-8 w-8' : 'h-10 w-10'} ${iconWrapClassName}`}>
+          <Icon className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} ${iconClassName}`} />
         </span>
       </div>
     </article>
@@ -20,6 +20,7 @@ function StatCard({ icon: Icon, iconClassName, iconWrapClassName, label, value, 
 }
 
 export default function DashboardStats({
+  compact = false,
   todayLessons,
   activeStudents,
   lessonsThisMonth,
@@ -61,9 +62,14 @@ export default function DashboardStats({
   ]
 
   return (
-    <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Dashboard summary">
+    <section
+      className={compact
+        ? 'grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-2 xl:gap-2.5'
+        : 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'}
+      aria-label="Dashboard summary"
+    >
       {cards.map((card) => (
-        <StatCard key={card.label} {...card} />
+        <StatCard key={card.label} {...card} compact={compact} />
       ))}
     </section>
   )
