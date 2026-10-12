@@ -358,18 +358,21 @@ export default function Dashboard() {
     return <FullPageLoading />
   }
 
+  const summaryCards = (
+    <DashboardStats
+      compact
+      todayLessons={todayLessons.length}
+      activeStudents={studentsLoading && students.length === 0 ? null : activeStudentCount}
+      lessonsThisMonth={lessonsThisMonth}
+      demoLessons={demoLessonsThisMonth}
+    />
+  )
+
   return (
     <div className="w-full min-h-0 flex flex-col gap-4 pb-2 xl:h-full xl:overflow-hidden">
       <DashboardHeader
         dateLabel={todayDate ? formatJapaneseDateLabel(todayDate) : ''}
         onOpenCalendar={() => setShowCalendarEvents(true)}
-      />
-
-      <DashboardStats
-        todayLessons={todayLessons.length}
-        activeStudents={studentsLoading && students.length === 0 ? null : activeStudentCount}
-        lessonsThisMonth={lessonsThisMonth}
-        demoLessons={demoLessonsThisMonth}
       />
 
       {error && (
@@ -387,7 +390,9 @@ export default function Dashboard() {
 
       {metrics ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:flex-1 xl:min-h-0 xl:items-stretch">
-          <section className="rounded-xl border border-gray-200 bg-white p-6 xl:p-4 shadow-sm min-h-[560px] xl:min-h-0 xl:h-full xl:overflow-hidden flex flex-col">
+          <div className="flex min-w-0 flex-col gap-3 xl:h-full xl:min-h-0">
+            {summaryCards}
+            <section className="rounded-xl border border-gray-200 bg-white p-6 xl:p-4 shadow-sm min-h-[560px] xl:min-h-0 xl:flex-1 xl:overflow-hidden flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Today's lessons</h3>
               <div className="flex items-center gap-3">
@@ -512,7 +517,8 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-          </section>
+            </section>
+          </div>
 
           <div className="flex min-w-0 flex-col gap-4 xl:h-full xl:min-h-0 xl:gap-3">
             <StudentSearch
@@ -646,7 +652,7 @@ export default function Dashboard() {
             </section>
           </div>
         </div>
-      ) : null}
+      ) : summaryCards}
       {selectedStudentId != null && (
         <StudentDetailsModal
           studentId={selectedStudentId}
