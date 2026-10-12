@@ -523,12 +523,12 @@ export default function Dashboard() {
             />
 
             <section className="rounded-xl border border-gray-200 bg-white p-6 pb-8 xl:p-4 shadow-sm xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1 xl:shrink-0">
                 <h3 className="text-lg font-semibold text-gray-900">
                   Trends
                 </h3>
               </div>
-              <div className="flex flex-wrap items-center gap-3 mb-4 xl:mb-2">
+              <div className="flex flex-wrap items-center gap-3 mb-4 xl:mb-2 xl:shrink-0">
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-gray-600">Range:</span>
                   <select
@@ -567,16 +567,16 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-gray-500 mb-5 xl:mb-2">
+              <p className="text-sm text-gray-500 mb-5 xl:mb-2 xl:shrink-0">
                 Students and lessons are charted separately from demo lessons and students who made their first payment that month.
               </p>
               {mergeMetrics(metrics).length === 0 ? (
                 <p className="text-sm text-gray-500 py-8">No data for this period.</p>
               ) : (
-                <div className="space-y-5 xl:space-y-0 xl:flex xl:flex-1 xl:flex-col xl:min-h-0 xl:gap-3">
-                  <div className="xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
+                <div className="space-y-5 xl:space-y-0 xl:flex xl:flex-1 xl:flex-col xl:min-h-0 xl:gap-3 xl:overflow-y-auto xl:overscroll-contain xl:pr-2">
+                  <div className="xl:flex xl:flex-1 xl:flex-col xl:min-h-[220px]">
                     <h4 className="mb-2 text-sm font-semibold text-gray-700">Students &amp; lessons</h4>
-                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-0">
+                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-[180px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={mergeMetrics(metrics)}
@@ -608,9 +608,9 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-100 pt-4 xl:pt-3 xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
+                  <div className="border-t border-gray-100 pt-4 xl:pt-3 xl:flex xl:flex-1 xl:flex-col xl:min-h-[220px]">
                     <h4 className="mb-2 text-sm font-semibold text-gray-700">Demo lessons &amp; joined students</h4>
-                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-0">
+                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-[180px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={mergeMetrics(metrics)}
