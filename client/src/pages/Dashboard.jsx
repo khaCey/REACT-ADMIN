@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -176,6 +176,25 @@ function lessonModeLabel(mode) {
   return ''
 }
 
+/** Today's timetable is shown in Japan time, regardless of the browser's timezone. */
+function getTokyoNow() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date()).map(({ type, value }) => [type, value]),
+  )
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  }
+}
+
 export default function Dashboard() {
   const currentMonth = getCurrentMonthYYYYMM()
   const [chartEndMonth, setChartEndMonth] = useState(() => currentMonth)
@@ -191,6 +210,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCalendarEvents, setShowCalendarEvents] = useState(false)
+  const [tokyoNow, setTokyoNow] = useState(getTokyoNow)
+  const scheduleScrollRef = useRef(null)
+  const currentTimeMarkerRef = useRef(null)
+  const pauseAutoFollowUntilRef = useRef(0)
 
   const { lastSynced } = useCalendarPollingContext()
 
@@ -271,6 +294,46 @@ export default function Dashboard() {
     fetchSummaryMetrics()
   }, [lastSynced, fetchDashboard, fetchSummaryMetrics])
 
+  // Keep the indicator up to date without relying on calendar polling.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setTokyoNow(getTokyoNow()), 30_000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const isTodayInTokyo = todayDate.slice(0, 10) === tokyoNow.date
+  const currentHour = isTodayInTokyo && tokyoNow.minutes >= 10 * 60 && tokyoNow.minutes < 21 * 60
+    ? Math.floor(tokyoNow.minutes / 60)
+    : null
+
+  const scrollToNow = useCallback((force = false) => {
+    const scroller = scheduleScrollRef.current
+    const marker = currentTimeMarkerRef.current
+    if (!scroller || !marker) return
+
+    const scrollBox = scroller.getBoundingClientRect()
+    const markerBox = marker.getBoundingClientRect()
+    const upperBoundary = scrollBox.top + scroller.clientHeight * 0.20
+    const lowerBoundary = scrollBox.top + scroller.clientHeight * 0.72
+    if (!force && markerBox.top >= upperBoundary && markerBox.top <= lowerBoundary) return
+
+    const target = scroller.scrollTop + markerBox.top - scrollBox.top - scroller.clientHeight * 0.45
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+    scroller.scrollTo({
+      top: Math.max(0, Math.min(maxScroll, target)),
+      behavior: force ? 'smooth' : 'auto',
+    })
+  }, [])
+
+  // Reposition only when necessary, and allow staff to browse other times manually.
+  useEffect(() => {
+    if (currentHour == null || Date.now() < pauseAutoFollowUntilRef.current) return
+    scrollToNow()
+  }, [currentHour, tokyoNow.minutes, todayLessons, scrollToNow])
+
+  const pauseAutoFollow = () => {
+    pauseAutoFollowUntilRef.current = Date.now() + 90_000
+  }
+
   const showPaymentBadges = (lesson) =>
     lesson.is_last_lesson_of_month === true || lesson.is_last_lesson_of_month === 't'
 
@@ -296,7 +359,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="w-full min-h-0 flex flex-col gap-4 pb-2">
+    <div className="w-full min-h-0 flex flex-col gap-4 pb-2 xl:h-full xl:overflow-hidden">
       <DashboardHeader
         dateLabel={todayDate ? formatJapaneseDateLabel(todayDate) : ''}
         onOpenCalendar={() => setShowCalendarEvents(true)}
@@ -323,22 +386,57 @@ export default function Dashboard() {
       )}
 
       {metrics ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
-          <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm min-h-[560px] flex flex-col">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:flex-1 xl:min-h-0 xl:items-stretch">
+          <section className="rounded-xl border border-gray-200 bg-white p-6 xl:p-4 shadow-sm min-h-[560px] xl:min-h-0 xl:h-full xl:overflow-hidden flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Today's lessons</h3>
-              <p className="text-xl font-semibold text-gray-700">
-                {todayDate ? formatJapaneseDateLabel(todayDate) : ''}
-              </p>
+              <div className="flex items-center gap-3">
+                {currentHour != null && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pauseAutoFollowUntilRef.current = 0
+                      scrollToNow(true)
+                    }}
+                    className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Go to now
+                  </button>
+                )}
+                <p className="text-xl font-semibold text-gray-700">
+                  {todayDate ? formatJapaneseDateLabel(todayDate) : ''}
+                </p>
+              </div>
             </div>
             {todayLessons.length === 0 ? (
               <p className="text-sm text-gray-500 py-4">No lessons scheduled for today.</p>
             ) : (
-              <div className="space-y-0 flex-1 min-h-0 overflow-y-auto pr-1">
+              <div
+                ref={scheduleScrollRef}
+                className="space-y-0 flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1"
+                tabIndex={0}
+                aria-label="Today's lesson timetable"
+                onWheel={pauseAutoFollow}
+                onTouchStart={pauseAutoFollow}
+                onPointerDown={pauseAutoFollow}
+                onKeyDown={(event) => {
+                  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+                    pauseAutoFollow()
+                  }
+                }}
+              >
                 {groupLessonsByHour(todayLessons).map(([hourLabel, lessons]) => {
                   const segments = buildHourLayoutSegments(lessons)
                   return (
-                  <div key={hourLabel} className="flex items-start border-b-2 border-dashed border-gray-500 py-1">
+                  <div key={hourLabel} className="relative flex items-start border-b-2 border-dashed border-gray-500 py-1">
+                    {currentHour === Number(hourLabel.slice(0, 2)) && (
+                      <div
+                        ref={currentTimeMarkerRef}
+                        aria-label="Current time"
+                        className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-red-500"
+                        style={{ top: `${((tokyoNow.minutes % 60) / 60) * 100}%` }}
+                      />
+                    )}
                     <div className="w-14 shrink-0 pt-2 text-sm font-semibold text-gray-700">
                       {hourLabel}
                     </div>
@@ -416,7 +514,7 @@ export default function Dashboard() {
             )}
           </section>
 
-          <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-4 xl:h-full xl:min-h-0 xl:gap-3">
             <StudentSearch
               students={students}
               loading={studentsLoading}
@@ -424,13 +522,13 @@ export default function Dashboard() {
               onSelectStudent={setSelectedStudentId}
             />
 
-            <section className="rounded-xl border border-gray-200 bg-white p-6 pb-8 shadow-sm">
+            <section className="rounded-xl border border-gray-200 bg-white p-6 pb-8 xl:p-4 shadow-sm xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  Metrics per month ({chartRangeYears} {chartRangeYears === 1 ? 'year' : 'years'} ending {formatEndMonthLabel(chartEndMonth)})
+                  Trends
                 </h3>
               </div>
-              <div className="flex flex-wrap items-center gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-3 mb-4 xl:mb-2">
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-gray-600">Range:</span>
                   <select
@@ -469,16 +567,16 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-gray-500 mb-5">
+              <p className="text-sm text-gray-500 mb-5 xl:mb-2">
                 Students and lessons are charted separately from demo lessons and students who made their first payment that month.
               </p>
               {mergeMetrics(metrics).length === 0 ? (
                 <p className="text-sm text-gray-500 py-8">No data for this period.</p>
               ) : (
-                <div className="space-y-5">
-                  <div>
+                <div className="space-y-5 xl:space-y-0 xl:flex xl:flex-1 xl:flex-col xl:min-h-0 xl:gap-3">
+                  <div className="xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
                     <h4 className="mb-2 text-sm font-semibold text-gray-700">Students &amp; lessons</h4>
-                    <div className="h-48 w-full">
+                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={mergeMetrics(metrics)}
@@ -510,9 +608,9 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-100 pt-4">
+                  <div className="border-t border-gray-100 pt-4 xl:pt-3 xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
                     <h4 className="mb-2 text-sm font-semibold text-gray-700">Demo lessons &amp; joined students</h4>
-                    <div className="h-48 w-full">
+                    <div className="h-48 w-full xl:h-auto xl:flex-1 xl:min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={mergeMetrics(metrics)}
