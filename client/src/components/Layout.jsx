@@ -20,6 +20,7 @@ export default function Layout() {
   /** Opened from sticky booking toasts via `student-admin:open-student`. */
   const [toastStudentId, setToastStudentId] = useState(null)
   const isStudentsListPage = location.pathname === '/students'
+  const isDashboardPage = location.pathname === '/dashboard'
 
   useEffect(() => {
     if (!location.state?.openPostLoginUnread) return
@@ -81,7 +82,7 @@ export default function Layout() {
         }`}
       >
         <div className="p-6 w-full flex flex-col h-full min-h-0">
-          <div className={`flex-1 min-h-0 flex flex-col ${isStudentsListPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <div className={`flex-1 min-h-0 flex flex-col ${isStudentsListPage ? 'overflow-hidden' : isDashboardPage ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
             <Outlet />
           </div>
         </div>
