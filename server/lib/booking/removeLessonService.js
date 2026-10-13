@@ -48,6 +48,7 @@ import {
   rewriteLessonTitleStudentNames,
 } from '../groupLessonTitle.js';
 import * as D from './domainInternals.js';
+import { reconcileCountersForAffectedRows } from './lessonCounterReconcile.js';
 
 const {
   SQL_NOT_STAFF_BREAK,
@@ -205,6 +206,7 @@ export async function handleRemoveLesson(req, res) {
         );
       }
 
+      await reconcileCountersForAffectedRows(oldRows);
       return res.json({
         ok: true,
         event_id: eventId,
@@ -228,6 +230,7 @@ export async function handleRemoveLesson(req, res) {
       }
     }
     const { slotDeleted } = await finalizeLessonRemoveFromDb(oldRows, eventId, req);
+    await reconcileCountersForAffectedRows(oldRows);
     res.json({
       ok: true,
       event_id: eventId,
