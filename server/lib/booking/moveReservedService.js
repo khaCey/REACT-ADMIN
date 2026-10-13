@@ -13,6 +13,7 @@ import {
   formatOrderedStudentNames,
 } from '../groupLessonTitle.js';
 import * as D from './domainInternals.js';
+import { reconcileCountersForAffectedRows } from './lessonCounterReconcile.js';
 
 const {
   LOCAL_BOOKING_EVENT_ID_PREFIX,
@@ -261,6 +262,11 @@ export async function handleMoveReserved(req, res) {
         console.error('[move-reserved] change log failed', logErr?.message || logErr);
       }
     }
+
+    await reconcileCountersForAffectedRows([
+      ...groupRows,
+      ...groupRows.map((row) => ({ student_id: row.student_id, month: dateStr.slice(0, 7) })),
+    ]);
 
     return res.json({
       ok: true,

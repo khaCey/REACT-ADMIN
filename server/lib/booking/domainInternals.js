@@ -389,6 +389,7 @@ export async function getBookedCountForMonth(studentId, monthKey, db = query) {
        FROM monthly_schedule m
       WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
         AND m.student_id = $1
+        AND LOWER(TRIM(COALESCE(m.lesson_kind, 'regular'))) <> 'demo'
         AND to_char(m.date, 'YYYY-MM') = $2`,
     [studentId, monthKey]
   );
@@ -400,7 +401,7 @@ export async function getBookedCountForMonth(studentId, monthKey, db = query) {
  * Then best-effort patch Google Calendar titles for synced scheduled lessons.
  * @returns {Promise<{ updated: number, pack_total: number, calendar_patched: number, calendar_errors: Array<{ event_id: string, error: string }> }>}
  */
-export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTotal, db = query) {
+export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTotal, db = query, options = {}) {
   const sid = Number(studentId);
   const month = String(monthKey || '').trim().slice(0, 7);
   const pack = Math.max(1, parseInt(packTotal, 10) || 0);
@@ -417,11 +418,14 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     throw new Error('Student has no name');
   }
 
-  await db(
-    `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
-     ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
-    [sid, month, pack]
-  );
+  // Automatic reconciliation must not modify a student's monthly lesson pack.
+  if (options.persistPack !== false) {
+    await db(
+      `INSERT INTO lessons (student_id, month, lessons) VALUES ($1, $2, $3)
+       ON CONFLICT (student_id, month) DO UPDATE SET lessons = EXCLUDED.lessons`,
+      [sid, month, pack]
+    );
+  }
 
   const rows = await db(
     `SELECT event_id, student_id, student_name, title, lesson_kind, lesson_mode,
@@ -430,7 +434,8 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
       WHERE student_id = $1
         AND to_char(date, 'YYYY-MM') = $2
         AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
-      ORDER BY start ASC, event_id ASC`,
+        AND LOWER(TRIM(COALESCE(lesson_kind, 'regular'))) <> 'demo'
+      ORDER BY date ASC, start ASC, event_id ASC`,
     [sid, month]
   );
 
@@ -460,14 +465,32 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
 
   /** @type {Map<string, string>} */
   const titlesByEvent = new Map();
+  const changedEventIds = [];
   let idx = 0;
   for (const eid of eventOrder) {
     idx += 1;
     const groupRows = rowsByEvent.get(eid) || [];
     const r = groupRows[0];
     const orderedStudents = await getOrderedEventStudents(eid, db);
-    const titleStudents =
-      orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
+    let activeStudents = orderedStudents;
+    if (orderedStudents.length > 1) {
+      // After a partial group reschedule, inactive members must not own or
+      // appear in the remaining shared event's counter title.
+      const groupActive = await db(
+        `SELECT student_id, student_name FROM monthly_schedule
+          WHERE event_id = $1
+            AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+          ORDER BY COALESCE(group_sort_order, 2147483647), student_id ASC`,
+        [eid]
+      );
+      const activeIds = new Set((groupActive.rows || []).map((row) => Number(row.student_id)));
+      const activeNames = new Set((groupActive.rows || []).map((row) => normalizePersonName(row.student_name)));
+      activeStudents = orderedStudents.filter((member) =>
+        activeIds.has(Number(member.id)) || activeNames.has(normalizePersonName(member.name))
+      );
+      if (Number(groupActive.rows?.[0]?.student_id) !== sid) continue;
+    }
+    const titleStudents = activeStudents.length > 0 ? activeStudents : [{ name: studentName }];
     const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
     const baseTitle =
       lessonKind === 'demo'
@@ -484,9 +507,15 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
             totalLessons: pack,
           });
     const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
+    if (String(r.title || '') === newTitle) continue;
     titlesByEvent.set(eid, newTitle);
+    changedEventIds.push(eid);
     if (orderedStudents.length > 1 || groupRows.length > 1) {
-      await db(`UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`, [newTitle, eid]);
+      await db(
+        `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2
+           AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))`,
+        [newTitle, eid]
+      );
     } else {
       await db(
         `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
@@ -499,7 +528,7 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
   /** @type {Array<{ event_id: string, error: string }>} */
   const calendar_errors = [];
   if (isBookingGasEnabled()) {
-    for (const eid of eventOrder) {
+    for (const eid of changedEventIds) {
       const groupRows = rowsByEvent.get(eid) || [];
       const r = groupRows[0];
       if (!r) continue;
@@ -540,7 +569,7 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
   }
 
   return {
-    updated: eventOrder.length,
+    updated: changedEventIds.length,
     pack_total: pack,
     calendar_patched,
     calendar_errors,

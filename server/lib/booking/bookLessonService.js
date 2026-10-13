@@ -48,6 +48,7 @@ import {
 } from '../groupLessonTitle.js';
 import { upsertDemoLessonEvent } from '../demoLessonEvents.js';
 import * as D from './domainInternals.js';
+import { reconcileCountersForAffectedRows } from './lessonCounterReconcile.js';
 
 const {
   SQL_NOT_STAFF_BREAK,
@@ -501,6 +502,12 @@ export async function handleBookLesson(req, res) {
           null,
           index + 1,
         ]
+      );
+    }
+
+    if (String(lessonKind || '').toLowerCase() !== 'demo') {
+      await reconcileCountersForAffectedRows(
+        orderedStudents.map((entry) => ({ student_id: entry.id, month: monthKey }))
       );
     }
 
