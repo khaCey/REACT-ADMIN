@@ -547,8 +547,8 @@ export async function handleRescheduleLinked(req, res) {
     }
 
     await reconcileCountersForAffectedRows([
-      ...sourceRowsForReschedule,
-      ...sourceRowsForReschedule.map((row) => ({ student_id: row.student_id, month: monthKey })),
+      ...sourceRowsForReschedule.map((row) => ({ student_id: row.student_id ?? studentIdNum, month: row.src_date_str?.slice(0, 7) })),
+      ...sourceRowsForReschedule.map((row) => ({ student_id: row.student_id ?? studentIdNum, month: monthKey })),
     ]);
 
     res.status(201).json({
