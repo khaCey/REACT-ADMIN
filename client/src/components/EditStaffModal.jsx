@@ -102,6 +102,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
     setDeleting(true)
     try {
       await api.deleteStaff(staff.id)
+      success('Staff removed from active staff')
       onDeleted?.(staff.id)
       onClose()
     } catch (err) {
@@ -251,11 +252,11 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
             </label>
           </div>
           <div className="flex gap-3 pt-2 flex-wrap items-center">
-            {staff.canEditRole && (
+            {staff.canDelete && (
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                disabled={submitting}
+                disabled={submitting || deleting}
                 className="px-4 py-2 border border-red-200 text-red-700 rounded-lg hover:bg-red-50 cursor-pointer flex items-center gap-2"
               >
                 <Trash2 className="w-4 h-4" />
@@ -284,7 +285,7 @@ export default function EditStaffModal({ staff, onClose, onSaved, onDeleted }) {
       {showDeleteConfirm && (
         <ConfirmActionModal
           title="Delete staff"
-          message={`Permanently delete "${staff.name}"? Their shift history, notifications, and schedule assignments will be removed. This cannot be undone.`}
+          message={`Remove "${staff.name}" from active staff? They will immediately lose account access, but their lesson history, shifts, notifications and messages will be preserved. You can restore this account using Show inactive staff.`}
           confirmLabel="Delete staff"
           destructive
           confirming={deleting}

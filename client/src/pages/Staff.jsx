@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import AddStaffModal from '../components/AddStaffModal'
 import EditStaffModal from '../components/EditStaffModal'
+import ConfirmActionModal from '../components/ConfirmActionModal'
 import AdjustShiftTimeModal from '../components/AdjustShiftTimeModal'
 import ExtendShiftModal from '../components/ExtendShiftModal'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -294,6 +295,10 @@ export default function Staff() {
   const canManageShifts = isAdmin || !!authStaff?.is_operator
 
   const [staffList, setStaffList] = useState([])
+  const [showInactiveStaff, setShowInactiveStaff] = useState(false)
+  const [staffPendingDelete, setStaffPendingDelete] = useState(null)
+  const [deletingStaff, setDeletingStaff] = useState(false)
+  const [deleteStaffError, setDeleteStaffError] = useState('')
   const [fetchScheduleStaffId, setFetchScheduleStaffId] = useState('')
   const [fetchScheduleLoading, setFetchScheduleLoading] = useState(false)
   const [fetchScheduleError, setFetchScheduleError] = useState('')
@@ -327,6 +332,26 @@ export default function Staff() {
   const loadStaff = useCallback(() => {
     return api.getStaff().then((res) => setStaffList(res.staff || [])).catch(() => setStaffList([]))
   }, [])
+
+  const handleDeleteStaff = async () => {
+    if (!staffPendingDelete || deletingStaff) return
+    setDeletingStaff(true)
+    setDeleteStaffError('')
+    try {
+      await api.deleteStaff(staffPendingDelete.id)
+      setStaffList((prev) =>
+        prev.map((s) => s.id === staffPendingDelete.id ? { ...s, active: false } : s)
+      )
+      success(`${staffPendingDelete.name} removed from active staff`)
+      setStaffPendingDelete(null)
+      await loadStaff()
+      loadShiftLog()
+    } catch (err) {
+      setDeleteStaffError(err?.message || 'Failed to remove staff')
+    } finally {
+      setDeletingStaff(false)
+    }
+  }
 
   const loadShiftLog = useCallback(() => {
     api.getStaffShifts().then((res) => setShiftLog(res.shifts || [])).catch(() => setShiftLog([]))
@@ -485,6 +510,12 @@ export default function Staff() {
         ),
     [staffList]
   )
+  const visibleStaff = useMemo(
+    () => showInactiveStaff ? staffList : staffList.filter((s) => s.active !== false),
+    [staffList, showInactiveStaff]
+  )
+  const inactiveStaffCount = staffList.filter((s) => s.active === false).length
+
   const selectedSyncStaff = useMemo(
     () => englishTeachersForSync.find((s) => String(s.id) === String(fetchScheduleStaffId)) || null,
     [englishTeachersForSync, fetchScheduleStaffId]
@@ -1189,7 +1220,7 @@ export default function Staff() {
                     const events = Array.isArray(teacherCalendarEvents) ? teacherCalendarEvents : []
                     const staff = Array.isArray(staffList) ? staffList : []
                     const englishTeachers = staff
-                      .filter((s) => s && s.staff_type === 'english_teacher')
+                      .filter((s) => s && s.active !== false && s.staff_type === 'english_teacher')
                       .map((s) => String(s.name || '').trim())
                       .filter(Boolean)
                       .sort((a, b) => a.localeCompare(b))
@@ -1426,16 +1457,29 @@ export default function Staff() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Staff directory</h3>
-                <p className="text-xs font-medium text-gray-500">{staffList.length} staff members</p>
+                <p className="text-xs font-medium text-gray-500">
+                  {staffList.length - inactiveStaffCount} active staff members
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowAddStaffModal(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                Add staff
-              </button>
+              <div className="flex items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={showInactiveStaff}
+                    onChange={(e) => setShowInactiveStaff(e.target.checked)}
+                    className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                  Show inactive ({inactiveStaffCount})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAddStaffModal(true)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700 cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add staff
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full">
@@ -1447,13 +1491,22 @@ export default function Staff() {
                     <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Role</th>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar</th>
                     <th className="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                    {isAdmin && (
+                      <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {staffList.map((s) => (
+                  {visibleStaff.map((s) => (
                     <tr
                       key={s.id}
-                      onClick={() => setSelectedStaff({ ...s, canEditRole: isAdmin })}
+                      onClick={() => setSelectedStaff({
+                        ...s,
+                        canEditRole: isAdmin,
+                        canDelete: isAdmin && s.active !== false &&
+                          s.id !== authStaff?.id &&
+                          String(s.name || '').trim().toLowerCase() !== 'khacey',
+                      })}
                       className="cursor-pointer transition-colors hover:bg-green-50/50"
                     >
                       <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
@@ -1505,6 +1558,28 @@ export default function Staff() {
                           {s.active !== false ? 'Active' : 'Inactive'}
                         </span>
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3 text-right">
+                          {s.active !== false &&
+                            s.id !== authStaff?.id &&
+                            String(s.name || '').trim().toLowerCase() !== 'khacey' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeleteStaffError('')
+                                setStaffPendingDelete(s)
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                              aria-label={`Delete ${s.name}`}
+                              title={`Remove ${s.name} from active staff`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1536,10 +1611,33 @@ export default function Staff() {
             await loadStaff()
           }}
           onDeleted={(id) => {
-            setStaffList((prev) => prev.filter((s) => s.id !== id))
+            setStaffList((prev) => prev.map((s) => s.id === id ? { ...s, active: false } : s))
             setSelectedStaff(null)
+            loadStaff()
+            loadShiftLog()
           }}
         />
+      )}
+
+      {staffPendingDelete && (
+        <ConfirmActionModal
+          title="Delete staff"
+          message={`Remove "${staffPendingDelete.name}" from active staff? Their account access will be disabled immediately. Existing lessons, shifts, notifications and messages will be kept. You can restore this account using Show inactive.`}
+          confirmLabel="Delete staff"
+          destructive
+          confirming={deletingStaff}
+          onConfirm={handleDeleteStaff}
+          onClose={() => {
+            if (!deletingStaff) {
+              setStaffPendingDelete(null)
+              setDeleteStaffError('')
+            }
+          }}
+        >
+          {deleteStaffError && (
+            <p className="mt-3 text-sm text-red-600" role="alert">{deleteStaffError}</p>
+          )}
+        </ConfirmActionModal>
       )}
 
       {adjustSlot && (

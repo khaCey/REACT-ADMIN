@@ -147,11 +147,14 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
     const payload = jwt.verify(token, JWT_SECRET);
-    const result = await query('SELECT id, name, is_admin, is_operator FROM staff WHERE id = $1', [payload.id]);
+    const result = await query('SELECT id, name, is_admin, is_operator, active FROM staff WHERE id = $1', [payload.id]);
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Staff not found' });
     }
     const row = result.rows[0];
+    if (row.active === false) {
+      return res.status(403).json({ error: 'Account inactive' });
+    }
     res.json({
       staff: {
         id: row.id,
