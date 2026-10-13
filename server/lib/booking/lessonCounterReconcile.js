@@ -56,7 +56,7 @@ async function packTotalForMonth(studentId, month, db) {
     [studentId, month]
   );
   for (const row of existing.rows || []) {
-    const suffix = String(row.title || '').match(/\b\d+\s*\/\s*(\d+)(?:\s+Moved\s+(?:from|to)\s+\S+)?\s*$/i);
+    const suffix = String(row.title || '').match(/\b\d+\s*\/\s*(\d+)(?:\s*[·•-]?\s*Moved\s+(?:from|to)\s+\S+)?\s*$/i);
     if (suffix && Number(suffix[1]) > 0) return Number(suffix[1]);
   }
 
