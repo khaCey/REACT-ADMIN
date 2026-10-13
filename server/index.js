@@ -54,6 +54,7 @@ import {
 } from './lib/backup.js';
 import { listBackupFilesInFolder } from './lib/googleDrive.js';
 import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
+import { runDailyLessonCounterReconciliation } from './lib/booking/lessonCounterReconcile.js';
 import cron from 'node-cron';
 import multer from 'multer';
 import { tmpdir } from 'os';
@@ -1301,6 +1302,19 @@ app.listen(PORT, '0.0.0.0', () => {
           { timezone: pollTz }
         );
         console.log('[calendar-poll/server] cron:', pollCronExpr, pollTz);
+      }
+
+      // Keep monthly x/y title counters in chronological date order (Tokyo time).
+      const counterCron = (process.env.LESSON_COUNTER_RECONCILE_CRON ?? '15 3 * * *').trim();
+      if (counterCron && counterCron !== '0' && !/^off$/i.test(counterCron)) {
+        cron.schedule(
+          counterCron,
+          () => runDailyLessonCounterReconciliation().catch((err) =>
+            console.error('[lesson-counters] daily job failed:', err?.message || err)
+          ),
+          { timezone: 'Asia/Tokyo' }
+        );
+        console.log('[lesson-counters] daily cron:', counterCron, 'Asia/Tokyo');
       }
     });
   })
