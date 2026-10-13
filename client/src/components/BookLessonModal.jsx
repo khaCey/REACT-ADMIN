@@ -177,13 +177,19 @@ function paidPackForMonth(ym, latestByMonth) {
 
 function countActiveLessonsInMonth(ym, latestByMonth) {
   const e = latestByMonth?.[ym]
+  // Use the server's regular-lesson-only total for booking quota enforcement.
+  // Demo appointments remain in e.lessons for display but must not use a credit.
+  if (typeof e?.bookedLessonsCount === 'number' && Number.isFinite(e.bookedLessonsCount)) {
+    return Math.max(0, e.bookedLessonsCount)
+  }
   if (!e?.lessons) return 0
-  return e.lessons.filter(
-    (l) => {
-      const status = String(l.status || '').toLowerCase()
-      return status !== 'cancelled' && status !== 'rescheduled' && status !== 'unscheduled'
-    }
-  ).length
+  return e.lessons.filter((lesson) => {
+    const kind = String(lesson?.lessonKind || 'regular').trim().toLowerCase()
+    const status = String(lesson?.status || '').trim().toLowerCase()
+    return kind !== 'demo' && kind !== 'staff_break' &&
+      !['cancelled', 'canceled', 'rescheduled', 'unscheduled'].includes(status) &&
+      !lesson?.rescheduledTo
+  }).length
 }
 
 function slotMonthFromKey(key) {

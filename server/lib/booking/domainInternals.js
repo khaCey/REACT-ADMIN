@@ -587,6 +587,7 @@ export async function listActiveMonthEventIdsByStart(studentId, monthKey, db = q
       WHERE m.student_id = $1
         AND to_char(m.date, 'YYYY-MM') = $2
         AND (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+        AND LOWER(TRIM(COALESCE(m.lesson_kind, 'regular'))) <> 'demo'
       GROUP BY m.event_id
       ORDER BY MIN(m.start) ASC`,
     [studentId, monthKey]

@@ -159,7 +159,7 @@ export async function handleRescheduleLinked(req, res) {
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
       await query(
-        `SELECT event_id, lesson_uuid, student_name, student_id, status, title, awaiting_reschedule_date, group_id, group_sort_order,
+        `SELECT event_id, lesson_uuid, student_name, student_id, status, title, lesson_kind, awaiting_reschedule_date, group_id, group_sort_order,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
@@ -207,7 +207,11 @@ export async function handleRescheduleLinked(req, res) {
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStrRaw.slice(0, 7);
-    const lessonKindForBooking = deriveLessonKindFromStudent(student);
+    // Keep the source lesson's type on a move. The student may have changed
+    // from DEMO to regular since the original appointment was made.
+    const lessonKindForBooking = String(
+      sourceAnchor.lesson_kind || deriveLessonKindFromStudent(student)
+    ).trim().toLowerCase();
 
     const fromDisplay = formatOrdinalCalendarDay(sourceAnchor.src_date_str);
     const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
@@ -238,15 +242,7 @@ export async function handleRescheduleLinked(req, res) {
       const sourceMonth = (
         await query(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
       ).rows[0]?.ym;
-      const bookedCountResult = await query(
-        `SELECT COUNT(DISTINCT m.event_id) AS cnt
-         FROM monthly_schedule m
-         WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
-           AND m.student_id = $1
-           AND to_char(m.date, 'YYYY-MM') = $2`,
-        [studentIdNum, monthKey]
-      );
-      const bookedThisMonth = parseInt(bookedCountResult.rows[0]?.cnt, 10) || 0;
+      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey);
       const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
       destinationBaseTitle = applyKidsTitlePrefix(
         `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`,
@@ -366,7 +362,9 @@ export async function handleRescheduleLinked(req, res) {
       insertedDestinationStudentIds.add(resolvedStudentId);
 
       const destinationStudentName = normalizePersonName(rowStudent.name || sourceRowStudentName) || sourceRowStudentName;
-      const destinationLessonKind = deriveLessonKindFromStudent(rowStudent);
+      const destinationLessonKind = String(
+        sourceRow.lesson_kind || deriveLessonKindFromStudent(rowStudent)
+      ).trim().toLowerCase();
       const destinationLessonMode =
         destinationLessonKind === 'demo'
           ? 'unknown'
