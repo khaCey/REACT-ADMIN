@@ -26,8 +26,13 @@ function fixture(initial, totals) {
     if (q.includes('select m.student_id, m.student_name, m.group_sort_order'))
       return { rows: rows.filter((r) => r.event_id === args[0])
         .map((r) => ({ ...r, canonical_student_name: r.student_name, student_is_child: false })) };
+    if (q.startsWith('select student_id, student_name from monthly_schedule'))
+      return { rows: rows.filter((r) => r.event_id === args[0] && active(r))
+        .sort((a,b) => (a.group_sort_order || 99) - (b.group_sort_order || 99)) };
     if (q.startsWith('update monthly_schedule set title')) {
-      for (const r of rows) if (r.event_id === args[1] && (!args[2] || args[2] === r.student_name)) r.title = args[0];
+      for (const r of rows) if (r.event_id === args[1]
+        && (!args[2] || args[2] === r.student_name)
+        && (!q.includes('not in') || active(r))) r.title = args[0];
       writes.push(args);
       return { rowCount: 1 };
     }
@@ -93,4 +98,19 @@ test('daily sweep is safe to run repeatedly', async () => {
   assert.equal((await runDailyLessonCounterReconciliation(f.db)).updated, 1);
   assert.equal((await runDailyLessonCounterReconciliation(f.db)).updated, 0);
   assert.equal(f.writes.length, 1);
+});
+
+test('partial group reschedule preserves moved member and renumbers remaining active member', async () => {
+  const f = fixture([
+    lesson('group', '2026-10-10', 'Sora and Kei (Cafe) 2/4 · Moved to 17th', {
+      student_id: 7, student_name: 'Sora', status: 'rescheduled', group_sort_order: 1,
+    }),
+    lesson('group', '2026-10-10', 'Sora and Kei (Cafe) 2/4', {
+      student_id: 8, student_name: 'Kei', status: 'scheduled', group_sort_order: 2,
+    }),
+  ], { '8:2026-10': 4 });
+  const result = await reconcileStudentMonthCounters(8, '2026-10', f.db);
+  assert.equal(result.updated, 1);
+  assert.equal(f.rows[0].title, 'Sora and Kei (Cafe) 2/4 · Moved to 17th');
+  assert.equal(f.rows[1].title, 'Kei (Cafe) 1/4');
 });
