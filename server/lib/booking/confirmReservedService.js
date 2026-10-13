@@ -358,8 +358,9 @@ export async function handleConfirmReserved(req, res) {
       });
     }
 
-    // Heal n/total for all students on this week (chronological by start).
-    const studentIdsToRenumber = [
+    // Demo confirmations must not create/overwrite regular monthly lesson packs.
+    // Heal n/total only for normal paid lessons (chronological by start).
+    const studentIdsToRenumber = lessonKindForBooking === 'demo' ? [] : [
       ...new Set(
         groupRows
           .map((r) => Number(r.student_id))
