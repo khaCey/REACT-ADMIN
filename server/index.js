@@ -55,6 +55,7 @@ import {
 import { listBackupFilesInFolder } from './lib/googleDrive.js';
 import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
 import { runDailyLessonCounterReconciliation } from './lib/booking/lessonCounterReconcile.js';
+import { countBookedRegularLessons } from './lib/lessonMonthCounters.js';
 import cron from 'node-cron';
 import multer from 'multer';
 import { tmpdir } from 'os';
@@ -175,7 +176,9 @@ function dedupeStudentLessonsBySlot(lessons) {
       unscheduled.push(lesson);
       continue;
     }
-    const key = `${day}\t${time}`;
+    // A demo and a regular lesson are different appointments, even at the same slot.
+    const kind = String(lesson?.lessonKind || 'regular').trim().toLowerCase();
+    const key = `${day}\t${time}\t${kind}`;
     const prev = bySlot.get(key);
     if (!prev || rank(lesson) > rank(prev)) bySlot.set(key, lesson);
   }
@@ -408,9 +411,9 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           paidLessons = storedPack;
         }
       }
-      // Rows from DB only (before unscheduled placeholders).
-      // Rescheduled-source lessons (`rescheduledTo` exists) do not consume monthly count.
-      const countedLessons = lessons.filter((l) => !l.rescheduledTo).length;
+      // Demo lessons stay visible but never consume paid regular lesson credits.
+      // Cancelled and rescheduled source rows likewise do not consume credits.
+      const countedLessons = countBookedRegularLessons(lessons);
       const bookedLessonsCount = countedLessons;
       const missingCount = Math.max(0, paidLessons - countedLessons);
       for (let i = 0; i < missingCount; i++) {
@@ -434,7 +437,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         missingCount,
         /** Lesson pack size: `lessons` table override if set, else payment-derived (sum vs max). */
         paidLessonsCount: paidLessons,
-        /** Non-cancelled lesson rows this month (before unscheduled placeholders). */
+        /** Active regular/owner lessons only, excluding demos and cancelled/moved sources. */
         bookedLessonsCount,
         year: parseInt(y, 10),
         monthIndex: parseInt(mo, 10) - 1,
