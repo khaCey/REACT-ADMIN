@@ -70,7 +70,7 @@ test('excludes demo/cancelled/moved-source rows and keeps movement marker', asyn
     lesson('other', '2026-10-15', 'Sora (Cafe) 3/4'),
   ], { '7:2026-10': 4 });
   assert.equal((await reconcileStudentMonthCounters(7, '2026-10', f.db)).updated, 2);
-  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 1/4 Moved from 5th');
+  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 1/4 · Moved from 5th');
   assert.equal(f.rows.find((r) => r.event_id === 'other').title, 'Sora (Cafe) 2/4');
   assert.equal(f.rows.find((r) => r.event_id === 'source').title, 'Sora (Cafe) 2/4 Moved to 8th');
 });
