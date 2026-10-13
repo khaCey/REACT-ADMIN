@@ -2,7 +2,7 @@
  * Staff management routes: list (admin/operator), update, delete (admin only for delete)
  */
 import { Router } from 'express';
-import { query } from '../db/index.js';
+import { pool, query } from '../db/index.js';
 import { requireAuth, requireAdmin, requireAdminOrOperator } from '../middleware/auth.js';
 
 const router = Router();
@@ -127,30 +127,54 @@ router.patch('/:id', requireAuth, requireAdminOrOperator, async (req, res) => {
   }
 });
 
-/** DELETE /api/staff/:id - delete staff (admin only). Cleans related records first. */
+/** DELETE /api/staff/:id - deactivate staff without destroying historical records (admin only). */
 router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid staff id' });
+  }
+  if (id === req.staff.id) {
+    return res.status(403).json({ error: 'You cannot delete your own account' });
+  }
+
+  let client;
   try {
-    const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id <= 0) {
-      return res.status(400).json({ error: 'Invalid staff id' });
-    }
-    const existing = await query('SELECT id, name FROM staff WHERE id = $1', [id]);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const existing = await client.query(
+      'SELECT id, name, active FROM staff WHERE id = $1 FOR UPDATE',
+      [id]
+    );
     if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Staff not found' });
     }
-    const teacherName = existing.rows[0].name;
-    await query('DELETE FROM notification_reads WHERE staff_id = $1', [id]);
-    await query('UPDATE notifications SET target_staff_id = NULL WHERE target_staff_id = $1', [id]);
-    await query('DELETE FROM notifications WHERE created_by_staff_id = $1', [id]);
-    await query('DELETE FROM staff_shifts WHERE staff_id = $1', [id]);
-    await query('UPDATE change_log SET staff_id = NULL WHERE staff_id = $1', [id]);
-    await query('DELETE FROM teacher_schedules WHERE teacher_name = $1', [teacherName]);
-    await query('DELETE FROM teacher_shift_extensions WHERE teacher_name = $1', [teacherName]);
-    await query('DELETE FROM teacher_break_presets WHERE teacher_name = $1', [teacherName]);
-    await query('DELETE FROM staff WHERE id = $1', [id]);
-    res.json({ ok: true });
+    const staff = existing.rows[0];
+    if (String(staff.name || '').trim().toLowerCase() === 'khacey') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'The owner account cannot be deleted' });
+    }
+    if (staff.active === false) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Staff account is already inactive' });
+    }
+
+    // Keep historical lessons, conversations, notifications, shifts and audit records.
+    // Both fresh logins and authenticated requests are blocked for inactive staff.
+    await client.query('UPDATE staff SET active = FALSE WHERE id = $1', [id]);
+    await client.query(
+      'UPDATE staff_shifts SET ended_at = NOW() WHERE staff_id = $1 AND ended_at IS NULL',
+      [id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, staff: { id: staff.id, name: staff.name, active: false } });
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch { /* Preserve the original error. */ }
+    }
     res.status(500).json({ error: err.message });
+  } finally {
+    client?.release();
   }
 });
 
