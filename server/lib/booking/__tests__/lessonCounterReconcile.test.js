@@ -86,7 +86,7 @@ test('cross-month reschedule fixes both affected months', async () => {
   assert.equal(r.checked, 2);
   assert.equal(r.updated, 2);
   assert.equal(f.rows.find((r) => r.event_id === 'old').title, 'Sora (Cafe) 1/4');
-  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 1/4 Moved from 8th');
+  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 1/4 · Moved from 8th');
 });
 test('daily sweep is safe to run repeatedly', async () => {
   const f = fixture([lesson('one', '2026-10-01', 'Sora (Cafe) 3/4')], { '7:2026-10': 4 });
