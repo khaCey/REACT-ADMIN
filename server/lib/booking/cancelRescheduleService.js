@@ -48,6 +48,7 @@ import {
   rewriteLessonTitleStudentNames,
 } from '../groupLessonTitle.js';
 import * as D from './domainInternals.js';
+import { reconcileCountersForAffectedRows } from './lessonCounterReconcile.js';
 
 const {
   SQL_NOT_STAFF_BREAK,
@@ -545,6 +546,11 @@ export async function handleRescheduleLinked(req, res) {
       );
     }
 
+    await reconcileCountersForAffectedRows([
+      ...sourceRowsForReschedule,
+      ...sourceRowsForReschedule.map((row) => ({ student_id: row.student_id, month: monthKey })),
+    ]);
+
     res.status(201).json({
       ok: true,
       source_event_id: sourceEventId,
@@ -778,6 +784,8 @@ export async function handleUnrescheduleLinked(req, res) {
       }
     }
 
+    await reconcileCountersForAffectedRows([...sourceRowsFullBefore, ...destRows]);
+
     res.status(200).json({
       ok: true,
       source_event_id: sourceEventId,
@@ -839,6 +847,7 @@ export async function handleRescheduleAwaitingDate(req, res) {
         req
       );
     }
+    await reconcileCountersForAffectedRows(oldRows);
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -883,6 +892,7 @@ export async function handleCancel(req, res) {
         req
       );
     }
+    await reconcileCountersForAffectedRows(oldRows);
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -931,6 +941,7 @@ export async function handleUncancel(req, res) {
         req
       );
     }
+    await reconcileCountersForAffectedRows(oldRows);
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1001,6 +1012,7 @@ export async function handleLegacyReschedule(req, res) {
         });
       }
     }
+    await reconcileCountersForAffectedRows([...oldRows, ...newRows]);
     res.json({ ok: true, event_id: eventId });
   } catch (err) {
     res.status(500).json({ error: err.message });
