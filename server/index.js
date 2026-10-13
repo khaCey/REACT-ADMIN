@@ -1305,7 +1305,7 @@ app.listen(PORT, '0.0.0.0', () => {
       }
 
       // Keep monthly x/y title counters in chronological date order (Tokyo time).
-      const counterCron = (process.env.LESSON_COUNTER_RECONCILE_CRON ?? '15 3 * * *').trim();
+      const counterCron = (process.env.LESSON_COUNTER_RECONCILE_CRON ?? '0 13 * * *').trim();
       if (counterCron && counterCron !== '0' && !/^off$/i.test(counterCron)) {
         cron.schedule(
           counterCron,
