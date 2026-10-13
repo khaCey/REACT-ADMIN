@@ -472,10 +472,25 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     const groupRows = rowsByEvent.get(eid) || [];
     const r = groupRows[0];
     const orderedStudents = await getOrderedEventStudents(eid, db);
-    // A shared group event has only one title; let its first member own it.
-    if (orderedStudents.length > 1 && Number(orderedStudents[0]?.id) !== sid) continue;
-    const titleStudents =
-      orderedStudents.length > 0 ? orderedStudents : [{ name: studentName }];
+    let activeStudents = orderedStudents;
+    if (orderedStudents.length > 1) {
+      // After a partial group reschedule, inactive members must not own or
+      // appear in the remaining shared event's counter title.
+      const groupActive = await db(
+        `SELECT student_id, student_name FROM monthly_schedule
+          WHERE event_id = $1
+            AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+          ORDER BY COALESCE(group_sort_order, 2147483647), student_id ASC`,
+        [eid]
+      );
+      const activeIds = new Set((groupActive.rows || []).map((row) => Number(row.student_id)));
+      const activeNames = new Set((groupActive.rows || []).map((row) => normalizePersonName(row.student_name)));
+      activeStudents = orderedStudents.filter((member) =>
+        activeIds.has(Number(member.id)) || activeNames.has(normalizePersonName(member.name))
+      );
+      if (Number(groupActive.rows?.[0]?.student_id) !== sid) continue;
+    }
+    const titleStudents = activeStudents.length > 0 ? activeStudents : [{ name: studentName }];
     const lessonKind = String(r.lesson_kind || 'regular').toLowerCase();
     const baseTitle =
       lessonKind === 'demo'
@@ -496,7 +511,11 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     titlesByEvent.set(eid, newTitle);
     changedEventIds.push(eid);
     if (orderedStudents.length > 1 || groupRows.length > 1) {
-      await db(`UPDATE monthly_schedule SET title = $1 WHERE event_id = $2`, [newTitle, eid]);
+      await db(
+        `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2
+           AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))`,
+        [newTitle, eid]
+      );
     } else {
       await db(
         `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2 AND student_name = $3`,
