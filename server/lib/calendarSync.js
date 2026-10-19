@@ -6,6 +6,7 @@ import { query } from '../db/index.js';
 import { GOOGLE_INSTANCE_SUFFIX_RE } from './calendarEventId.js';
 import { utcToJstDateAndTime } from './timezone.js';
 import { upsertDemoLessonEvent } from './demoLessonEvents.js';
+import { resolvePolledScheduleStatus } from './calendarPollStatus.js';
 
 /** Appended in buildMonthlyScheduleRows: _YYYY-MM-DD or _YYYY-MM-DD_HH-mm-ss */
 const OUR_DISAMBIGUATION_SUFFIX_RE = /_\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2})?$/;
@@ -109,23 +110,6 @@ function normalizeLessonMode(val, title, location) {
   const byLocation = parseLessonModeFromText(location);
   if (byLocation !== 'unknown') return byLocation;
   return parseLessonModeFromText(title);
-}
-
-/** GAS poll statuses (see Calendar API MonthlyCache / docs). Unknown values fall back to scheduled. */
-const SCHEDULE_STATUS_VALID = {
-  scheduled: true,
-  cancelled: true,
-  reserved: true,
-  rescheduled: true,
-  demo: true,
-  unscheduled: true,
-};
-
-function normalizeScheduleStatus(raw) {
-  const s = String(raw || 'scheduled')
-    .trim()
-    .toLowerCase() || 'scheduled';
-  return SCHEDULE_STATUS_VALID[s] ? s : 'scheduled';
 }
 
 /**
@@ -375,15 +359,8 @@ async function buildMonthlyScheduleRows(data) {
     if (resolvedDate && /^\d{4}-\d{2}/.test(resolvedDate)) months.add(resolvedDate.slice(0, 7));
 
     const title = (r.title || '').toString().trim();
-    // Prefer title markers over poll color→status (GAS once mapped graphite to cancelled, and
-    // only recognized legacy [RESCHEDULED] — not "Moved to/from").
-    let status = normalizeScheduleStatus(r.status != null && r.status !== '' ? r.status : 'scheduled');
-    if (
-      /Moved\s+(to|from)\s+(\?{3}|\d{1,2}(?:st|nd|rd|th))/i.test(title) ||
-      /\[RESCHEDULED\]/i.test(title)
-    ) {
-      status = 'rescheduled';
-    }
+    // The "Moved to" source is inactive; the "Moved from" replacement stays active.
+    const status = resolvePolledScheduleStatus(r.status, title);
     const isKids = (r.isKidsLesson || r.is_kids_lesson || '') === '子' ||
       r.isKidsLesson === true || r.is_kids_lesson === true;
     const teacherName = (r.teacherName || r.teacher_name || '').toString().trim();
