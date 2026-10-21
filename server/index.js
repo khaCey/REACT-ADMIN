@@ -57,6 +57,7 @@ import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
 import { runDailyLessonCounterReconciliation } from './lib/booking/lessonCounterReconcile.js';
 import { countBookedRegularLessons } from './lib/lessonMonthCounters.js';
 import cron from 'node-cron';
+import { pushGuideStaffRoster } from './lib/guideStaffRosterPush.js';
 import multer from 'multer';
 import { tmpdir } from 'os';
 
@@ -1271,6 +1272,38 @@ runMigrations()
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API running at http://localhost:${PORT} (network: http://0.0.0.0:${PORT})`);
   registerWatch().catch(() => {});
+
+      // Optional outbound-only Guide staff roster sync. Never opens inbound access
+      // to this private Student Admin and never changes any student records.
+      const guideSyncUrl = (process.env.GS_GUIDE_STAFF_SYNC_URL || '').trim();
+      const guideSyncSecret = (process.env.GS_GUIDE_STAFF_SYNC_SECRET || '').trim();
+      if (guideSyncUrl || guideSyncSecret) {
+        if (!guideSyncUrl || guideSyncSecret.length < 32) {
+          console.warn('[guide-staff-sync] disabled: supply HTTPS URL and 32+ character secret.');
+        } else {
+          let guideSyncRunning = false;
+          const sendGuideRoster = async () => {
+            if (guideSyncRunning) return;
+            guideSyncRunning = true;
+            try {
+              const result = await pushGuideStaffRoster({
+                queryFn: query,
+                url: guideSyncUrl,
+                secret: guideSyncSecret,
+              });
+              console.log('[guide-staff-sync] sent', result.count, 'active staff');
+            } catch (err) {
+              console.warn('[guide-staff-sync] failed:', err.message);
+            } finally {
+              guideSyncRunning = false;
+            }
+          };
+          // Best effort: initial snapshot after DB migrations, then refresh.
+          sendGuideRoster().catch(() => {});
+          cron.schedule('*/10 * * * *', sendGuideRoster, { timezone: 'Asia/Tokyo' });
+          console.log('[guide-staff-sync] outbound sync scheduled every ten minutes');
+        }
+      }
 
       const cronExpr = process.env.BACKUP_SCHEDULE_CRON || '0 12 * * *';
       const tz = process.env.BACKUP_SCHEDULE_TZ || 'Asia/Tokyo';

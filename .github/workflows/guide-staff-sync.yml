@@ -1,0 +1,29 @@
+name: Website Guide staff roster sync validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server/index.js'
+      - 'server/lib/guideStaffRosterPush.js'
+      - 'server/lib/__tests__/guideStaffRosterPush.test.js'
+      - '.github/workflows/guide-staff-sync.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  staff-roster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Node syntax
+        run: |
+          node --check server/index.js
+          node --check server/lib/guideStaffRosterPush.js
+      - name: Test outbound roster sync
+        run: node --test server/lib/__tests__/guideStaffRosterPush.test.js
