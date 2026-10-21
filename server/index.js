@@ -412,7 +412,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
         }
       }
       // Demo lessons stay visible but never consume paid regular lesson credits.
-      // Cancelled and rescheduled source rows likewise do not consume credits.
+      // Cancelled lessons and date-pending reschedules retain credits; linked sources do not.
       const countedLessons = countBookedRegularLessons(lessons);
       const bookedLessonsCount = countedLessons;
       const missingCount = Math.max(0, paidLessons - countedLessons);

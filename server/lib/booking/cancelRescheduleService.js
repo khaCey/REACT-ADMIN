@@ -1,3 +1,5 @@
+import { syncLessonCalendarStyle, queueLessonCalendarStyle, needsCalendarStyleRetry } from './lessonCalendarStyle.js';
+import { applyCancelledTitleMarker, restoreActiveLessonTitle } from '../lessonMonthCounters.js';
 /**
  * Booking service handler — logic extracted from schedule routes.
  * Staff routes remain thin adapters that call these handlers unchanged.
@@ -127,9 +129,33 @@ const {
   collectExcludeCalendarEventIds,
 } = D;
 
+function restoredSourceTitle(row) {
+  const base = restoreActiveLessonTitle(row?.title || '');
+  const from = scheduleRowDateToYyyyMmDd(row?.reschedule_snapshot_from_date);
+  return from ? applyRescheduleTitleMarker(base, 'from', formatOrdinalCalendarDay(from)) : base;
+}
+
+async function validateRestoredSlot(rows, excludedEventIds, db) {
+  const row = rows[0];
+  const startDate = new Date(row.start);
+  const endDate = new Date(row.end);
+  const dateStr = scheduleRowDateToYyyyMmDd(row.date);
+  if (!dateStr || !Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) {
+    return { ok: false, status: 409, error: 'The original lesson has no valid time to restore' };
+  }
+  const students = (await db('SELECT id, name, is_child, payment FROM students WHERE id = ANY($1::int[])', [rows.map((r) => r.student_id)])).rows;
+  if (!students.length) return { ok: false, status: 409, error: 'Unable to resolve lesson students' };
+  return assertBookableSlotForConfirm({ startDate, endDate, dateStr, orderedStudents: students, excludedEventIds, db });
+}
+
 export async function handleRescheduleLinked(req, res) {
   let client;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Serialise related status/link changes before inspecting source state.
+    await client.query("SELECT pg_advisory_xact_lock(1936941420, 1)");
+    const db = (sql, args) => client ? client.query(sql, args) : query(sql, args);
     const {
       source_event_id,
       student_id,
@@ -148,7 +174,7 @@ export async function handleRescheduleLinked(req, res) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStrRaw)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
     if (!/^\d{2}:\d{2}$/.test(timeStrRaw)) return res.status(400).json({ error: 'time must be HH:MM' });
 
-    const studentResult = await query('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
+    const studentResult = await db('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
     if (studentResult.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
     const student = studentResult.rows[0];
     const studentName = String(student.name || '').trim();
@@ -158,12 +184,12 @@ export async function handleRescheduleLinked(req, res) {
     const swappedStudentName =
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
-      await query(
+      await db(
         `SELECT event_id, lesson_uuid, student_name, student_id, status, title, lesson_kind, awaiting_reschedule_date, group_id, group_sort_order,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
-         WHERE event_id = $1`,
+         WHERE event_id = $1 FOR UPDATE`,
         [sourceEventId]
       )
     ).rows;
@@ -176,16 +202,19 @@ export async function handleRescheduleLinked(req, res) {
       const n = String(r.student_name || '').replace(/\s+/g, ' ').trim();
       return nameCandidates.includes(n);
     });
-    const sourceAnchor = byStudentId || byName || (candidateRows.length === 1 ? candidateRows[0] : null);
+    const sourceAnchor = byStudentId || byName;
     if (!sourceAnchor) {
       return res.status(404).json({ error: 'Source lesson not found for student' });
     }
-    const sourceStatus = String(sourceAnchor.status || '').toLowerCase();
+    const sourceStatus = String(sourceAnchor.status || 'scheduled').trim().toLowerCase();
+    const existingLink = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 LIMIT 1', [sourceEventId]);
+    if (existingLink.rows.length) return res.status(409).json({ error: 'This lesson already has a replacement. Refresh the schedule.' });
     const sourceCancelled = sourceStatus === 'cancelled';
     const sourceRescheduled = sourceStatus === 'rescheduled';
     const awaitingDate = !!sourceAnchor.awaiting_reschedule_date;
-    if (sourceCancelled) {
-      return res.status(400).json({ error: 'Source lesson is already cancelled' });
+    if (sourceCancelled) return res.status(400).json({ error: 'Source lesson is already cancelled' });
+    if (!['scheduled', 'demo', 'rescheduled'].includes(sourceStatus)) {
+      return res.status(409).json({ error: 'This lesson cannot be rescheduled in its current state' });
     }
     if (sourceRescheduled && !awaitingDate) {
       return res.status(400).json({ error: 'Source lesson is already rescheduled' });
@@ -202,8 +231,15 @@ export async function handleRescheduleLinked(req, res) {
     const duration = Math.min(120, Math.max(30, Number(duration_minutes) || 50));
     const [hh, mm] = timeStrRaw.split(':').map((x) => parseInt(x, 10) || 0);
     const startDate = parseJstToUtc(dateStrRaw, hh, mm);
-    if (!startDate) return res.status(400).json({ error: 'Invalid date or time' });
+    if (!startDate || utcToJstDateAndTime(startDate)?.date !== dateStrRaw || hh > 23 || mm > 59) return res.status(400).json({ error: 'Invalid date or time' });
     const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+
+    const slotCheck = await assertBookableSlotForConfirm({
+      startDate, endDate, dateStr: dateStrRaw,
+      orderedStudents: [{ ...student, id: studentIdNum }],
+      excludedEventIds: [sourceEventId], db,
+    });
+    if (!slotCheck.ok) return res.status(slotCheck.status || 409).json({ error: slotCheck.error });
 
     const locationLabel = String(location || 'Cafe').trim() || 'Cafe';
     const monthKey = dateStrRaw.slice(0, 7);
@@ -217,7 +253,7 @@ export async function handleRescheduleLinked(req, res) {
     const toDisplay = formatOrdinalCalendarDay(dateStrRaw);
     const movedFromLabel = fromDisplay || '???';
 
-    const sourceOrderedStudents = await getOrderedEventStudents(sourceEventId);
+    const sourceOrderedStudents = await getOrderedEventStudents(sourceEventId, db);
     const sourceTitleSeed = sourceAnchor.title || '';
     const kidsAwareSourceStudents =
       sourceOrderedStudents.length > 0
@@ -233,16 +269,16 @@ export async function handleRescheduleLinked(req, res) {
     } else {
       let totalLessons = parsePackTotalFromTitle(sourceAnchor.title);
       if (!totalLessons) {
-        const packRow = await query('SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2', [studentIdNum, monthKey]);
+        const packRow = await db('SELECT lessons FROM lessons WHERE student_id = $1 AND month = $2', [studentIdNum, monthKey]);
         totalLessons = Math.max(0, parseInt(packRow.rows[0]?.lessons, 10) || 0);
       }
       if (!totalLessons) totalLessons = 1;
 
       // Quota-neutral numbering: when moving within the same month, source lesson is effectively replaced.
       const sourceMonth = (
-        await query(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
+        await db(`SELECT to_char(date, 'YYYY-MM') AS ym FROM monthly_schedule WHERE event_id = $1 AND student_id = $2 LIMIT 1`, [sourceEventId, studentIdNum])
       ).rows[0]?.ym;
-      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey);
+      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey, db);
       const nextLessonNumber = sourceMonth === monthKey ? Math.max(1, bookedThisMonth) : bookedThisMonth + 1;
       destinationBaseTitle = applyKidsTitlePrefix(
         `${studentName} (${locationLabel}) ${nextLessonNumber}/${totalLessons}`,
@@ -280,20 +316,18 @@ export async function handleRescheduleLinked(req, res) {
           ? 'online'
           : 'cafe';
 
-    const sourceRowsFull = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const sourceRowsFull = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [sourceEventId])).rows;
     const skipAmbiguousRecurringCalendar = await shouldSkipAmbiguousRecurringForRows(
       sourceEventId,
-      sourceRowsForReschedule
+      sourceRowsForReschedule, db
     );
     /** Same predicate as PATCH cancel: style source Calendar (graphite) when lesson was on Calendar. */
     const shouldStyleSourceCalendar =
       isBookingGasEnabled() &&
-      shouldSyncCalendarForRows(sourceRowsFull) &&
+      (shouldSyncCalendarForRows(sourceRowsFull) || sourceRowsFull.some(needsCalendarStyleRetry)) &&
       !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
       !skipAmbiguousRecurringCalendar;
 
-    client = await pool.connect();
-    await client.query('BEGIN');
     const srcDateStr = String(sourceAnchor.src_date_str || '').trim();
     const srcDateForSnap = /^\d{4}-\d{2}-\d{2}$/.test(srcDateStr) ? srcDateStr : null;
     const srcTimeJst = String(sourceAnchor.src_time_jst || '').trim() || null;
@@ -476,43 +510,26 @@ export async function handleRescheduleLinked(req, res) {
         [sourceLessonUuids, destinationLessonUuid]
       );
     }
+    await queueLessonCalendarStyle(db, sourceEventId, sourceRowsFull);
     await client.query('COMMIT');
+    client.release();
+    client = null;
 
     const startIso = startDate.toISOString();
     const endIso = endDate.toISOString();
 
     /** Keep original Calendar event at original time: graphite + “Moved to …” title; the new event at the new time is created when the client calls POST /schedule/sync. */
-    let calendarSourceGraphiteOk = false;
-    let calendarSourceStyleError = null;
-
-    if (shouldStyleSourceCalendar) {
-      try {
-        const styleUpd = await updateBookedLessonEventInGas(
-          sourceEventId,
-          {
-            title: canonicalSourceTitleUpdated,
-            colorId: '8',
-            mergeStudentAdminDescription: { awaiting_reschedule_date: false },
-          },
-          calendarGasOptions(sourceRowsForReschedule)
-        );
-        if (styleUpd.ok) {
-          calendarSourceGraphiteOk = true;
-        } else {
-          calendarSourceStyleError = styleUpd.error || 'Calendar source styling failed';
-          console.error('[reschedule-linked] source graphite/title update failed:', calendarSourceStyleError);
-        }
-      } catch (err) {
-        calendarSourceStyleError = err?.message || String(err);
-        console.error('[reschedule-linked] source graphite/title update threw:', calendarSourceStyleError);
-      }
-    }
+    const sourceStyle = shouldStyleSourceCalendar
+      ? await syncLessonCalendarStyle(sourceEventId, sourceRowsFull)
+      : {};
+    const calendarSourceGraphiteOk = sourceStyle.calendar_sync_status === 'synced';
+    const calendarSourceStyleError = sourceStyle.calendar_sync_error || null;
 
     // Calendar sync for the new event is triggered by the client via POST /schedule/sync
     // (single trigger). Auto-queuing here in addition would race with the client call and
     // create duplicate calendar events / spurious "failed" results.
 
-    const sourceRowsAfter = (await query(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [sourceEventId])).rows;
+    const sourceRowsAfter = (await db(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [sourceEventId])).rows;
     for (const oldSourceRow of sourceRowsForReschedule) {
       const sourceRowStudentName = String(oldSourceRow.student_name || '').trim();
       if (!sourceRowStudentName) continue;
@@ -530,7 +547,7 @@ export async function handleRescheduleLinked(req, res) {
         req
       );
     }
-    const newRowsForLog = (await query(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [localEventId])).rows;
+    const newRowsForLog = (await db(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [localEventId])).rows;
     for (const newRowForLog of newRowsForLog) {
       await logChange(
         {
@@ -566,20 +583,28 @@ export async function handleRescheduleLinked(req, res) {
     }
     res.status(500).json({ error: err.message });
   } finally {
-    if (client) client.release();
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 
 export async function handleUnrescheduleLinked(req, res) {
   let client;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Serialise related status/link changes before inspecting source state.
+    await client.query("SELECT pg_advisory_xact_lock(1936941420, 1)");
+    const db = (sql, args) => client ? client.query(sql, args) : query(sql, args);
     const { source_event_id, student_id, source_student_name } = req.body || {};
     const sourceEventId = String(source_event_id || '').trim();
     const studentIdNum = Number(student_id);
     if (!sourceEventId) return res.status(400).json({ error: 'source_event_id is required' });
     if (!Number.isFinite(studentIdNum)) return res.status(400).json({ error: 'student_id must be a number' });
 
-    const studentResult = await query('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
+    const studentResult = await db('SELECT id, name, is_child, status, payment FROM students WHERE id = $1', [studentIdNum]);
     if (studentResult.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
     const studentName = String(studentResult.rows[0].name || '').trim();
     const normalizedStudentName = studentName.replace(/\s+/g, ' ').trim();
@@ -588,12 +613,12 @@ export async function handleUnrescheduleLinked(req, res) {
     const swappedStudentName =
       studentParts.length >= 2 ? [...studentParts.slice(-1), ...studentParts.slice(0, -1)].join(' ') : '';
     const candidateRows = (
-      await query(
+      await db(
         `SELECT event_id, lesson_uuid, student_name, student_id, status, title, awaiting_reschedule_date,
                 to_char(date, 'YYYY-MM-DD') AS src_date_str,
                 to_char(start AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') AS src_time_jst
          FROM monthly_schedule
-         WHERE event_id = $1`,
+         WHERE event_id = $1 FOR UPDATE`,
         [sourceEventId]
       )
     ).rows;
@@ -606,7 +631,7 @@ export async function handleUnrescheduleLinked(req, res) {
       const n = String(r.student_name || '').replace(/\s+/g, ' ').trim();
       return nameCandidates.includes(n);
     });
-    const source = byStudentId || byName || (candidateRows.length === 1 ? candidateRows[0] : null);
+    const source = byStudentId || byName;
     if (!source) {
       return res.status(404).json({ error: 'Source lesson not found for student' });
     }
@@ -614,7 +639,7 @@ export async function handleUnrescheduleLinked(req, res) {
     if (!sourceStudentName) return res.status(400).json({ error: 'Source student name is missing' });
     const sourceLessonUuid = String(source.lesson_uuid || '').trim();
 
-    const linkRes = await query(
+    const linkRes = await db(
       `SELECT * FROM reschedules WHERE from_event_id = $1`,
       [sourceEventId]
     );
@@ -628,21 +653,29 @@ export async function handleUnrescheduleLinked(req, res) {
       return res.status(400).json({ error: 'Invalid reschedule links (multiple destination events)' });
     }
 
-    const destRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [toEventId])).rows;
+    const destRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [toEventId])).rows;
     if (destRows.length === 0) {
       return res.status(400).json({ error: 'Destination lesson not found; link may be stale' });
     }
 
-    const sourceRowsFullBefore = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [sourceEventId])).rows;
+    const laterLinks = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 LIMIT 1', [toEventId]);
+    if (laterLinks.rows.length) {
+      return res.status(409).json({ error: 'The replacement was rescheduled again. Undo its latest reschedule first.' });
+    }
+
+    const sourceRowsFullBefore = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [sourceEventId])).rows;
     const skipAmbiguousRecurringCalendar = await shouldSkipAmbiguousRecurringForRows(
       sourceEventId,
-      sourceRowsFullBefore
+      sourceRowsFullBefore, db
     );
     const shouldStyleSourceCalendar =
       isBookingGasEnabled() &&
-      shouldSyncCalendarForRows(sourceRowsFullBefore) &&
+      (shouldSyncCalendarForRows(sourceRowsFullBefore) || sourceRowsFullBefore.some(needsCalendarStyleRetry)) &&
       !String(sourceEventId).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX) &&
       !skipAmbiguousRecurringCalendar;
+
+    const restoredSlot = await validateRestoredSlot(sourceRowsFullBefore, [sourceEventId, toEventId], db);
+    if (!restoredSlot.ok) return res.status(restoredSlot.status || 409).json({ error: restoredSlot.error });
 
     if (isBookingGasEnabled() && rowsIndicateExplicitCalendarSyncedForGasDelete(destRows)) {
       const del = await deleteBookedLessonEventInGas(toEventId, calendarGasOptions(destRows));
@@ -654,8 +687,6 @@ export async function handleUnrescheduleLinked(req, res) {
       }
     }
 
-    client = await pool.connect();
-    await client.query('BEGIN');
     const destinationLessonUuids = [
       ...new Set(destRows.map((row) => String(row.lesson_uuid || '').trim()).filter(Boolean)),
     ];
@@ -678,9 +709,7 @@ export async function handleUnrescheduleLinked(req, res) {
          status = 'scheduled',
          awaiting_reschedule_date = FALSE,
          reschedule_snapshot_to_date = NULL,
-         reschedule_snapshot_to_time = NULL,
-         reschedule_snapshot_from_date = NULL,
-         reschedule_snapshot_from_time = NULL
+         reschedule_snapshot_to_time = NULL
        WHERE event_id = $1`,
       [sourceEventId]
     );
@@ -691,10 +720,13 @@ export async function handleUnrescheduleLinked(req, res) {
         `UPDATE monthly_schedule
             SET title = $3
           WHERE event_id = $1 AND student_name = $2`,
-        [sourceEventId, sourceRowStudentName, stripRescheduleTitleMarker(oldSourceRow.title || '')]
+        [sourceEventId, sourceRowStudentName, restoredSourceTitle(oldSourceRow)]
       );
     }
+    await queueLessonCalendarStyle(db, sourceEventId, sourceRowsFullBefore);
     await client.query('COMMIT');
+    client.release();
+    client = null;
 
     for (const oldRow of destRows) {
       await logChange(
@@ -708,7 +740,7 @@ export async function handleUnrescheduleLinked(req, res) {
         req
       );
     }
-    const sourceRowsAfter = (await query(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [sourceEventId])).rows;
+    const sourceRowsAfter = (await db(`SELECT * FROM monthly_schedule WHERE event_id = $1`, [sourceEventId])).rows;
     for (const oldSourceRow of sourceRowsFullBefore) {
       const sourceRowStudentName = String(oldSourceRow.student_name || '').trim();
       if (!sourceRowStudentName) continue;
@@ -727,60 +759,10 @@ export async function handleUnrescheduleLinked(req, res) {
       );
     }
 
-    let calendarSourceRestoreError = null;
-    if (shouldStyleSourceCalendar) {
-      try {
-        const activeForTitle = (
-          await query(
-            `SELECT m.*, s.name AS canonical_student_name, s.status AS student_status,
-                    s.payment AS student_payment, s.is_child AS student_is_child
-               FROM monthly_schedule m
-               LEFT JOIN students s ON s.id = m.student_id
-              WHERE m.event_id = $1
-                AND (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
-              ORDER BY COALESCE(m.group_sort_order, 2147483647) ASC,
-                       LOWER(COALESCE(s.name, m.student_name)) ASC`,
-            [sourceEventId]
-          )
-        ).rows;
-        if (activeForTitle.length > 0) {
-          const orderedStudents = activeForTitle.map((entry, index) => ({
-            id: entry.student_id != null ? Number(entry.student_id) : null,
-            name: String(entry.canonical_student_name || entry.student_name || '').trim(),
-            status: entry.student_status,
-            payment: entry.student_payment,
-            is_child: !!entry.student_is_child,
-            sort_order: parseInt(entry.group_sort_order, 10) || index + 1,
-          }));
-          const gasTitle =
-            activeForTitle.length > 1
-              ? buildCanonicalLessonTitle(activeForTitle[0]?.title || '', orderedStudents)
-              : stripRescheduleTitleMarker(activeForTitle[0]?.title || '');
-          const lk = String(activeForTitle[0]?.lesson_kind || 'regular').toLowerCase();
-          const cid = bookingEventColorId(lk);
-          const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
-          const restoreGasOpts = calendarGasOptions(sourceRowsFullBefore);
-          const styleUpd = cid
-            ? await updateBookedLessonEventInGas(
-                sourceEventId,
-                { title: gasTitle, colorId: cid, ...merge },
-                restoreGasOpts
-              )
-            : await updateBookedLessonEventInGas(
-                sourceEventId,
-                { title: gasTitle, clearColor: true, ...merge },
-                restoreGasOpts
-              );
-          if (!styleUpd.ok) {
-            calendarSourceRestoreError = styleUpd.error || 'Calendar source restore failed';
-            console.error('[unreschedule-linked] source calendar restore failed:', calendarSourceRestoreError);
-          }
-        }
-      } catch (err) {
-        calendarSourceRestoreError = err?.message || String(err);
-        console.error('[unreschedule-linked] source calendar restore threw:', calendarSourceRestoreError);
-      }
-    }
+    const sourceStyle = shouldStyleSourceCalendar
+      ? await syncLessonCalendarStyle(sourceEventId, sourceRowsFullBefore)
+      : {};
+    const calendarSourceRestoreError = sourceStyle.calendar_sync_error || null;
 
     await reconcileCountersForAffectedRows([...sourceRowsFullBefore, ...destRows]);
 
@@ -796,41 +778,50 @@ export async function handleUnrescheduleLinked(req, res) {
     }
     res.status(500).json({ error: err.message });
   } finally {
-    if (client) client.release();
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 
 export async function handleRescheduleAwaitingDate(req, res) {
+  let client;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Serialise related status/link changes before inspecting source state.
+    await client.query("SELECT pg_advisory_xact_lock(1936941420, 1)");
+    const db = (sql, args) => client ? client.query(sql, args) : query(sql, args);
     const eventId =
       getEventIdFromPath(req.path, 'reschedule-awaiting-date') ||
       decodeURIComponent((req.params[0] || req.params[1] || '').trim());
-    const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const oldRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    const skipAmbiguousGas = await shouldSkipAmbiguousRecurringForRows(eventId, oldRows);
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && !skipAmbiguousGas) {
-      const pendingTitle = applyRescheduleTitleMarker(oldRows[0]?.title || '', 'to', '???');
-      await updateBookedLessonEventInGas(
-        eventId,
-        {
-          title: pendingTitle,
-          colorId: '8',
-          mergeStudentAdminDescription: { awaiting_reschedule_date: true },
-        },
-        calendarGasOptions(oldRows)
-      );
+    const linked = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 LIMIT 1', [eventId]);
+    if (linked.rows.length) return res.status(409).json({ error: 'This lesson has a replacement. Use Undo reschedule first.' });
+    if (oldRows.some((row) => !['scheduled', 'demo', 'rescheduled'].includes(String(row.status || 'scheduled').trim().toLowerCase())
+      || (String(row.status).trim().toLowerCase() === 'rescheduled' && !row.awaiting_reschedule_date))) {
+      return res.status(409).json({ error: 'Lesson status has changed. Refresh the schedule.' });
     }
-    await query(
+    await db(
       `UPDATE monthly_schedule
          SET status = 'rescheduled',
              awaiting_reschedule_date = TRUE,
+             reschedule_snapshot_to_date = NULL,
+             reschedule_snapshot_to_time = NULL,
              title = $2
        WHERE event_id = $1`,
       [eventId, applyRescheduleTitleMarker(oldRows[0]?.title || '', 'to', '???')]
     );
-    const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const newRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
+    await queueLessonCalendarStyle(db, eventId, oldRows);
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+    const calendar = await syncLessonCalendarStyle(eventId, oldRows);
     for (let i = 0; i < oldRows.length; i++) {
       const oldRow = oldRows[i];
       const newRow = newRows.find((r) => r.student_name === oldRow.student_name) || oldRow;
@@ -846,36 +837,46 @@ export async function handleRescheduleAwaitingDate(req, res) {
       );
     }
     await reconcileCountersForAffectedRows(oldRows);
-    res.json({ ok: true, event_id: eventId });
+    res.json({ ok: true, event_id: eventId, ...calendar });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 
 export async function handleCancel(req, res) {
+  let client;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Serialise related status/link changes before inspecting source state.
+    await client.query("SELECT pg_advisory_xact_lock(1936941420, 1)");
+    const db = (sql, args) => client ? client.query(sql, args) : query(sql, args);
     const eventId = getEventIdFromPath(req.path, 'cancel') || decodeURIComponent((req.params[0] || req.params[1] || '').trim());
-    const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const oldRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    const skipAmbiguousGas = await shouldSkipAmbiguousRecurringForRows(eventId, oldRows);
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && !skipAmbiguousGas) {
-      // Google Calendar Graphite = colorId "8".
-      await updateBookedLessonEventInGas(
-        eventId,
-        {
-          colorId: '8',
-          mergeStudentAdminDescription: { awaiting_reschedule_date: false },
-        },
-        calendarGasOptions(oldRows)
-      );
+    const linked = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 LIMIT 1', [eventId]);
+    if (linked.rows.length) return res.status(409).json({ error: 'This lesson has a replacement. Use Undo reschedule first.' });
+    if (oldRows.some((row) => !['scheduled', 'demo', 'cancelled', 'rescheduled'].includes(String(row.status || 'scheduled').trim().toLowerCase())
+      || (String(row.status).trim().toLowerCase() === 'rescheduled' && !row.awaiting_reschedule_date))) {
+      return res.status(409).json({ error: 'Lesson status has changed. Refresh the schedule.' });
     }
-    await query(
-      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE WHERE event_id = $1`,
-      [eventId]
+    await db(
+      `UPDATE monthly_schedule SET status = 'cancelled', awaiting_reschedule_date = FALSE, title = $2 WHERE event_id = $1`,
+      [eventId, applyCancelledTitleMarker(oldRows[0]?.title)]
     );
-    const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const newRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
+    await queueLessonCalendarStyle(db, eventId, oldRows);
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+    const calendar = await syncLessonCalendarStyle(eventId, oldRows);
     for (let i = 0; i < oldRows.length; i++) {
       const oldRow = oldRows[i];
       const newRow = newRows.find((r) => r.student_name === oldRow.student_name) || oldRow;
@@ -891,40 +892,54 @@ export async function handleCancel(req, res) {
       );
     }
     await reconcileCountersForAffectedRows(oldRows);
-    res.json({ ok: true, event_id: eventId });
+    res.json({ ok: true, event_id: eventId, ...calendar });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 
 export async function handleUncancel(req, res) {
+  let client;
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Serialise related status/link changes before inspecting source state.
+    await client.query("SELECT pg_advisory_xact_lock(1936941420, 1)");
+    const db = (sql, args) => client ? client.query(sql, args) : query(sql, args);
     const eventId = getEventIdFromPath(req.path, 'uncancel') || decodeURIComponent((req.params[0] || req.params[1] || '').trim());
-    const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const oldRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
     if (oldRows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows)) {
-      const lk = String(oldRows[0]?.lesson_kind || 'regular').toLowerCase();
-      const cid = bookingEventColorId(lk);
-      const restoredTitle = stripRescheduleTitleMarker(oldRows[0]?.title || '');
-      const merge = { mergeStudentAdminDescription: { awaiting_reschedule_date: false } };
-      const gasOpts = calendarGasOptions(oldRows);
-      if (cid) {
-        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, colorId: cid, ...merge }, gasOpts);
-      } else {
-        await updateBookedLessonEventInGas(eventId, { title: restoredTitle, clearColor: true, ...merge }, gasOpts);
-      }
+    const linked = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 LIMIT 1', [eventId]);
+    if (linked.rows.length) return res.status(409).json({ error: 'This lesson has a replacement. Use Undo reschedule first.' });
+    if (oldRows.some((row) => !['cancelled', 'rescheduled'].includes(String(row.status || 'scheduled').trim().toLowerCase())
+      || (String(row.status).trim().toLowerCase() === 'rescheduled' && !row.awaiting_reschedule_date))) {
+      return res.status(409).json({ error: 'Lesson status has changed. Refresh the schedule.' });
     }
-    await query(
+    const restoredSlot = await validateRestoredSlot(oldRows, [eventId], db);
+    if (!restoredSlot.ok) return res.status(restoredSlot.status || 409).json({ error: restoredSlot.error });
+    await db(
       `UPDATE monthly_schedule
          SET status = 'scheduled',
              awaiting_reschedule_date = FALSE,
+             reschedule_snapshot_to_date = NULL,
+             reschedule_snapshot_to_time = NULL,
              title = $2
        WHERE event_id = $1`,
-      [eventId, stripRescheduleTitleMarker(oldRows[0]?.title || '')]
+      [eventId, restoredSourceTitle(oldRows[0])]
     );
-    const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const newRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
+    await queueLessonCalendarStyle(db, eventId, oldRows);
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+    const calendar = await syncLessonCalendarStyle(eventId, oldRows);
     for (let i = 0; i < oldRows.length; i++) {
       const oldRow = oldRows[i];
       const newRow = newRows.find((r) => r.student_name === oldRow.student_name) || oldRow;
@@ -940,80 +955,67 @@ export async function handleUncancel(req, res) {
       );
     }
     await reconcileCountersForAffectedRows(oldRows);
-    res.json({ ok: true, event_id: eventId });
+    res.json({ ok: true, event_id: eventId, ...calendar });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 
+/** Compatibility endpoint for moving an unlinked lesson in place. */
 export async function handleLegacyReschedule(req, res) {
+  let client;
   try {
     const eventId = getEventIdFromPath(req.path, 'reschedule') || decodeURIComponent((req.params[0] || req.params[1] || '').trim());
     const { date, start, end } = req.body || {};
-    const oldRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
-    if (oldRows.length === 0) {
-      return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    if (!date && !start && !end) return res.status(400).json({ error: 'Provide at least one of date, start, end' });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(1936941420, 1)');
+    const db = client.query.bind(client);
+    const oldRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1 FOR UPDATE', [eventId])).rows;
+    if (!oldRows.length) return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    const links = await db('SELECT 1 FROM reschedules WHERE from_event_id = $1 OR to_event_id = $1 LIMIT 1', [eventId]);
+    if (links.rows.length || oldRows.some((r) => !['scheduled', 'demo'].includes(String(r.status || 'scheduled').trim().toLowerCase()))) {
+      return res.status(409).json({ error: 'Use the linked reschedule flow for this lesson' });
     }
-    const updates = [];
-    const values = [];
-    let i = 1;
-    if (date != null && date !== '') {
-      updates.push(`date = $${i}::date`);
-      values.push(date);
-      i++;
+    const row = oldRows[0];
+    const oldStart = new Date(row.start);
+    const oldEnd = new Date(row.end);
+    const requestedDate = String(date || '').trim();
+    const oldClock = utcToJstDateAndTime(oldStart)?.time;
+    const startDate = start ? new Date(start) : requestedDate && oldClock
+      ? parseJstToUtc(requestedDate, ...oldClock.split(':').map(Number)) : oldStart;
+    if (!startDate || !Number.isFinite(startDate.getTime())) return res.status(400).json({ error: 'Invalid lesson start' });
+    const endDate = end ? new Date(end) : new Date(startDate.getTime() + oldEnd.getTime() - oldStart.getTime());
+    const dateStr = utcToJstDateAndTime(startDate)?.date;
+    if (!dateStr || !Number.isFinite(endDate.getTime()) || endDate <= startDate || (requestedDate && requestedDate !== dateStr)) {
+      return res.status(400).json({ error: 'Invalid or inconsistent lesson date and time' });
     }
-    if (start != null && start !== '') {
-      updates.push(`start = $${i}::timestamptz`);
-      values.push(start);
-      i++;
-    }
-    if (end != null && end !== '') {
-      updates.push(`"end" = $${i}::timestamptz`);
-      values.push(end);
-      i++;
-    }
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'Provide at least one of date, start, end' });
-    }
-    values.push(eventId);
-    await query(
-      `UPDATE monthly_schedule SET ${updates.join(', ')} WHERE event_id = $${i}`,
-      values
-    );
-    const newRows = (await query('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
-    for (let j = 0; j < oldRows.length; j++) {
-      const oldRow = oldRows[j];
-      const newRow = newRows.find((r) => r.student_name === oldRow.student_name) || oldRow;
-      await logChange(
-        {
-          entityType: 'monthly_schedule',
-          entityKey: `${eventId}_${oldRow.student_name}`,
-          action: 'update',
-          oldData: oldRow,
-          newData: newRow,
-        },
-        req
-      );
-    }
-    if (isBookingGasEnabled() && shouldSyncCalendarForRows(oldRows) && newRows.length > 0) {
-      const nr = newRows[0];
-      const startIso = nr.start ? new Date(nr.start).toISOString() : '';
-      const endIso = nr.end ? new Date(nr.end).toISOString() : '';
-      const patch = {
-        ...(nr.title ? { title: String(nr.title) } : {}),
-        ...(startIso ? { startIso } : {}),
-        ...(endIso ? { endIso } : {}),
-      };
-      if (Object.keys(patch).length > 0) {
-        updateBookedLessonEventInGas(eventId, patch, calendarGasOptions(oldRows)).catch((err) => {
-          console.error('[schedule/reschedule] calendar update failed:', err?.message || err);
-        });
-      }
+    const students = (await db('SELECT id, name, is_child, payment FROM students WHERE id = ANY($1::int[])', [oldRows.map((r) => r.student_id)])).rows;
+    if (!students.length) return res.status(409).json({ error: 'Unable to resolve lesson students' });
+    const slot = await assertBookableSlotForConfirm({ startDate, endDate, dateStr, orderedStudents: students, excludedEventIds: [eventId], db });
+    if (!slot.ok) return res.status(slot.status || 409).json({ error: slot.error });
+    await db('UPDATE monthly_schedule SET date = $2::date, start = $3::timestamptz, "end" = $4::timestamptz WHERE event_id = $1', [eventId, dateStr, startDate.toISOString(), endDate.toISOString()]);
+    await queueLessonCalendarStyle(db, eventId, oldRows);
+    const newRows = (await db('SELECT * FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    await db('COMMIT'); client.release(); client = null;
+    const calendar = await syncLessonCalendarStyle(eventId, oldRows);
+    for (const oldRow of oldRows) {
+      await logChange({ entityType: 'monthly_schedule', entityKey: `${eventId}_${oldRow.student_name}`, action: 'update', oldData: oldRow, newData: newRows.find((r) => r.student_name === oldRow.student_name) }, req);
     }
     await reconcileCountersForAffectedRows([...oldRows, ...newRows]);
-    res.json({ ok: true, event_id: eventId });
+    res.json({ ok: true, event_id: eventId, ...calendar });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
-

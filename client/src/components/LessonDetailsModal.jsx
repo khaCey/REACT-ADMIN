@@ -189,12 +189,12 @@ export default function LessonDetailsModal({
     transientStatus === 'sync_pending' ||
     transientStatus === 'confirm_processing' ||
     transientStatus === 'deleting'
+  const hasCalendarStyleFailure = String(lesson?.calendarSyncError || '').startsWith('[calendar-style] ')
   const canSyncWithCalendar =
     !isReservedLesson &&
     !isTransientBusy &&
     !isUnscheduled &&
-    !isCancelled &&
-    !isRescheduled &&
+    ((!isCancelled && !isRescheduled) || hasCalendarStyleFailure) &&
     calendarSyncStatus !== 'synced'
   const canConfirmSchedule =
     (typeof onConfirmOneWeek === 'function' || typeof onConfirmAllWeeks === 'function') &&
@@ -230,7 +230,7 @@ export default function LessonDetailsModal({
     !!lesson?.calendarSyncError ||
     isAwaitingRescheduleDate
 
-  const isLocalOnlyRemove = calendarSyncStatus === 'failed'
+  const isLocalOnlyRemove = calendarSyncStatus === 'failed' && !hasCalendarStyleFailure
 
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`

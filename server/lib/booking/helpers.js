@@ -1,3 +1,4 @@
+import { parseLessonPackTotal } from '../lessonMonthCounters.js';
 /**
  * Shared booking helpers (pure + small DB lookups).
  * Used by staff schedule routes and booking services.
@@ -111,7 +112,5 @@ export async function getOrderedGroupMembers(groupId, db = query) {
 }
 
 export function parsePackTotalFromTitle(title) {
-  const m = String(title || '').match(/(\d+)\s*\/\s*(\d+)\s*$/);
-  if (!m) return 0;
-  return Math.max(0, parseInt(m[2], 10) || 0);
+  return parseLessonPackTotal(title);
 }
