@@ -128,6 +128,7 @@ const {
 } = D;
 
 export async function handleBookLesson(req, res) {
+  let client;
   try {
     const { student_id, group_id, date, time, duration_minutes, pack_total, location } = req.body || {};
     const dateStrRaw = date != null ? String(date).trim() : '';
@@ -138,11 +139,17 @@ export async function handleBookLesson(req, res) {
       return res.status(400).json({ error: 'Missing student_id or group_id, date, or time' });
     }
 
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Share the reschedule lock so booking cannot claim a slot between validation and insert.
+    await client.query('SELECT pg_advisory_xact_lock(1936941420, 1)');
+    const db = client.query.bind(client);
+
     let orderedStudents = [];
     let activeGroupId = Number.isFinite(groupIdNum) && groupIdNum > 0 ? groupIdNum : null;
     let anchorStudentId = Number(student_id);
     if (activeGroupId) {
-      orderedStudents = await getOrderedGroupMembers(activeGroupId);
+      orderedStudents = await getOrderedGroupMembers(activeGroupId, db);
       if (orderedStudents.length === 0) {
         return res.status(404).json({ error: 'Group not found or has no members.' });
       }
@@ -153,7 +160,7 @@ export async function handleBookLesson(req, res) {
       if (!Number.isFinite(anchorStudentId)) {
         return res.status(400).json({ error: 'student_id must be a number' });
       }
-      const studentResult = await query(
+      const studentResult = await db(
         'SELECT id, name, is_child, status, payment FROM students WHERE id = $1 AND COALESCE(is_hidden, FALSE) = FALSE',
         [anchorStudentId]
       );
@@ -218,7 +225,7 @@ export async function handleBookLesson(req, res) {
     const excludedStudentIds = bookingDisabledStudentIdsArray();
 
     // Kids vs adults separation: no mixing in the same time slot (ignore booking-disabled students' rows)
-    const existingResult = await query(
+    const existingResult = await db(
       `SELECT is_kids_lesson FROM monthly_schedule m
        WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
          AND ${SQL_NOT_STAFF_BREAK}
@@ -242,7 +249,7 @@ export async function handleBookLesson(req, res) {
     }
 
     if (bookingLessonKind === 'owner') {
-      const ownerOverlap = await query(
+      const ownerOverlap = await db(
         `SELECT 1 FROM monthly_schedule m
          LEFT JOIN students s ON s.id = m.student_id
          WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
@@ -265,7 +272,7 @@ export async function handleBookLesson(req, res) {
     }
 
     const orderedStudentIds = orderedStudents.map((student) => Number(student.id)).filter(Number.isFinite);
-    const dupResult = await query(
+    const dupResult = await db(
       `SELECT COALESCE(s.name, m.student_name) AS student_name
          FROM monthly_schedule m
          LEFT JOIN students s ON s.id = m.student_id
@@ -285,7 +292,7 @@ export async function handleBookLesson(req, res) {
     // Max simultaneous lessons = teachers available in that slot (including shift extensions up to 2h before/after). Slot time in JST to match teacher_schedules.
     const slotMinutes = getJstMinutesOfDay(startDate);
     const [teacherRows, breakPresetsResult] = await Promise.all([
-      query(
+      db(
         `SELECT t.teacher_name, t.start_time, t.end_time,
                 COALESCE(e.extend_before_minutes, 0) AS extend_before_minutes,
                 COALESCE(e.extend_after_minutes, 0) AS extend_after_minutes
@@ -294,7 +301,7 @@ export async function handleBookLesson(req, res) {
          WHERE t.date = $1::date`,
         [dateStr]
       ),
-      query(
+      db(
         `SELECT teacher_name, start_time, end_time
          FROM teacher_break_presets
          WHERE active = TRUE AND weekday = $1`,
@@ -349,7 +356,7 @@ export async function handleBookLesson(req, res) {
 
     let teacherCount = teacherSet.size;
     if (teacherCount === 0) teacherCount = 1;
-    const lessonCountResult = await query(
+    const lessonCountResult = await db(
       `SELECT COUNT(DISTINCT m.event_id) AS cnt FROM monthly_schedule m
        WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
          AND ${SQL_NOT_STAFF_BREAK}
@@ -367,11 +374,11 @@ export async function handleBookLesson(req, res) {
     let assignedTeacherName = null;
     if (teacherSet.size > 0) {
       const [distinctTeachersResult, dayBreakRows] = await Promise.all([
-        query(
+        db(
           `SELECT DISTINCT teacher_name FROM teacher_schedules WHERE date = $1::date ORDER BY teacher_name`,
           [dateStr]
         ),
-        query(
+        db(
           `SELECT
              to_char(m.start AT TIME ZONE 'Asia/Tokyo', 'HH24') || ':00' AS time_jst,
              m.teacher_name,
@@ -428,9 +435,9 @@ export async function handleBookLesson(req, res) {
         locationLabel,
       });
     } else {
-      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey);
+      const bookedThisMonth = await getBookedCountForMonth(studentIdNum, monthKey, db);
       const nextLessonNumber = bookedThisMonth + 1;
-      const totalLessons = await getPackTotalForBooking(studentIdNum, monthKey, pack_total);
+      const totalLessons = await getPackTotalForBooking(studentIdNum, monthKey, pack_total, db);
       if (!totalLessons) {
         return res.status(400).json({
           error: 'Missing lesson pack total. Enter total lessons before booking.',
@@ -451,7 +458,7 @@ export async function handleBookLesson(req, res) {
       const studentEntry = orderedStudents[index];
       // One key per row: idx_monthly_schedule_calendar_sync_key is unique. GAS bookingKey still comes from rows[0] in sync.
       const calendarSyncKey = buildCalendarSyncKey();
-      await query(
+      await db(
         `INSERT INTO monthly_schedule
           (event_id, lesson_uuid, title, date, start, "end", status, student_name, is_kids_lesson, teacher_name, lesson_kind, lesson_mode, student_id,
            calendar_sync_status, calendar_sync_error, calendar_sync_key, calendar_sync_attempted_at, calendar_synced_at,
@@ -505,6 +512,10 @@ export async function handleBookLesson(req, res) {
       );
     }
 
+    await client.query('COMMIT');
+    client.release();
+    client = null;
+
     if (String(lessonKind || '').toLowerCase() !== 'demo') {
       await reconcileCountersForAffectedRows(
         orderedStudents.map((entry) => ({ student_id: entry.id, month: monthKey }))
@@ -542,6 +553,11 @@ export async function handleBookLesson(req, res) {
     // duplicate calendar events / spurious "failed" results.
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+      client.release();
+    }
   }
 }
 

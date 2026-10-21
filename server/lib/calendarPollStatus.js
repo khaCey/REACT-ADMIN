@@ -16,6 +16,8 @@ export function resolvePolledScheduleStatus(rawStatus, title) {
   const status = VALID_STATUSES.has(candidate) ? candidate : 'scheduled';
   const eventTitle = String(title || '');
 
+  if (/(?:\[Cancelled\]|\bCancelled)\s*$/i.test(eventTitle)) return 'cancelled';
+
   // An original lesson remains inactive even if graphite was polled as cancelled.
   if (MOVED_TO_RE.test(eventTitle) || LEGACY_RESCHEDULED_RE.test(eventTitle)) {
     return 'rescheduled';

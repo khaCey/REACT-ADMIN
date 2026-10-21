@@ -735,7 +735,7 @@ export default function LessonsThisMonth({
       },
     })
     try {
-      await api.cancelScheduleEvent(lesson.eventID)
+      const calendarResult = await api.cancelScheduleEvent(lesson.eventID)
       applyOptimisticMutation({
         type: 'patch_lesson',
         eventID: lesson.eventID,
@@ -743,10 +743,11 @@ export default function LessonsThisMonth({
           transientStatus: undefined,
           status: 'cancelled',
           awaitingRescheduleDate: false,
-          calendarSyncStatus: 'synced',
-          calendarSyncError: null,
+          calendarSyncStatus: calendarResult?.calendar_sync_status || 'synced',
+          calendarSyncError: calendarResult?.calendar_sync_error || null,
         },
       })
+      if (calendarResult?.calendar_sync_error) setActionError(calendarResult.calendar_sync_error)
       success('Lesson cancelled')
       try {
         await refetchSilent()
@@ -781,7 +782,7 @@ export default function LessonsThisMonth({
       },
     })
     try {
-      await api.unrescheduleLinkedLesson({
+      const undoResult = await api.unrescheduleLinkedLesson({
         source_event_id: lesson.eventID,
         student_id: studentId,
         source_student_name: student?.Name || student?.name || '',
@@ -795,10 +796,11 @@ export default function LessonsThisMonth({
           awaitingRescheduleDate: false,
           rescheduledTo: undefined,
           optimisticRescheduledTo: undefined,
-          calendarSyncStatus: 'synced',
-          calendarSyncError: null,
+          calendarSyncStatus: undoResult?.calendar_source_restore_error ? 'failed' : 'synced',
+          calendarSyncError: undoResult?.calendar_source_restore_error || null,
         },
       })
+      if (undoResult?.calendar_source_restore_error) setActionError(undoResult.calendar_source_restore_error)
       success('Reschedule undone')
       try {
         await refetchSilent()
@@ -832,7 +834,7 @@ export default function LessonsThisMonth({
       },
     })
     try {
-      await api.uncancelScheduleEvent(lesson.eventID)
+      const calendarResult = await api.uncancelScheduleEvent(lesson.eventID)
       applyOptimisticMutation({
         type: 'patch_lesson',
         eventID: lesson.eventID,
@@ -840,10 +842,11 @@ export default function LessonsThisMonth({
           transientStatus: undefined,
           status: 'scheduled',
           awaitingRescheduleDate: false,
-          calendarSyncStatus: 'synced',
-          calendarSyncError: null,
+          calendarSyncStatus: calendarResult?.calendar_sync_status || 'synced',
+          calendarSyncError: calendarResult?.calendar_sync_error || null,
         },
       })
+      if (calendarResult?.calendar_sync_error) setActionError(calendarResult.calendar_sync_error)
       success('Lesson uncancelled')
       try {
         await refetchSilent()
@@ -1545,7 +1548,7 @@ export default function LessonsThisMonth({
               },
             })
             try {
-              await api.rescheduleAwaitingDate(l.eventID)
+              const calendarResult = await api.rescheduleAwaitingDate(l.eventID)
               applyOptimisticMutation({
                 type: 'patch_lesson',
                 eventID: l.eventID,
@@ -1553,10 +1556,11 @@ export default function LessonsThisMonth({
                   transientStatus: undefined,
                   status: 'rescheduled',
                   awaitingRescheduleDate: true,
-                  calendarSyncStatus: 'synced',
-                  calendarSyncError: null,
+                  calendarSyncStatus: calendarResult?.calendar_sync_status || 'synced',
+                  calendarSyncError: calendarResult?.calendar_sync_error || null,
                 },
               })
+              if (calendarResult?.calendar_sync_error) setActionError(calendarResult.calendar_sync_error)
               success('Lesson marked as awaiting a new date')
               setRescheduleChoiceLesson(null)
               setSelectedLesson(null)

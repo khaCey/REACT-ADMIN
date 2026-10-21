@@ -1,3 +1,4 @@
+import { lessonPackStatusSql, parseLessonPackTotal } from '../lessonMonthCounters.js';
 /**
  * Repairs chronological x/y lesson title suffixes. Used after timetable edits
  * and by the daily maintenance job; never changes payment or lesson-pack data.
@@ -56,8 +57,8 @@ async function packTotalForMonth(studentId, month, db) {
     [studentId, month]
   );
   for (const row of existing.rows || []) {
-    const suffix = String(row.title || '').match(/\b\d+\s*\/\s*(\d+)(?:\s*[·•-]?\s*Moved\s+(?:from|to)\s+\S+)?\s*$/i);
-    if (suffix && Number(suffix[1]) > 0) return Number(suffix[1]);
+    const total = parseLessonPackTotal(row.title);
+    if (total > 0) return total;
   }
 
   // Imported lessons sometimes have no pack or numbered titles at all.
@@ -117,7 +118,7 @@ export async function runDailyLessonCounterReconciliation(db = query) {
       `SELECT DISTINCT student_id, to_char(date, 'YYYY-MM') AS month
          FROM monthly_schedule
         WHERE student_id IS NOT NULL
-          AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+          AND ${lessonPackStatusSql()}
           AND LOWER(TRIM(COALESCE(lesson_kind, 'regular'))) <> 'demo'
         ORDER BY student_id, month`
     );
