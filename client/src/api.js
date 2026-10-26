@@ -267,6 +267,7 @@ export const api = {
   moveReservedSchedule: (body) =>
     fetchApi('/schedule/move-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Create a weekly reserved (固定) hold for a student/month. */
+  retryFutureFixedSchedule: (studentId) => fetchApi('/schedule/fixed-retry-future', { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
   createReservedSchedule: (body) =>
     fetchApi('/schedule/create-reserved', { method: 'POST', body: JSON.stringify(body) }),
   /** Upsert month pack and renumber lesson titles in DB for that month (i/N). */

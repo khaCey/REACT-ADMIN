@@ -664,7 +664,7 @@ export default function BookLessonModal({
       setError(null)
       setHideBookingCalendar(true)
       try {
-        await api.createReservedSchedule({
+        const created = await api.createReservedSchedule({
           student_id: sidRaw,
           month,
           date,
@@ -673,7 +673,8 @@ export default function BookLessonModal({
           location: 'Cafe',
         })
         onBooked?.({ eventIds: [] })
-        success('固定 hold created')
+        if (created.calendar_errors?.length) throw new Error('Temporary appointments were saved, but Calendar sync failed. Open the lessons and retry Sync with Calendar.')
+        success('Individual 固定 appointments created. Remove any old recurring Calendar series manually after checking its history.', { durationMs: 0 })
         onClose?.()
       } catch (e) {
         setError(e?.message || 'Failed to create 固定')
@@ -704,11 +705,12 @@ export default function BookLessonModal({
       setError(null)
       setHideBookingCalendar(true)
       try {
-        await api.moveReservedSchedule({
+        const moved = await api.moveReservedSchedule({
           event_id: eventId,
           date,
           time,
         })
+        if (moved.calendar_sync_error) throw new Error(moved.calendar_sync_error)
         onBooked?.({ eventIds: [] })
         success('固定 date updated')
         onClose?.()
@@ -730,7 +732,7 @@ export default function BookLessonModal({
       setError(null)
       setHideBookingCalendar(true)
       const tempEventId = `optimistic-reschedule-${Date.now()}`
-      onOptimisticScheduleMutation?.({
+      if (!rescheduleSource?.fixedOccurrenceId) onOptimisticScheduleMutation?.({
         type: 'reschedule_start',
         sourceEventID: rescheduleSource.eventID,
         targetMonthKey: String(date || '').slice(0, 7),
@@ -761,7 +763,8 @@ export default function BookLessonModal({
         if (!newEventId) {
           throw new Error('Reschedule succeeded but no destination event id was returned')
         }
-        await awaitCalendarSyncForEvent(newEventId)
+        if (rescheduleRes?.calendar_sync_error) throw new Error(rescheduleRes.calendar_sync_error)
+        if (!rescheduleRes?.in_place) await awaitCalendarSyncForEvent(newEventId)
         onBooked?.({ eventIds: [] })
         const [weekData, latestRes] = await Promise.all([
           api

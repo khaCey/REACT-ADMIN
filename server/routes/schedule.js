@@ -1,3 +1,4 @@
+import { individualFixedSchedules } from '../lib/booking/individualFixedScheduleService.js';
 import { Router } from 'express';
 import { handleGetWeek } from '../lib/booking/availabilityService.js';
 import { handleBookLesson } from '../lib/booking/bookLessonService.js';
@@ -40,6 +41,7 @@ router.post('/book', handleBookLesson);
 router.post('/confirm-reserved', handleConfirmReserved);
 router.post('/move-reserved', handleMoveReserved);
 router.post('/create-reserved', handleCreateReserved);
+router.post('/fixed-retry-future', individualFixedSchedules.handleRetryFuture);
 router.post('/sync', handleSync);
 router.post(/^\/(.+)\/reschedule-awaiting-date\/?$/, handleRescheduleAwaitingDate);
 router.patch(/^\/(.+)\/cancel\/?$/, handleCancel);

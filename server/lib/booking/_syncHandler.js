@@ -1,3 +1,4 @@
+import { individualFixedSchedules } from './individualFixedScheduleService.js';
 import { syncLessonCalendarStyle, needsCalendarStyleRetry } from './lessonCalendarStyle.js';
 /**
  * Booking service handler — logic extracted from schedule routes.
@@ -130,10 +131,11 @@ export async function handleSync(req, res) {
   try {
     const eventId = String(req.body?.event_id || '').trim();
     if (!eventId) return res.status(400).json({ error: 'event_id is required' });
-    const rows = (await query('SELECT event_id, status, calendar_sync_status, calendar_sync_error FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const rows = (await query('SELECT event_id, status, calendar_sync_status, calendar_sync_error, fixed_occurrence_id FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
     }
+    if (rows[0]?.fixed_occurrence_id && !rows.some(needsCalendarStyleRetry)) return individualFixedSchedules.handleRetry(req, res);
     if (rows.some(needsCalendarStyleRetry)) {
       const result = await syncLessonCalendarStyle(eventId);
       if (result.calendar_sync_status !== 'synced') {

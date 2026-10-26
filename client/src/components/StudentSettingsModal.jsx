@@ -87,6 +87,7 @@ export default function StudentSettingsModal({
   highlightEdit = false,
   onBookLesson,
   onCreateReserved,
+  onRetryFutureFixed,
   onSyncGoogleContact,
   onManageGroup,
   onMarkHiatus,
@@ -194,6 +195,11 @@ export default function StudentSettingsModal({
               tip="この生徒の毎週の固定（予約済み）ホールドを作成します"
               onClick={() => runAndClose(onCreateReserved)}
             />
+          )}
+          {showCreateReserved && onRetryFutureFixed && (
+            <ActionRow icon={CalendarRange} label="Retry future 固定"
+              tip="最後に確認した月を基準に、未作成・同期失敗の固定予定を再試行します。予約期間は自動延長しません。"
+              onClick={() => runAndClose(onRetryFutureFixed)} />
           )}
           <ActionRow
             icon={Contact}

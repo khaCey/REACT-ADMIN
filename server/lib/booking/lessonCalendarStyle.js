@@ -1,3 +1,4 @@
+import { upsertFixedCalendarEvent } from '../fixedScheduleCalendar.js';
 /** Retry styling of an existing Calendar event; never create a replacement event. */
 import { pool } from '../../db/index.js';
 import { bookingEventColorId, isBookingGasEnabled, updateBookedLessonEventInGas } from '../bookingCalendarSync.js';
@@ -35,7 +36,16 @@ export async function syncLessonCalendarStyle(eventId, previousRows = null) {
     const color = inactive ? '8' : bookingEventColorId(row.lesson_kind || 'regular');
     let error = null;
     try {
-      const result = await updateBookedLessonEventInGas(eventId, {
+      const result = row.fixed_occurrence_id
+        ? await upsertFixedCalendarEvent({
+          eventId: String(row.calendar_source_event_id || '').match(/^fs[0-9a-f]{64}/)?.[0],
+          occurrenceId: row.fixed_occurrence_id, scheduleId: row.fixed_schedule_id,
+          status: row.status, title: row.title,
+          start: new Date(row.start).toISOString(), end: new Date(row.end).toISOString(),
+          lessonKind: row.lesson_kind || 'regular',
+          location: row.lesson_mode === 'online' ? 'Online' : 'Cafe', colorId: color,
+        })
+        : await updateBookedLessonEventInGas(eventId, {
         title: row.title,
         ...(row.start ? { startIso: new Date(row.start).toISOString() } : {}),
         ...(row.end ? { endIso: new Date(row.end).toISOString() } : {}),
@@ -48,9 +58,9 @@ export async function syncLessonCalendarStyle(eventId, previousRows = null) {
     }
     const status = error ? 'failed' : 'synced';
     const savedError = error ? CALENDAR_STYLE_ERROR_PREFIX + error : null;
-    await db(`UPDATE monthly_schedule SET calendar_sync_status = $2, calendar_sync_error = $3,
+    await db(`UPDATE monthly_schedule SET calendar_sync_status = $2::varchar, calendar_sync_error = $3,
       calendar_sync_attempted_at = NOW(),
-      calendar_synced_at = CASE WHEN $2 = 'synced' THEN NOW() ELSE calendar_synced_at END
+      calendar_synced_at = CASE WHEN $2::varchar = 'synced' THEN NOW() ELSE calendar_synced_at END
       WHERE event_id = $1`, [eventId, status, savedError]);
     await db('COMMIT');
     return { calendar_sync_status: status, calendar_sync_error: savedError };

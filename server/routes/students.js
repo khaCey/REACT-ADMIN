@@ -52,6 +52,7 @@ function mapStudentRow(r) {
     HiatusOtsukisha: !!r.hiatus_otsukisha,
     HasReview: !!r.has_review,
     ReviewFreeDrink: !!r.review_free_drink,
+    FixedMonthsAhead: r.fixed_months_ahead ?? 1,
   };
 }
 
@@ -438,6 +439,10 @@ router.put('/:id', async (req, res) => {
         error: 'Use PATCH /students/:id/hiatus to mark a student on break (休会中).',
       });
     }
+    const fixedRaw = body.FixedMonthsAhead ?? body.fixed_months_ahead;
+    if (fixedRaw !== undefined && (!Number.isInteger(Number(fixedRaw)) || Number(fixedRaw) < 0 || Number(fixedRaw) > 12 || String(fixedRaw).trim() === '')) {
+      return res.status(400).json({ error: 'FixedMonthsAhead must be a whole number from 0 to 12' });
+    }
     let isChildParam = undefined;
     if (typeof body.is_child === 'boolean') isChildParam = body.is_child;
     else if (body.子 === '子') isChildParam = true;
@@ -457,6 +462,7 @@ router.put('/:id', async (req, res) => {
         group_type = COALESCE($10, group_type),
         group_size = COALESCE($11, group_size),
         is_child = COALESCE($12, is_child),
+        fixed_months_ahead = COALESCE($14, fixed_months_ahead),
         hiatus_contacted = CASE WHEN $13 THEN FALSE ELSE hiatus_contacted END,
         hiatus_expected_return = CASE WHEN $13 THEN NULL ELSE hiatus_expected_return END,
         hiatus_otsukisha = CASE WHEN $13 THEN FALSE ELSE hiatus_otsukisha END,
@@ -476,6 +482,7 @@ router.put('/:id', async (req, res) => {
         body.人数 ?? body.group_size,
         isChildParam,
         clearHiatus,
+        fixedRaw === undefined ? null : Number(fixedRaw),
       ]
     );
     const newRow = (await query('SELECT * FROM students WHERE id = $1', [id])).rows[0] || oldRow;

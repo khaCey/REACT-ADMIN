@@ -42,6 +42,7 @@ export async function runMigrations() {
   const exactGoogleEventIdPath = join(__dirname, 'add_calendar_google_event_id.sql');
   const exactGoogleEventIdMigration = readFileSync(exactGoogleEventIdPath, 'utf8');
   await pool.query(exactGoogleEventIdMigration);
+  await pool.query(readFileSync(join(__dirname, 'add_individual_fixed_schedules.sql'), 'utf8'));
 }
 
 export { pool };

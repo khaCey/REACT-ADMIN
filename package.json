@@ -12,6 +12,7 @@
     "build": "cd client && npm run build",
     "server": "node server/index.js",
     "dev": "concurrently --kill-others=false \"npm run server\" \"cd client && npm run dev\"",
+    "test:fixed": "node --experimental-test-module-mocks --test server/lib/booking/__tests__/individualFixedSchedules.test.js server/lib/booking/__tests__/fixedScheduleGas.test.js server/lib/booking/__tests__/fixedSchedulePolling.test.js server/lib/booking/__tests__/fixedScheduleAdapter.test.js",
     "test:booking": "node --test server/lib/booking/__tests__/*.test.js",
     "test:line-email": "node --test server/lib/__tests__/studentLine*.test.js",
     "test:reschedule": "node --experimental-test-module-mocks --test server/lib/booking/__tests__/rescheduleGuards.test.js"
@@ -37,5 +38,8 @@
   "overrides": {
     "glob": "^13.0.0",
     "rimraf": "^5.0.10"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.11"
   }
 }

@@ -66,6 +66,7 @@ export async function deleteMonthlyScheduleByRawEvent(studentName, rawEventId, l
   const result = await query(
     `DELETE FROM monthly_schedule ms
      WHERE ms.student_name = $1
+       AND ms.fixed_occurrence_id IS NULL
        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
        AND ${matchSql}${dateExtra}
        AND NOT EXISTS (
@@ -426,7 +427,8 @@ async function reconcileMonthsToSnapshot(months, incomingKeys, incomingSlotKeys,
        FROM monthly_schedule ms
        WHERE ms.date IS NOT NULL
          AND to_char(ms.date, 'YYYY-MM') = $1
-         AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'`,
+         AND ms.fixed_occurrence_id IS NULL
+       AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'`,
       [ym]
     );
     for (const r of existing.rows || []) {
@@ -518,7 +520,8 @@ export async function compareMonthSchedule(data, month) {
        FROM monthly_schedule ms
       WHERE ms.date IS NOT NULL
         AND to_char(ms.date, 'YYYY-MM') = $1
-        AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
+        AND ms.fixed_occurrence_id IS NULL
+       AND COALESCE(ms.calendar_sync_status, 'synced') = 'synced'
       ORDER BY ms.start ASC NULLS LAST, ms.student_name ASC`,
     [ym]
   );
@@ -778,6 +781,10 @@ export async function upsertMonthlySchedule(data, options = {}) {
   const monthsToReconcile = monthsEligibleForReconcile(months, options);
   const envAllowReconcile = String(process.env.CALENDAR_RECONCILE_ORPHANS ?? '0').trim() === '1';
 
+  const migratedFixedRows = (await query(`SELECT o.legacy_event_id, o.legacy_calendar_source_event_id,
+      to_char(o.nominal_date, 'YYYY-MM-DD') AS nominal_date, s.name AS student_name
+    FROM fixed_schedule_occurrences o JOIN fixed_schedules f ON f.id=o.schedule_id
+    JOIN students s ON s.id=ANY(f.student_ids) WHERE o.legacy_event_id IS NOT NULL`)).rows;
   let upserted = 0;
   let skippedDismissed = 0;
   for (const {
@@ -796,6 +803,12 @@ export async function upsertMonthlySchedule(data, options = {}) {
     studentId,
     awaitingReschedulePollMerge,
   } of rows) {
+    // Staff clean up old Calendar series manually. Do not re-import a legacy
+    // placeholder after its particular date has been converted in Admin.
+    if (migratedFixedRows.some((r) => r.nominal_date === date && r.student_name === studentName &&
+      (r.legacy_event_id === eventId || (r.legacy_calendar_source_event_id && r.legacy_calendar_source_event_id === calendarSourceEventId)))) continue;
+    // Independent fixed appointments are owned by Admin, including moved dates and retry state.
+    if (/^fs[0-9a-f]{64}(?:@|_|$)/.test(String(calendarSourceEventId || eventId))) continue;
     const slotKey = lessonSlotKey(studentName, startTs);
     if (slotKey && dismissedSlotKeys.has(slotKey)) {
       skippedDismissed++;

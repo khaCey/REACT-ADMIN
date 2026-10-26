@@ -266,7 +266,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
       const studentIdForJoin = Number(id) || id;
       const scheduleResult = await query(
         `SELECT m.event_id, m.lesson_uuid, to_char(m.date, 'YYYY-MM-DD') as date, m.start, m.status, m.lesson_kind,
-                m.awaiting_reschedule_date,
+                m.awaiting_reschedule_date, m.fixed_schedule_id, m.fixed_occurrence_id,
                 m.calendar_sync_status, m.calendar_sync_error,
                 m.reschedule_snapshot_to_date, m.reschedule_snapshot_to_time,
                 m.reschedule_snapshot_from_date, m.reschedule_snapshot_from_time,
@@ -371,6 +371,8 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
           status: (r.status || 'scheduled').toLowerCase(),
           eventID: r.event_id,
           lessonUUID: r.lesson_uuid || null,
+          fixedScheduleId: r.fixed_schedule_id || null,
+          fixedOccurrenceId: r.fixed_occurrence_id || null,
           hasNote: !!r.has_lesson_note,
           awaitingRescheduleDate: !!r.awaiting_reschedule_date,
           calendarSyncStatus: (r.calendar_sync_status || 'synced').toLowerCase(),

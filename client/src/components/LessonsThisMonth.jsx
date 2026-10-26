@@ -98,7 +98,10 @@ function listReservedBatchEventIds(monthData, monthKey, anchorLesson) {
   for (const lesson of monthData[monthKey].lessons || []) {
     if (String(lesson?.status || '').toLowerCase() !== 'reserved') continue
     const eid = String(lesson?.eventID || '').trim()
-    if (!eid || stripMonthlyEventIdBase(eid) !== idBase) continue
+    if (!eid) continue
+    if (anchorLesson?.fixedScheduleId
+      ? lesson.fixedScheduleId !== anchorLesson.fixedScheduleId
+      : stripMonthlyEventIdBase(eid) !== idBase) continue
     if (!byEvent.has(eid)) byEvent.set(eid, lesson)
   }
   return [...byEvent.values()]
@@ -995,7 +998,9 @@ export default function LessonsThisMonth({
         },
       })
       try {
-        await api.confirmReservedSchedule({ event_id: eventID, ...confirmBody })
+        const confirmation = await api.confirmReservedSchedule({ event_id: eventID, ...confirmBody })
+        if (confirmation.calendar_sync_error) throw new Error(confirmation.calendar_sync_error)
+        if (confirmation.calendar_errors?.length) setActionError('Month confirmed, but some future holds need a Calendar retry. Open those appointments to sync them.')
         applyOptimisticMutation({
           type: 'patch_lesson',
           eventID,
@@ -1089,11 +1094,13 @@ export default function LessonsThisMonth({
           },
         })
         try {
-          await api.confirmReservedSchedule({
+          const confirmation = await api.confirmReservedSchedule({
             event_id: eventID,
             ...confirmBodyBase,
             finalize_series: isLastWeek,
           })
+          if (confirmation.calendar_sync_error) throw new Error(confirmation.calendar_sync_error)
+          if (confirmation.calendar_errors?.length) setActionError('Month confirmed, but some future holds could not be created/synced. Retry confirmation to recover.')
           applyOptimisticMutation({
             type: 'patch_lesson',
             eventID,

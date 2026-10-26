@@ -1,3 +1,4 @@
+import { individualFixedSchedules } from './individualFixedScheduleService.js';
 import { syncLessonCalendarStyle, queueLessonCalendarStyle, needsCalendarStyleRetry } from './lessonCalendarStyle.js';
 import { applyCancelledTitleMarker, restoreActiveLessonTitle } from '../lessonMonthCounters.js';
 /**
@@ -149,6 +150,10 @@ async function validateRestoredSlot(rows, excludedEventIds, db) {
 }
 
 export async function handleRescheduleLinked(req, res) {
+  try {
+    const managed = await query('SELECT fixed_occurrence_id FROM monthly_schedule WHERE event_id = $1 LIMIT 1', [req.body?.source_event_id]);
+    if (managed.rows[0]?.fixed_occurrence_id) return individualFixedSchedules.handleMove(req, res);
+  } catch (error) { return res.status(500).json({ error: error.message }); }
   let client;
   try {
     client = await pool.connect();

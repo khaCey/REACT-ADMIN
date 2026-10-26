@@ -191,7 +191,7 @@ export default function LessonDetailsModal({
     transientStatus === 'deleting'
   const hasCalendarStyleFailure = String(lesson?.calendarSyncError || '').startsWith('[calendar-style] ')
   const canSyncWithCalendar =
-    !isReservedLesson &&
+    (!isReservedLesson || !!lesson?.fixedOccurrenceId) &&
     !isTransientBusy &&
     !isUnscheduled &&
     ((!isCancelled && !isRescheduled) || hasCalendarStyleFailure) &&

@@ -888,6 +888,15 @@ Green Square`
         highlightEdit={guideFocusKey === 'student-edit' || guideFocusKey === 'student-delete'}
         onBookLesson={openBookingFlow}
         onCreateReserved={() => openBookingFlow({ createReservedPick: true })}
+        onRetryFutureFixed={async () => {
+          try {
+            const result = await api.retryFutureFixedSchedule(studentId)
+            const failures = (result.results || []).flatMap((r) => r.errors || [])
+            if (failures.length) setError(failures.map((f) => `${f.date}: ${f.error}`).join('; '))
+            else success('Future 固定 appointments checked')
+            fetchData()
+          } catch (e) { setError(e.message) }
+        }}
         onSyncGoogleContact={handleSyncGoogleContact}
         onManageGroup={handleOpenGroupLinkLesson}
         onMarkHiatus={() => setMarkHiatusOpen(true)}

@@ -484,6 +484,9 @@ router.post('/:id/undo', async (req, res) => {
     }
     const change = changeResult.rows[0];
     const { entity_type, entity_key, action, old_data, new_data } = change;
+    if (old_data?.fixed_occurrence_id || new_data?.fixed_occurrence_id) {
+      return res.status(409).json({ error: 'Use the lesson actions to change independent 固定 appointments; Change History cannot update their Calendar and reservation ledger together.' });
+    }
 
     if (action === 'undo' || action === 'redo') {
       return res.status(400).json({ error: `Cannot undo a ${action}` });
@@ -534,6 +537,9 @@ router.post('/:id/redo', async (req, res) => {
 
     const change = changeResult.rows[0];
     const { entity_type, entity_key, action, old_data, new_data } = change;
+    if (old_data?.fixed_occurrence_id || new_data?.fixed_occurrence_id) {
+      return res.status(409).json({ error: 'Use the lesson actions to change independent 固定 appointments; Change History cannot update their Calendar and reservation ledger together.' });
+    }
 
     if (action === 'undo' || action === 'redo') {
       return res.status(400).json({ error: `Cannot redo a ${action}` });

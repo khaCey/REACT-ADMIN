@@ -35,6 +35,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
     子: false,
     Group: 'Single',
     人数: '2',
+    FixedMonthsAhead: 1,
   })
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -58,6 +59,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
         子: !!(student.子 === '子' || student.is_child),
         Group: student.Group === 'Group' ? 'Group' : 'Single',
         人数: String(student.人数 ?? student.group_size ?? '2'),
+        FixedMonthsAhead: student.FixedMonthsAhead ?? student.fixed_months_ahead ?? 1,
       })
     }
   }, [student])
@@ -76,6 +78,7 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
         Phone: phone,
         Email: form.Email.trim(),
         Payment: form.Payment,
+        FixedMonthsAhead: Number(form.FixedMonthsAhead),
         当日: form.当日,
         子: form.子 ? '子' : '',
         is_child: form.子,
@@ -260,6 +263,14 @@ export default function EditStudentModal({ studentId, student, onSave, onDeleted
                   <option>OLD</option>
                   <option>Owner&apos;s Course</option>
                 </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="fixed-months-ahead" className="block font-semibold text-gray-800 mb-1">固定: months reserved ahead</label>
+                <input id="fixed-months-ahead" type="number" min="0" max="12" step="1" required
+                  value={form.FixedMonthsAhead}
+                  onChange={(e) => setForm((f) => ({ ...f, FixedMonthsAhead: e.target.value }))}
+                  className="w-24 rounded-md border border-gray-300 px-3 py-2" />
+                <p className="mt-1 text-xs text-gray-500">Confirming a complete month creates temporary appointments this many months ahead. Without confirmation, no more are created. Changing this setting does not remove existing appointments. Shared groups use the smallest member setting.</p>
               </div>
               <div className="sm:col-span-1">
                 <label className="block font-semibold text-gray-800 mb-1 flex items-center gap-2">
