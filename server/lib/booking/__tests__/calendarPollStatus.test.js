@@ -27,3 +27,8 @@ test('legacy reschedule marker remains inactive and unchanged titles keep their 
   assert.equal(resolvePolledScheduleStatus('cancelled', 'Sora (Cafe) 1/4'), 'cancelled');
   assert.equal(resolvePolledScheduleStatus('weird', 'Sora (Cafe) 1/4'), 'scheduled');
 });
+
+test('Cancelled suffix takes precedence over old movement history during polling', () => {
+  assert.equal(resolvePolledScheduleStatus('rescheduled', 'Sora (Cafe) 2/4 · Moved from 8th · Cancelled'), 'cancelled');
+  assert.equal(resolvePolledScheduleStatus('scheduled', 'Sora (Cafe) 2/4 · Moved to ??? · Cancelled'), 'cancelled');
+});

@@ -1,3 +1,4 @@
+import { lessonPackStatusSql, applyCancelledTitleMarker, parseLessonPackTotal } from '../lessonMonthCounters.js';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { pool, query } from '../../db/index.js';
@@ -119,11 +120,11 @@ export function collectExcludeCalendarEventIds(createdGasIds, planned = []) {
 }
 
 /** Skip GAS styling when we only have a recurring series master and multiple DB occurrences exist. */
-export async function shouldSkipAmbiguousRecurringCalendarUpdate(monthlyEventId, calendarSourceEventId, studentId) {
+export async function shouldSkipAmbiguousRecurringCalendarUpdate(monthlyEventId, calendarSourceEventId, studentId, db = query) {
   if (!isAmbiguousRecurringSeriesMaster(monthlyEventId, calendarSourceEventId)) return false;
   const master = stripOurMonthlyDisambiguationSuffix(monthlyEventId);
   if (!master || !Number.isFinite(Number(studentId))) return true;
-  const r = await query(
+  const r = await db(
     `SELECT COUNT(DISTINCT date) AS cnt
      FROM monthly_schedule
      WHERE student_id = $1
@@ -136,12 +137,13 @@ export async function shouldSkipAmbiguousRecurringCalendarUpdate(monthlyEventId,
   return (parseInt(r.rows[0]?.cnt, 10) || 0) > 1;
 }
 
-export async function shouldSkipAmbiguousRecurringForRows(monthlyEventId, rows) {
+export async function shouldSkipAmbiguousRecurringForRows(monthlyEventId, rows, db = query) {
   const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
   return shouldSkipAmbiguousRecurringCalendarUpdate(
     monthlyEventId,
     row?.calendar_source_event_id,
-    row?.student_id
+    row?.student_id,
+    db
   );
 }
 
@@ -387,7 +389,7 @@ export async function getBookedCountForMonth(studentId, monthKey, db = query) {
   const bookedCountResult = await db(
     `SELECT COUNT(DISTINCT m.event_id) AS cnt
        FROM monthly_schedule m
-      WHERE (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+      WHERE ${lessonPackStatusSql('m')}
         AND m.student_id = $1
         AND LOWER(TRIM(COALESCE(m.lesson_kind, 'regular'))) <> 'demo'
         AND to_char(m.date, 'YYYY-MM') = $2`,
@@ -429,11 +431,11 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
 
   const rows = await db(
     `SELECT event_id, student_id, student_name, title, lesson_kind, lesson_mode,
-            status, start, "end", calendar_source_event_id, calendar_sync_status
+            status, awaiting_reschedule_date, start, "end", calendar_source_event_id, calendar_sync_status, calendar_sync_error
        FROM monthly_schedule
       WHERE student_id = $1
         AND to_char(date, 'YYYY-MM') = $2
-        AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+        AND ${lessonPackStatusSql()}
         AND LOWER(TRIM(COALESCE(lesson_kind, 'regular'))) <> 'demo'
       ORDER BY date ASC, start ASC, event_id ASC`,
     [sid, month]
@@ -463,9 +465,10 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     rowsByEvent.get(eid).push(r);
   }
 
-  /** @type {Map<string, string>} */
-  const titlesByEvent = new Map();
   const changedEventIds = [];
+  const calendarEventIds = new Set();
+  const { queueLessonCalendarStyle, syncLessonCalendarStyle, needsCalendarStyleRetry } =
+    await import('./lessonCalendarStyle.js');
   let idx = 0;
   for (const eid of eventOrder) {
     idx += 1;
@@ -479,7 +482,7 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
       const groupActive = await db(
         `SELECT student_id, student_name FROM monthly_schedule
           WHERE event_id = $1
-            AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))
+            AND ${lessonPackStatusSql()}
           ORDER BY COALESCE(group_sort_order, 2147483647), student_id ASC`,
         [eid]
       );
@@ -506,14 +509,21 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
             lessonNumber: idx,
             totalLessons: pack,
           });
-    const newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
+    let newTitle = preserveRescheduleTitleMarker(r.title || '', baseTitle);
+    if (['cancelled', 'canceled'].includes(String(r.status || '').trim().toLowerCase())) {
+      newTitle = applyCancelledTitleMarker(newTitle);
+    }
+    if (groupRows.some(needsCalendarStyleRetry)) calendarEventIds.add(eid);
     if (String(r.title || '') === newTitle) continue;
-    titlesByEvent.set(eid, newTitle);
+    // Persist the retry marker before changing the local title. Polling must
+    // not overwrite it if Calendar is unavailable or this process stops.
+    if (String(r.status || '').trim().toLowerCase() !== 'reserved' &&
+        await queueLessonCalendarStyle(db, eid, groupRows)) calendarEventIds.add(eid);
     changedEventIds.push(eid);
     if (orderedStudents.length > 1 || groupRows.length > 1) {
       await db(
         `UPDATE monthly_schedule SET title = $1 WHERE event_id = $2
-           AND (status IS NULL OR LOWER(TRIM(status)) NOT IN ('cancelled', 'rescheduled'))`,
+           AND ${lessonPackStatusSql()}`,
         [newTitle, eid]
       );
     } else {
@@ -528,42 +538,17 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
   /** @type {Array<{ event_id: string, error: string }>} */
   const calendar_errors = [];
   if (isBookingGasEnabled()) {
-    for (const eid of changedEventIds) {
-      const groupRows = rowsByEvent.get(eid) || [];
-      const r = groupRows[0];
-      if (!r) continue;
-      const status = String(r.status || '').toLowerCase().trim();
-      if (status === 'reserved') continue;
-      if (String(eid).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)) continue;
-      if (normalizeCalendarSyncStatus(r.calendar_sync_status) !== CALENDAR_SYNC_STATUS_SYNCED) {
-        continue;
-      }
+    for (const eid of calendarEventIds) {
+      const r = rowsByEvent.get(eid)?.[0];
+      if (!r || String(r.status || '').trim().toLowerCase() === 'reserved') continue;
       try {
-        if (await shouldSkipAmbiguousRecurringCalendarUpdate(eid, r.calendar_source_event_id, sid)) {
-          continue;
+        const result = await syncLessonCalendarStyle(eid);
+        if (result.calendar_sync_status === 'synced') calendar_patched += 1;
+        else if (result.calendar_sync_error) {
+          calendar_errors.push({ event_id: eid, error: result.calendar_sync_error });
         }
-      } catch (skipErr) {
-        calendar_errors.push({
-          event_id: eid,
-          error: skipErr?.message || String(skipErr),
-        });
-        continue;
-      }
-      const title = titlesByEvent.get(eid);
-      if (!title) continue;
-      try {
-        const gasRes = await updateBookedLessonEventInGas(eid, { title }, calendarGasOptions(groupRows));
-        if (gasRes?.ok) {
-          calendar_patched += 1;
-        } else {
-          const errMsg = String(gasRes?.error || 'Calendar title update failed').trim();
-          console.error('[renumber] Calendar title patch failed', eid, errMsg);
-          calendar_errors.push({ event_id: eid, error: errMsg });
-        }
-      } catch (patchErr) {
-        const errMsg = String(patchErr?.message || patchErr).trim();
-        console.error('[renumber] Calendar title patch error', eid, errMsg);
-        calendar_errors.push({ event_id: eid, error: errMsg });
+      } catch (error) {
+        calendar_errors.push({ event_id: eid, error: error?.message || String(error) });
       }
     }
   }
@@ -586,7 +571,7 @@ export async function listActiveMonthEventIdsByStart(studentId, monthKey, db = q
        FROM monthly_schedule m
       WHERE m.student_id = $1
         AND to_char(m.date, 'YYYY-MM') = $2
-        AND (m.status IS NULL OR LOWER(TRIM(m.status)) NOT IN ('cancelled', 'rescheduled'))
+        AND ${lessonPackStatusSql('m')}
         AND LOWER(TRIM(COALESCE(m.lesson_kind, 'regular'))) <> 'demo'
       GROUP BY m.event_id
       ORDER BY MIN(m.start) ASC`,
@@ -1443,9 +1428,7 @@ export async function syncBookedLessonEventToCalendar(localEventId) {
 }
 
 export function parsePackTotalFromTitle(title) {
-  const m = String(title || '').match(/\/\s*(\d+)\s*$/);
-  const n = m ? parseInt(m[1], 10) : 0;
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  return parseLessonPackTotal(title);
 }
 
 export function addDaysToYyyyMmDd(dateStr, n) {

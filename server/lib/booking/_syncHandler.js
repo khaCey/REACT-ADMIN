@@ -1,3 +1,4 @@
+import { syncLessonCalendarStyle, needsCalendarStyleRetry } from './lessonCalendarStyle.js';
 /**
  * Booking service handler — logic extracted from schedule routes.
  * Staff routes remain thin adapters that call these handlers unchanged.
@@ -129,9 +130,16 @@ export async function handleSync(req, res) {
   try {
     const eventId = String(req.body?.event_id || '').trim();
     if (!eventId) return res.status(400).json({ error: 'event_id is required' });
-    const rows = (await query('SELECT event_id, status, calendar_sync_status FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
+    const rows = (await query('SELECT event_id, status, calendar_sync_status, calendar_sync_error FROM monthly_schedule WHERE event_id = $1', [eventId])).rows;
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Event not found', event_id: eventId });
+    }
+    if (rows.some(needsCalendarStyleRetry)) {
+      const result = await syncLessonCalendarStyle(eventId);
+      if (result.calendar_sync_status !== 'synced') {
+        return res.status(502).json({ error: result.calendar_sync_error || 'Calendar style retry could not complete', event_id: eventId });
+      }
+      return res.json({ ok: true, event_id: eventId, ...result });
     }
     if (normalizeCalendarSyncStatus(rows[0]?.calendar_sync_status) === CALENDAR_SYNC_STATUS_SYNCED) {
       return res.status(400).json({ error: 'Lesson is already synced with Google Calendar', event_id: eventId });

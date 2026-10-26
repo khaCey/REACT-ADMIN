@@ -790,7 +790,9 @@ export default function BookLessonModal({
         setSelectedSlotKeys([])
         const studentLabel = student?.Name || student?.name || 'student'
         const sid = resolveBookStudentId(studentId, student) ?? sidRaw
-        success(`Lesson rescheduled for ${studentLabel}.`, {
+        success(rescheduleRes?.calendar_source_style_error
+          ? `Lesson rescheduled. Original Calendar event needs a sync retry: ${rescheduleRes.calendar_source_style_error}`
+          : `Lesson rescheduled for ${studentLabel}.`, {
           durationMs: 0,
           actionLabel: 'Click to open student details',
           onClick: () => {

@@ -12,7 +12,7 @@ function fixture(initial, totals) {
     lesson_mode: 'cafe', status: 'scheduled', calendar_sync_status: 'pending', ...r,
   }));
   const writes = [];
-  const active = (r) => !['cancelled', 'rescheduled'].includes(r.status) && r.lesson_kind !== 'demo';
+  const active = (r) => (r.status !== 'rescheduled' || r.awaiting_reschedule_date === true) && r.status !== 'unscheduled' && r.lesson_kind !== 'demo';
   async function db(sql, args = []) {
     const q = sql.replace(/\s+/g, ' ').toLowerCase().trim();
     if (q.startsWith('select lessons from lessons'))
@@ -66,7 +66,7 @@ test('repairs out-of-order counters and is idempotent', async () => {
   assert.equal((await reconcileStudentMonthCounters(7, '2026-10', f.db)).updated, 0);
   assert.equal(f.writes.length, 3);
 });
-test('excludes demo/cancelled/moved-source rows and keeps movement marker', async () => {
+test('counts cancellation, excludes demo/linked source and keeps movement marker', async () => {
   const f = fixture([
     lesson('demo', '2026-10-01', 'Sora D/L', { lesson_kind: 'demo' }),
     lesson('cancel', '2026-10-03', 'Sora (Cafe) 1/4', { status: 'cancelled' }),
@@ -75,8 +75,8 @@ test('excludes demo/cancelled/moved-source rows and keeps movement marker', asyn
     lesson('other', '2026-10-15', 'Sora (Cafe) 3/4'),
   ], { '7:2026-10': 4 });
   assert.equal((await reconcileStudentMonthCounters(7, '2026-10', f.db)).updated, 2);
-  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 1/4 · Moved from 5th');
-  assert.equal(f.rows.find((r) => r.event_id === 'other').title, 'Sora (Cafe) 2/4');
+  assert.equal(f.rows.find((r) => r.event_id === 'new').title, 'Sora (Cafe) 2/4 · Moved from 5th');
+  assert.equal(f.rows.find((r) => r.event_id === 'other').title, 'Sora (Cafe) 3/4');
   assert.equal(f.rows.find((r) => r.event_id === 'source').title, 'Sora (Cafe) 2/4 Moved to 8th');
 });
 test('cross-month reschedule fixes both affected months', async () => {
@@ -113,4 +113,34 @@ test('partial group reschedule preserves moved member and renumbers remaining ac
   assert.equal(result.updated, 1);
   assert.equal(f.rows[0].title, 'Sora and Kei (Cafe) 2/4 · Moved to 17th');
   assert.equal(f.rows[1].title, 'Kei (Cafe) 1/4');
+});
+
+test('pending reschedule retains its chronological credit until a replacement exists', async () => {
+  const f = fixture([
+    lesson('a', '2026-10-01', 'Sora (Cafe) 1/4'),
+    lesson('pending', '2026-10-08', 'Sora (Cafe) 2/4 · Moved to ???', { status: 'rescheduled', awaiting_reschedule_date: true }),
+    lesson('c', '2026-10-15', 'Sora (Cafe) 2/4'),
+    lesson('d', '2026-10-22', 'Sora (Cafe) 3/4'),
+  ], { '7:2026-10': 4 });
+  await reconcileStudentMonthCounters(7, '2026-10', f.db);
+  assert.equal(f.rows[3].title, 'Sora (Cafe) 4/4');
+  f.rows[1].awaiting_reschedule_date = false;
+  f.rows.push(lesson('replacement', '2026-10-29', 'Sora (Cafe) 1/4 · Moved from 8th', {student_id: 7, student_name: 'Sora', status: 'scheduled', lesson_kind: 'regular'}));
+  await reconcileStudentMonthCounters(7, '2026-10', f.db);
+  assert.equal(f.rows[3].title, 'Sora (Cafe) 3/4');
+  assert.equal(f.rows[4].title, 'Sora (Cafe) 4/4 · Moved from 8th');
+});
+
+test('cancellation keeps four chronological credits and daily repair adds its marker', async () => {
+  const f = fixture([
+    lesson('a', '2026-10-01', 'Sora (Cafe) 1/4'),
+    lesson('cancel', '2026-10-08', 'Sora (Cafe) 2/4', { status: 'cancelled' }),
+    lesson('c', '2026-10-15', 'Sora (Cafe) 2/4'),
+    lesson('d', '2026-10-22', 'Sora (Cafe) 3/4'),
+  ], { '7:2026-10': 4 });
+  await runDailyLessonCounterReconciliation(f.db);
+  assert.equal(f.rows[1].title, 'Sora (Cafe) 2/4 · Cancelled');
+  assert.equal(f.rows[2].title, 'Sora (Cafe) 3/4');
+  assert.equal(f.rows[3].title, 'Sora (Cafe) 4/4');
+  assert.equal((await runDailyLessonCounterReconciliation(f.db)).updated, 0);
 });

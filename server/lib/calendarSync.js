@@ -821,8 +821,9 @@ export async function upsertMonthlySchedule(data, options = {}) {
        ON CONFLICT (event_id, student_name) DO UPDATE SET
          calendar_source_event_id = COALESCE(EXCLUDED.calendar_source_event_id, monthly_schedule.calendar_source_event_id),
          lesson_uuid = COALESCE(monthly_schedule.lesson_uuid, EXCLUDED.lesson_uuid),
-         title = EXCLUDED.title, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
+         title = CASE WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.title ELSE EXCLUDED.title END, date = EXCLUDED.date, start = EXCLUDED.start, "end" = EXCLUDED."end",
          status = CASE
+           WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.status
            WHEN EXISTS (
              SELECT 1 FROM reschedules rs
              WHERE TRIM(rs.from_event_id) = TRIM(monthly_schedule.event_id)
@@ -834,8 +835,11 @@ export async function upsertMonthlySchedule(data, options = {}) {
            ELSE EXCLUDED.status
          END,
          is_kids_lesson = EXCLUDED.is_kids_lesson, teacher_name = EXCLUDED.teacher_name, lesson_kind = EXCLUDED.lesson_kind, lesson_mode = EXCLUDED.lesson_mode, student_id = EXCLUDED.student_id,
-         calendar_sync_status = EXCLUDED.calendar_sync_status, calendar_sync_error = EXCLUDED.calendar_sync_error, calendar_synced_at = EXCLUDED.calendar_synced_at,
+         calendar_sync_status = CASE WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.calendar_sync_status ELSE EXCLUDED.calendar_sync_status END,
+         calendar_sync_error = CASE WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.calendar_sync_error ELSE EXCLUDED.calendar_sync_error END,
+         calendar_synced_at = CASE WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.calendar_synced_at ELSE EXCLUDED.calendar_synced_at END,
          awaiting_reschedule_date = CASE
+           WHEN monthly_schedule.calendar_sync_error LIKE '[calendar-style] %' THEN monthly_schedule.awaiting_reschedule_date
            WHEN $13::boolean IS NULL THEN monthly_schedule.awaiting_reschedule_date
            ELSE $13::boolean
          END,
