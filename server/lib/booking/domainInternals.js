@@ -431,7 +431,7 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
 
   const rows = await db(
     `SELECT event_id, student_id, student_name, title, lesson_kind, lesson_mode,
-            status, awaiting_reschedule_date, start, "end", calendar_source_event_id, calendar_sync_status
+            status, awaiting_reschedule_date, start, "end", calendar_source_event_id, calendar_sync_status, calendar_sync_error
        FROM monthly_schedule
       WHERE student_id = $1
         AND to_char(date, 'YYYY-MM') = $2
@@ -465,9 +465,10 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     rowsByEvent.get(eid).push(r);
   }
 
-  /** @type {Map<string, string>} */
-  const titlesByEvent = new Map();
   const changedEventIds = [];
+  const calendarEventIds = new Set();
+  const { queueLessonCalendarStyle, syncLessonCalendarStyle, needsCalendarStyleRetry } =
+    await import('./lessonCalendarStyle.js');
   let idx = 0;
   for (const eid of eventOrder) {
     idx += 1;
@@ -512,8 +513,12 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     if (['cancelled', 'canceled'].includes(String(r.status || '').trim().toLowerCase())) {
       newTitle = applyCancelledTitleMarker(newTitle);
     }
+    if (groupRows.some(needsCalendarStyleRetry)) calendarEventIds.add(eid);
     if (String(r.title || '') === newTitle) continue;
-    titlesByEvent.set(eid, newTitle);
+    // Persist the retry marker before changing the local title. Polling must
+    // not overwrite it if Calendar is unavailable or this process stops.
+    if (String(r.status || '').trim().toLowerCase() !== 'reserved' &&
+        await queueLessonCalendarStyle(db, eid, groupRows)) calendarEventIds.add(eid);
     changedEventIds.push(eid);
     if (orderedStudents.length > 1 || groupRows.length > 1) {
       await db(
@@ -533,42 +538,17 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
   /** @type {Array<{ event_id: string, error: string }>} */
   const calendar_errors = [];
   if (isBookingGasEnabled()) {
-    for (const eid of changedEventIds) {
-      const groupRows = rowsByEvent.get(eid) || [];
-      const r = groupRows[0];
-      if (!r) continue;
-      const status = String(r.status || '').toLowerCase().trim();
-      if (status === 'reserved') continue;
-      if (String(eid).startsWith(LOCAL_BOOKING_EVENT_ID_PREFIX)) continue;
-      if (normalizeCalendarSyncStatus(r.calendar_sync_status) !== CALENDAR_SYNC_STATUS_SYNCED) {
-        continue;
-      }
+    for (const eid of calendarEventIds) {
+      const r = rowsByEvent.get(eid)?.[0];
+      if (!r || String(r.status || '').trim().toLowerCase() === 'reserved') continue;
       try {
-        if (await shouldSkipAmbiguousRecurringCalendarUpdate(eid, r.calendar_source_event_id, sid)) {
-          continue;
+        const result = await syncLessonCalendarStyle(eid);
+        if (result.calendar_sync_status === 'synced') calendar_patched += 1;
+        else if (result.calendar_sync_error) {
+          calendar_errors.push({ event_id: eid, error: result.calendar_sync_error });
         }
-      } catch (skipErr) {
-        calendar_errors.push({
-          event_id: eid,
-          error: skipErr?.message || String(skipErr),
-        });
-        continue;
-      }
-      const title = titlesByEvent.get(eid);
-      if (!title) continue;
-      try {
-        const gasRes = await updateBookedLessonEventInGas(eid, { title }, calendarGasOptions(groupRows));
-        if (gasRes?.ok) {
-          calendar_patched += 1;
-        } else {
-          const errMsg = String(gasRes?.error || 'Calendar title update failed').trim();
-          console.error('[renumber] Calendar title patch failed', eid, errMsg);
-          calendar_errors.push({ event_id: eid, error: errMsg });
-        }
-      } catch (patchErr) {
-        const errMsg = String(patchErr?.message || patchErr).trim();
-        console.error('[renumber] Calendar title patch error', eid, errMsg);
-        calendar_errors.push({ event_id: eid, error: errMsg });
+      } catch (error) {
+        calendar_errors.push({ event_id: eid, error: error?.message || String(error) });
       }
     }
   }

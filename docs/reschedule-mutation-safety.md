@@ -13,6 +13,8 @@ Database changes remain valid when Calendar is unavailable. Before committing a 
 
 The existing Sync with Calendar action retries this update, including for cancelled or rescheduled source lessons. Calendar polling preserves the pending local title, status and pending-date flag until a successful retry; it cannot erase the failure by rereading the old Calendar state. Ambiguous recurring series masters retain the existing protection against styling a whole series accidentally.
 
+Counter reconciliation also queues this marker before changing a Calendar-backed title. A later reconciliation retries failed updates even when the local title is already correct; successfully synchronised, unchanged events are skipped. Reserved holds retain their existing Calendar behaviour.
+
 No schema migration is required. Existing error/status columns are reused. Changes do not repair pre-existing orphan reschedule links automatically.
 
 ## Verification
