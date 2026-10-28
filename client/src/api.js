@@ -23,6 +23,7 @@ async function fetchApi(path, options = {}) {
 }
 
 export const api = {
+  getWeeklySchedule: (weekStart) => fetchApi(`/weekly-schedule?week_start=${encodeURIComponent(weekStart)}`),
   getStudents: () => fetchApi('/students'),
   getHiatusStudents: () => fetchApi('/students/hiatus'),
   patchStudentHiatus: (id, body) =>

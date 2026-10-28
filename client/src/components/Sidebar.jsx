@@ -66,6 +66,14 @@ export default function Sidebar({
               <span>Students</span>
             </Link>
           </li>
+          {isAdmin && (
+            <li>
+              <Link to="/weekly-schedule" className={navItemClass(path === '/weekly-schedule')}>
+                <Calendar className="w-5 h-5" />
+                <span>Weekly Schedule</span>
+              </Link>
+            </li>
+          )}
           {canAccessStaff && (
             <li>
               <Link to="/staff" className={navItemClass(path === '/staff')}>
