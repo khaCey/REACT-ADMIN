@@ -4,6 +4,7 @@ import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { studentIsDemo } from '../config/booking'
+import { getCalendarSyncDisplayState, CALENDAR_STYLE_PENDING_ERROR } from '../utils/calendarSyncDisplay'
 import { BOOKING_WIP_DISABLED, RESERVED_CONFIRM_WIP_DISABLED } from '../guides/wipFlags'
 import ConfirmActionModal from './ConfirmActionModal'
 
@@ -19,6 +20,8 @@ const STATUS_STYLES = {
   unscheduled: { color: 'bg-rose-600', text: 'Unscheduled' },
   deleting: { color: 'bg-slate-700', text: 'Deleting...' },
   sync_pending: { color: 'bg-indigo-600', text: 'Syncing with Calendar' },
+  calendar_style_pending: { color: 'bg-amber-500', text: 'Calendar update pending' },
+  calendar_style_failed: { color: 'bg-amber-600', text: 'Calendar update failed' },
   sync_failed: { color: 'bg-red-600', text: 'Calendar sync failed' },
 }
 
@@ -147,6 +150,7 @@ export default function LessonDetailsModal({
 
   const status = (lesson.status || 'scheduled').toLowerCase()
   const calendarSyncStatus = String(lesson.calendarSyncStatus || 'synced').toLowerCase()
+  const calendarSyncDisplayState = getCalendarSyncDisplayState(calendarSyncStatus, lesson.calendarSyncError)
   const transientStatus = String(lesson.transientStatus || '').toLowerCase()
   const isAwaitingRescheduleDate = !!lesson.awaitingRescheduleDate
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
@@ -172,10 +176,14 @@ export default function LessonDetailsModal({
             ? 'rescheduled'
             : status === 'cancelled'
             ? 'cancelled'
-            : calendarSyncStatus === 'failed'
-              ? 'sync_failed'
-              : calendarSyncStatus === 'pending' && (status === 'scheduled' || status === 'reserved')
-                ? 'calendar_pending'
+            : calendarSyncDisplayState === 'calendar_style_pending'
+              ? 'calendar_style_pending'
+              : calendarSyncDisplayState === 'calendar_style_failed'
+                ? 'calendar_style_failed'
+                : calendarSyncDisplayState === 'sync_failed'
+                  ? 'sync_failed'
+                  : calendarSyncDisplayState === 'calendar_pending' && (status === 'scheduled' || status === 'reserved')
+                    ? 'calendar_pending'
                 : isDemoLesson
                     ? 'demo'
                     : status
@@ -471,7 +479,11 @@ export default function LessonDetailsModal({
                 <div>{lesson.transientError}</div>
               )}
               {lesson?.calendarSyncError && (
-                <div>Calendar sync error: {lesson.calendarSyncError}</div>
+                <div>{lesson.calendarSyncError === CALENDAR_STYLE_PENDING_ERROR
+                  ? 'Calendar title/status update is pending. The event was previously linked to Calendar.'
+                  : hasCalendarStyleFailure
+                    ? 'Calendar update error: ' + lesson.calendarSyncError.replace(/^\[calendar-style\] /, '')
+                    : 'Calendar sync error: ' + lesson.calendarSyncError}</div>
               )}
               {isAwaitingRescheduleDate && (
                 <div className="text-amber-800 text-xs mt-1">Awaiting a new date (graphite in Google Calendar).</div>
