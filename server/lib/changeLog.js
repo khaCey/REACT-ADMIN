@@ -2,6 +2,7 @@
  * Change log helper - records data modifications for audit and undo
  */
 import { query } from '../db/index.js';
+import { logEvent } from './appLogger.js';
 
 /** @param {import('pg').PoolClient} [client] When set, run inserts on this client (same transaction as caller). */
 export async function logChange({ entityType, entityKey, action, oldData, newData, sourceChangeId = null }, req, client = null) {
@@ -42,4 +43,5 @@ export async function logChange({ entityType, entityKey, action, oldData, newDat
       ]
     );
   }
+  logEvent('info', 'audit.recorded', { entityType, entityKey, action, staffId, sourceChangeId, transactional: !!client });
 }

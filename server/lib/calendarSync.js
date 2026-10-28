@@ -3,6 +3,8 @@
  * Used by both /api/calendar-poll/sync (from GAS) and /api/calendar-poll/sync-from-sheet (from Google Sheets API).
  */
 import { query } from '../db/index.js';
+import { logEvent } from './appLogger.js';
+import { validateCalendarSnapshot } from './calendarMemberValidation.js';
 import { GOOGLE_INSTANCE_SUFFIX_RE } from './calendarEventId.js';
 import { utcToJstDateAndTime } from './timezone.js';
 import { upsertDemoLessonEvent } from './demoLessonEvents.js';
@@ -749,6 +751,8 @@ export async function upsertMonthlySchedule(data, options = {}) {
     onlyKeys: onlyKeysOpt,
     ignoreDismissals = false,
   } = options;
+  try { validateCalendarSnapshot(Array.isArray(data) ? data : []); }
+  catch (error) { logEvent('error', 'calendar.invalid_row', error.rowContext); throw error; }
   const removedStats = await applyRemovedFromPoll(removed);
 
   const built = await buildMonthlyScheduleRows(Array.isArray(data) ? data : []);

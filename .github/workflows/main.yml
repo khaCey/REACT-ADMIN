@@ -56,6 +56,11 @@ jobs:
           call "C:\Program Files\nodejs\npm.cmd" run test:reschedule
           if errorlevel 1 exit /b 1
 
+      - name: Test diagnostics and Calendar member guards
+        run: |
+          node --test server/lib/__tests__/appLogger.test.js server/lib/__tests__/calendarMemberValidation.test.js
+          if errorlevel 1 exit /b 1
+
       - name: Build application
         run: |
           call "C:\Program Files\nodejs\npm.cmd" run build

@@ -3,6 +3,8 @@
  * Called from POST /api/schedule/book to create a real Calendar event.
  */
 
+import { logEvent } from './appLogger.js';
+
 import {
   GOOGLE_INSTANCE_SUFFIX_RE,
   gasCalendarEventIdFromMonthly,
@@ -20,6 +22,7 @@ function normalizeResult(data, fallbackError = null) {
   if (err && rev) {
     err = `${err} [gas:${rev}]`;
   }
+  logEvent(data?.ok ? 'info' : 'error', 'calendar.write_result', { ok: !!data?.ok, eventId: data?.eventId, actionTaken: data?.actionTaken, error: err, gasScriptRevision: rev });
   return {
     ok: !!data?.ok,
     actionTaken: data?.actionTaken || null,
