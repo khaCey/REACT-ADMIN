@@ -2,31 +2,81 @@ name: Deploy Production
 
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    runs-on: [self-hosted, windows, x64]
-
+    runs-on: [greensquare-admin-prod]
+    timeout-minutes: 20
+    env:
+      PM2_HOME: C:\Admin\pm2-system
+      EXPECTED_COMMIT: ${{ github.sha }}
     defaults:
       run:
         shell: cmd
-        working-directory: C:\GitHub\REACT-ADMIN
+        working-directory: C:\Admin\react-admin
 
     steps:
-      - name: Trust deployment repository
-        run: git config --global --add safe.directory C:/GitHub/REACT-ADMIN
+      - name: Update production checkout
+        run: |
+          git config --global --add safe.directory C:/Admin/react-admin
+          if errorlevel 1 exit /b 1
+          git diff --quiet
+          if errorlevel 1 exit /b 1
+          git diff --cached --quiet
+          if errorlevel 1 exit /b 1
+          git fetch origin main
+          if errorlevel 1 exit /b 1
+          git checkout main
+          if errorlevel 1 exit /b 1
+          git merge --ff-only %EXPECTED_COMMIT%
+          if errorlevel 1 exit /b 1
+          for /f %%H in ('git rev-parse HEAD') do if not "%%H"=="%EXPECTED_COMMIT%" exit /b 1
 
-      - name: Pull latest main branch
-        run: git pull --ff-only origin main
+      - name: Install dependencies
+        run: |
+          call "C:\Program Files\nodejs\npm.cmd" ci --no-audit --no-fund
+          if errorlevel 1 exit /b 1
+          cd client
+          call "C:\Program Files\nodejs\npm.cmd" ci --no-audit --no-fund
+          if errorlevel 1 exit /b 1
+
+      - name: Test booking and rescheduling
+        run: |
+          call "C:\Program Files\nodejs\npm.cmd" run test:booking
+          if errorlevel 1 exit /b 1
+          call "C:\Program Files\nodejs\npm.cmd" run test:reschedule
+          if errorlevel 1 exit /b 1
 
       - name: Build application
-        run: npm run build
+        run: |
+          call "C:\Program Files\nodejs\npm.cmd" run build
+          if errorlevel 1 exit /b 1
 
+      - name: Restart SYSTEM-managed application
+        run: |
+          "C:\Program Files\nodejs\node.exe" "C:\Users\GreenSquare\AppData\Roaming\npm\node_modules\pm2\bin\pm2" startOrReload ecosystem.config.cjs --update-env
+          if errorlevel 1 exit /b 1
+          "C:\Program Files\nodejs\node.exe" "C:\Users\GreenSquare\AppData\Roaming\npm\node_modules\pm2\bin\pm2" save
+          if errorlevel 1 exit /b 1
+
+      - name: Verify application health
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            try {
+              $health = Invoke-RestMethod 'http://127.0.0.1:3002/api/health' -TimeoutSec 5
+              if ($health.ok -eq $true) { exit 0 }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          throw 'Application health check failed after deployment.'
