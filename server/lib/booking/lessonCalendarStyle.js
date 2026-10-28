@@ -1,5 +1,6 @@
 /** Retry styling of an existing Calendar event; never create a replacement event. */
 import { pool } from '../../db/index.js';
+import { logEvent } from '../appLogger.js';
 import { bookingEventColorId, isBookingGasEnabled, updateBookedLessonEventInGas } from '../bookingCalendarSync.js';
 import { calendarGasOptions, shouldSkipAmbiguousRecurringForRows } from './domainInternals.js';
 
@@ -50,10 +51,13 @@ export async function syncLessonCalendarStyle(eventId, previousRows = null) {
     const savedError = error ? CALENDAR_STYLE_ERROR_PREFIX + error : null;
     await db(`UPDATE monthly_schedule SET calendar_sync_status = $2, calendar_sync_error = $3,
       calendar_sync_attempted_at = NOW(),
-      calendar_synced_at = CASE WHEN $2 = 'synced' THEN NOW() ELSE calendar_synced_at END
+      calendar_synced_at = CASE WHEN $2::varchar(20) = 'synced' THEN NOW() ELSE calendar_synced_at END
       WHERE event_id = $1`, [eventId, status, savedError]);
     await db('COMMIT');
     return { calendar_sync_status: status, calendar_sync_error: savedError };
+  } catch (error) {
+    logEvent('error', 'calendar.style_sync_failed', { eventId, error });
+    throw error;
   } finally {
     try { await client.query('ROLLBACK'); } catch {}
     client.release();
