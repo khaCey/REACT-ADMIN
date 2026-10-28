@@ -8,6 +8,7 @@ import { api } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FullPageLoading from '../components/FullPageLoading'
 import { getCurrentYyyyMmJst } from '../utils/jstMonth'
+import { getCalendarSyncDisplayState } from '../utils/calendarSyncDisplay'
 
 function formatBackupDate(iso) {
   if (!iso) return '—'
@@ -755,17 +756,23 @@ export default function Admin() {
                           <td className="px-3 py-2 align-top">
                             <span
                               className={`inline-flex rounded px-2 py-0.5 text-xs ${
-                                row.calendar_sync_status === 'failed'
-                                  ? 'bg-red-100 text-red-700'
-                                  : row.calendar_sync_status === 'pending'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-emerald-100 text-emerald-700'
+                                getCalendarSyncDisplayState(row.calendar_sync_status, row.calendar_sync_error).startsWith('calendar_style')
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : row.calendar_sync_status === 'failed'
+                                    ? 'bg-red-100 text-red-700'
+                                    : row.calendar_sync_status === 'pending'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : 'bg-emerald-100 text-emerald-700'
                               }`}
                             >
-                              {row.calendar_sync_status || 'synced'}
+                              {getCalendarSyncDisplayState(row.calendar_sync_status, row.calendar_sync_error) === 'calendar_style_pending'
+                                ? 'update pending'
+                                : getCalendarSyncDisplayState(row.calendar_sync_status, row.calendar_sync_error) === 'calendar_style_failed'
+                                  ? 'update failed'
+                                  : row.calendar_sync_status || 'synced'}
                             </span>
                             {row.calendar_sync_error ? (
-                              <div className="text-[11px] text-red-600 mt-1 max-w-[220px] break-words">
+                              <div className={`text-[11px] mt-1 max-w-[220px] break-words ${getCalendarSyncDisplayState(row.calendar_sync_status, row.calendar_sync_error).startsWith('calendar_style') ? 'text-amber-700' : 'text-red-600'}`}>
                                 {row.calendar_sync_error}
                               </div>
                             ) : null}

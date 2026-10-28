@@ -9,6 +9,7 @@ import RescheduleChoiceModal from './RescheduleChoiceModal'
 import { useToast } from '../context/ToastContext'
 import { addOneMonthYyyyMm, getCurrentYyyyMmJst } from '../utils/jstMonth'
 import { studentIsDemo } from '../config/booking'
+import { getCalendarSyncDisplayState } from '../utils/calendarSyncDisplay'
 import { BOOKING_WIP_DISABLED, RESERVED_CONFIRM_WIP_DISABLED } from '../guides/wipFlags'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
@@ -51,6 +52,8 @@ const CARD_STYLES = {
   unscheduled: { accent: 'bg-rose-600', bg: 'bg-rose-50', dot: 'bg-rose-600', hoverRing: 'hover:ring-rose-500/60', label: 'Unscheduled' },
   deleting: { accent: 'bg-slate-700', bg: 'bg-slate-100', dot: 'bg-slate-700', hoverRing: 'hover:ring-slate-600/60', label: 'Deleting...' },
   sync_pending: { accent: 'bg-indigo-600', bg: 'bg-indigo-50', dot: 'bg-indigo-600', hoverRing: 'hover:ring-indigo-500/60', label: 'Syncing' },
+  calendar_style_pending: { accent: 'bg-amber-500', bg: 'bg-amber-50', dot: 'bg-amber-500', hoverRing: 'hover:ring-amber-500/60', label: 'Update pending' },
+  calendar_style_failed: { accent: 'bg-amber-600', bg: 'bg-amber-50', dot: 'bg-amber-600', hoverRing: 'hover:ring-amber-600/60', label: 'Update failed' },
   sync_failed: { accent: 'bg-red-600', bg: 'bg-red-50', dot: 'bg-red-600', hoverRing: 'hover:ring-red-500/60', label: 'Sync failed' },
 }
 
@@ -63,7 +66,7 @@ const CARD_SIZES = {
 function getLessonDisplayStatus(lesson) {
   const transientStatus = String(lesson?.transientStatus || '').toLowerCase()
   const rawStatus = String(lesson?.status || '').toLowerCase()
-  const syncStatus = String(lesson?.calendarSyncStatus || 'synced').toLowerCase()
+  const syncDisplayState = getCalendarSyncDisplayState(lesson?.calendarSyncStatus, lesson?.calendarSyncError)
   const isDemoLesson = String(lesson?.lessonKind || '').toLowerCase() === 'demo'
 
   if (transientStatus === 'deleting') return 'deleting'
@@ -76,8 +79,10 @@ function getLessonDisplayStatus(lesson) {
   if (lesson?.optimisticRescheduledTo || lesson?.rescheduledTo) return 'rescheduled'
   if (rawStatus === 'rescheduled') return 'rescheduled'
   if (rawStatus === 'cancelled') return 'cancelled'
-  if (syncStatus === 'failed') return 'sync_failed'
-  if (syncStatus === 'pending' && (rawStatus === 'scheduled' || rawStatus === 'reserved')) return 'calendar_pending'
+  if (syncDisplayState === 'calendar_style_pending') return 'calendar_style_pending'
+  if (syncDisplayState === 'calendar_style_failed') return 'calendar_style_failed'
+  if (syncDisplayState === 'sync_failed') return 'sync_failed'
+  if (syncDisplayState === 'calendar_pending' && (rawStatus === 'scheduled' || rawStatus === 'reserved')) return 'calendar_pending'
   if (isDemoLesson) return 'demo'
   if (rawStatus === 'reserved') return 'reserved'
   return rawStatus || 'scheduled'
