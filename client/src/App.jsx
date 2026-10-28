@@ -5,6 +5,7 @@ import AdminRoute from './components/AdminRoute'
 import KhaceyRoute from './components/KhaceyRoute'
 import StaffRoute from './components/StaffRoute'
 import Dashboard from './pages/Dashboard'
+import WeeklySchedule from './pages/WeeklySchedule'
 import Students from './pages/Students'
 import StudentDetail from './pages/StudentDetail'
 import Staff from './pages/Staff'
@@ -35,6 +36,7 @@ function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="weekly-schedule" element={<AdminRoute><WeeklySchedule /></AdminRoute>} />
         <Route path="students" element={<Students />} />
         <Route path="students/:id" element={<StudentDetail />} />
         <Route path="staff" element={<StaffRoute><Staff /></StaffRoute>} />

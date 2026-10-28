@@ -30,6 +30,7 @@ import lessonsRouter from './routes/lessons.js';
 import dashboardRouter from './routes/dashboard.js';
 import demoTrackerRouter from './routes/demoTracker.js';
 import configRouter from './routes/config.js';
+import weeklyScheduleRouter from './routes/weeklySchedule.js';
 import scheduleRouter, { purgeAllReservedPlaceholders } from './routes/schedule.js';
 import changeLogRouter from './routes/changeLog.js';
 import calendarRouter, { registerWatch } from './routes/calendar.js';
@@ -465,6 +466,7 @@ app.use('/api/calendar', calendarRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/shifts', shiftsRouter);
 
+app.use('/api/weekly-schedule', weeklyScheduleRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/change-log', changeLogRouter);
 app.use('/api/notifications', notificationsRouter);
