@@ -87,3 +87,11 @@ Export your Google Sheets as CSV to `migration-data/`. See `migration-data/READM
 - `POST /api/notes` - Add note
 - `GET /api/dashboard/stats` - Dashboard stats
 - `GET /api/config/feature-flags` - Feature flags
+
+## Application diagnostics
+
+The API writes JSON Lines to `logs/app.jsonl` (on the admin PC: `C:\Admin\react-admin\logs\app.jsonl`). `APP_LOG_DIR` can select another directory. Files rotate at 10 MiB with five older files retained; logs are local, excluded from Git and are not served by the web app. PM2 stdout/stderr logs remain available separately.
+
+Records include timestamps, process IDs, server-generated request IDs, HTTP outcomes and staff IDs, database write summaries and failures, audit record references, outbound API timings, Calendar write outcomes and planned before/after title changes. Existing console messages and exceptions are captured. The database change log remains the detailed audit/undo source; transactional audit entries in the file mean recorded within a transaction, not necessarily committed.
+
+Passwords, tokens, cookies, credentials, configured secret values and URL query strings are redacted. Request bodies, SQL parameter values and response bodies are not logged. Calendar title traces contain student names; restrict access to the local logs. Historical actions cannot be reconstructed retroactively from these files. A logging filesystem failure is reported to PM2 stderr without preventing application work.

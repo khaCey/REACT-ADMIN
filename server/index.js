@@ -2,9 +2,11 @@ import { config } from 'dotenv';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
+import { installAppLogging, requestLogging } from './lib/appLogger.js';
 
 const __dirnameServer = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirnameServer, '..', '.env'), override: true });
+installAppLogging();
 const clientDistDir = join(__dirnameServer, '..', 'client', 'dist');
 const hasClientDist = existsSync(clientDistDir);
 
@@ -63,6 +65,7 @@ import { tmpdir } from 'os';
 const app = express();
 const PORT = process.env.API_PORT || 3001;
 
+app.use(requestLogging);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 

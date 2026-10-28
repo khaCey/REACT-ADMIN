@@ -6,6 +6,7 @@ const __dirnameDb = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirnameDb, '..', '..', '.env'), override: true });
 
 import pg from 'pg';
+import { logEvent } from '../lib/appLogger.js';
 import { readFileSync } from 'fs';
 
 const __dirname = __dirnameDb;
@@ -24,11 +25,19 @@ const pool = new pg.Pool({
 });
 
 export async function query(text, params) {
-  const client = await pool.connect();
+  let client;
+  const operation = String(text).trim().match(/^(INSERT INTO|UPDATE|DELETE FROM)\s+([\w.]+)/i);
   try {
-    return await client.query(text, params);
+    client = await pool.connect();
+    const result = await client.query(text, params);
+    if (operation) logEvent('info', 'database.write', { operation: operation[1], table: operation[2], rows: result.rowCount });
+    return result;
+  } catch (error) {
+    logEvent('error', 'database.failed', { operation: operation?.[1], table: operation?.[2], error,
+      parameterLengths: (params || []).map(v => typeof v === 'string' ? Array.from(v).length : null) });
+    throw error;
   } finally {
-    client.release();
+    client?.release();
   }
 }
 

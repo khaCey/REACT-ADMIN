@@ -1,3 +1,5 @@
+import { logEvent } from '../appLogger.js';
+import { canonicalEventMembers } from '../calendarMemberValidation.js';
 import { lessonPackStatusSql, applyCancelledTitleMarker, parseLessonPackTotal } from '../lessonMonthCounters.js';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
@@ -323,14 +325,14 @@ export async function getOrderedEventStudents(eventId, db = query) {
                LOWER(COALESCE(s.name, m.student_name)) ASC`,
     [eventId]
   );
-  return (result.rows || []).map((row, index) => ({
+  return canonicalEventMembers((result.rows || []).map((row, index) => ({
     id: row.student_id != null ? Number(row.student_id) : null,
     name: normalizePersonName(row.canonical_student_name || row.student_name),
     status: row.student_status,
     payment: row.student_payment,
     is_child: !!row.student_is_child,
     sort_order: parseInt(row.group_sort_order, 10) || index + 1,
-  }));
+  })));
 }
 
 export function buildCanonicalLessonTitle(existingTitle, orderedStudents) {
@@ -515,6 +517,7 @@ export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, p
     }
     if (groupRows.some(needsCalendarStyleRetry)) calendarEventIds.add(eid);
     if (String(r.title || '') === newTitle) continue;
+    logEvent('info', 'calendar.title_rewrite_planned', { eventId: eid, studentId: sid, month, oldTitle: r.title, newTitle, memberIds: titleStudents.map(member => member.id) });
     // Persist the retry marker before changing the local title. Polling must
     // not overwrite it if Calendar is unavailable or this process stops.
     if (String(r.status || '').trim().toLowerCase() !== 'reserved' &&
