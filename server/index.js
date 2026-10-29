@@ -56,7 +56,7 @@ import {
   runRestoreFromUpload,
 } from './lib/backup.js';
 import { listBackupFilesInFolder } from './lib/googleDrive.js';
-import { runServerCalendarPollSync } from './lib/calendarPollServerJob.js';
+import { runServerCalendarPollSync, getCalendarPollStatus } from './lib/calendarPollServerJob.js';
 import { runDailyLessonCounterReconciliation } from './lib/booking/lessonCounterReconcile.js';
 import { countBookedRegularLessons } from './lib/lessonMonthCounters.js';
 import cron from 'node-cron';
@@ -902,6 +902,10 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
   }
 });
 
+app.get('/api/calendar-poll/status', (_req, res) => {
+  res.set('Cache-Control', 'no-store').json(getCalendarPollStatus());
+});
+
 /** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); optional removed[] + reconcile drop stale rows. */
 app.post('/api/calendar-poll/sync', requireAdmin, async (req, res) => {
   try {
@@ -977,7 +981,7 @@ app.post('/api/calendar-poll/sync', requireAdmin, async (req, res) => {
 });
 
 /** Server-side backfill: fetch from GAS Calendar Webhook and sync to DB. Uses CALENDAR_POLL_URL and CALENDAR_POLL_API_KEY from .env (no client rebuild needed). */
-app.post('/api/calendar-poll/backfill', async (req, res) => {
+app.post('/api/calendar-poll/backfill', requireAdmin, async (req, res) => {
   try {
     const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
     const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
@@ -1310,6 +1314,7 @@ app.listen(PORT, '0.0.0.0', () => {
           { timezone: pollTz }
         );
         console.log('[calendar-poll/server] cron:', pollCronExpr, pollTz);
+        runServerCalendarPollSync().catch((err) => console.error('[calendar-poll/server] startup sync failed:', err.message));
       }
 
       // Keep monthly x/y title counters in chronological date order (Tokyo time).
@@ -1330,3 +1335,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.error('Failed to run DB migrations:', err);
     process.exit(1);
 });
+

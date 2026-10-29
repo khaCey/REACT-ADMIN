@@ -43,11 +43,10 @@ router.get('/calendar-poll-configured', (_req, res) => {
   res.json({ configured: !!(url && key) });
 });
 
-/** URL + key for browser polling (production: from root .env CALENDAR_POLL_*; Vite build may omit VITE_*). */
+/** Legacy clients may check configuration, but never receive server credentials. */
 router.get('/calendar-poll', requireAuth, (_req, res) => {
-  const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim();
-  const apiKey = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
-  res.json({ url, apiKey });
+  const configured = !!((process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim() && (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim());
+  res.set('Cache-Control', 'no-store').json({ configured, serverOnly: true });
 });
 
 /**
@@ -228,3 +227,4 @@ router.post('/student-line-email/:id', requireAuth, async (req, res) => {
 });
 
 export default router;
+

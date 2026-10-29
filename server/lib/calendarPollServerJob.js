@@ -3,6 +3,7 @@
  * Runs on a cron schedule from server/index.js when CALENDAR_POLL_SERVER_CRON is set.
  * Uses current + next month snapshots (month=YYYY-MM) + reconcile to mirror backfill behavior.
  */
+import { createCalendarPollRunner } from './calendarPollState.js';
 import { upsertMonthlySchedule } from './calendarSync.js';
 import { utcToJstDateAndTime } from './timezone.js';
 import {
@@ -132,7 +133,7 @@ async function fetchMonthlyScheduleFromGasMonth(yyyyMm) {
   const gasUrl = `${url}?key=${encodeURIComponent(key)}&full=1&month=${encodeURIComponent(yyyyMm)}`;
   let fetchRes;
   try {
-    fetchRes = await fetch(gasUrl);
+    fetchRes = await fetch(gasUrl, { signal: AbortSignal.timeout(60000) });
   } catch (err) {
     const detail = formatFetchError(err);
     throw new Error(`Failed to reach Calendar GAS: ${detail}`);
@@ -152,7 +153,7 @@ async function fetchMonthlyScheduleFromGasMonth(yyyyMm) {
 /**
  * GAS month snapshots (current + next) → upsert + reconcile; mirrors backfill behavior.
  */
-export async function runServerCalendarPollSync() {
+async function performServerCalendarPollSync() {
   const { configured } = getCalendarPollGasEnv();
   if (!configured) {
     console.warn('[calendar-poll/server] skip: CALENDAR_POLL_URL / CALENDAR_POLL_API_KEY not set');
@@ -211,4 +212,12 @@ export async function runServerCalendarPollSync() {
     cacheVersion: 0,
     lastUpdated: new Date().toISOString(),
   };
+}
+
+
+const pollRunner = createCalendarPollRunner(performServerCalendarPollSync);
+export const runServerCalendarPollSync = () => pollRunner.run();
+export function getCalendarPollStatus() {
+  const cron = String(process.env.CALENDAR_POLL_SERVER_CRON || '').trim();
+  return { ...pollRunner.status(), configured: getCalendarPollGasEnv().configured, enabled: !!cron && cron !== '0' && !/^off$/i.test(cron) };
 }

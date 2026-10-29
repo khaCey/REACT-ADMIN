@@ -1,126 +1,45 @@
-/**
- * useCalendarPolling — GAS month backfill (current + next JST month) on load and each interval.
- */
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { fetchCalendarSyncStatus } from '../api/pollingApi'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  fetchCalendarCurrentAndNextMonths,
-  isPollingConfigured,
-  ensurePollingConfig,
-} from '../api/pollingApi'
-
-export function useCalendarPolling(options = {}) {
-  const {
-    intervalMs = 900000, // 15 min (CalendarPollingProvider overrides default)
-    enabled = true,
-    onError,
-  } = options
-
-  const [data, setData] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [lastUpdated, setLastUpdated] = useState(null)
-  const [cacheVersion, setCacheVersion] = useState(null)
-  const pollRef = useRef(null)
-  const mountedRef = useRef(true)
-  const dataRef = useRef([])
-
+/** Read local sync metadata. Only the server contacts GAS and imports lessons. */
+export function useCalendarPolling({ intervalMs = 30000, enabled = true } = {}) {
+  const [snapshot, setSnapshot] = useState({ status: null, error: null, loading: true })
+  const generation = useRef(0)
+  const inFlight = useRef(null)
   const refetch = useCallback(async () => {
-    await ensurePollingConfig()
-    if (!isPollingConfigured()) {
-      setLoading(false)
-      setData([])
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchCalendarCurrentAndNextMonths()
-      if (result._skipped) {
-        setData([])
-        setLoading(false)
-        return
-      }
-      if (mountedRef.current) {
-        const rows = Array.isArray(result.data) ? result.data : []
-        setData(rows)
-        dataRef.current = rows
-        setLastUpdated(result.lastUpdated || null)
-        setCacheVersion(result.cacheVersion ?? null)
-      }
-    } catch (e) {
-      if (mountedRef.current) {
-        setError(e.message)
-        onError?.(e)
-      }
-    } finally {
-      if (mountedRef.current) setLoading(false)
-    }
-  }, [onError])
-
-  const fetchFullSilent = useCallback(async () => {
-    await ensurePollingConfig()
-    if (!isPollingConfigured() || !mountedRef.current) return
-    try {
-      const result = await fetchCalendarCurrentAndNextMonths()
-      if (result._skipped || !mountedRef.current) return
-      const rows = Array.isArray(result.data) ? result.data : []
-      setData(rows)
-      dataRef.current = rows
-      setLastUpdated(result.lastUpdated || null)
-      setCacheVersion(result.cacheVersion ?? null)
-    } catch (e) {
-      if (mountedRef.current) {
-        setError(e.message)
-        onError?.(e)
-      }
-    }
-  }, [onError])
+    if (!enabled) return
+    const gen = generation.current
+    if (inFlight.current?.gen === gen) return inFlight.current.promise
+    const promise = fetchCalendarSyncStatus().then((status) => {
+      if (generation.current === gen) setSnapshot({ status, error: null, loading: false })
+    }).catch((err) => {
+      if (generation.current === gen) setSnapshot((previous) => ({ ...previous, error: err.message, loading: false }))
+    }).finally(() => {
+      if (inFlight.current?.promise === promise) inFlight.current = null
+    })
+    inFlight.current = { gen, promise }
+    return promise
+  }, [enabled])
 
   useEffect(() => {
-    mountedRef.current = true
-    if (enabled) {
-      refetch()
-    } else {
-      setLoading(false)
-      setData([])
-    }
+    generation.current += 1
+    if (!enabled) return
+    refetch()
+    const timer = setInterval(refetch, intervalMs)
     return () => {
-      mountedRef.current = false
-      if (pollRef.current) clearInterval(pollRef.current)
+      generation.current += 1
+      clearInterval(timer)
     }
-  }, [enabled, refetch])
+  }, [enabled, intervalMs, refetch])
 
-  useEffect(() => {
-    if (!enabled || loading) return
-    if (!isPollingConfigured()) {
-      if (import.meta.env.DEV) {
-        console.warn(
-          '[useCalendarPolling] Not configured: add VITE_CALENDAR_POLL_URL + VITE_CALENDAR_POLL_API_KEY to client/.env (restart Vite), or log in as staff so /api/config/calendar-poll can supply them.'
-        )
-      }
-      return
-    }
-
-    pollRef.current = setInterval(() => {
-      fetchFullSilent()
-    }, intervalMs)
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
-  }, [enabled, intervalMs, loading, fetchFullSilent])
-
+  const status = enabled ? snapshot.status : null
   return {
-    data,
-    loading,
-    error,
-    lastUpdated,
-    cacheVersion,
+    data: [],
+    loading: enabled && snapshot.loading,
+    error: enabled ? snapshot.error || (status?.failed ? 'The last Calendar import failed; the server will retry.' : null) : null,
+    lastUpdated: status?.lastSuccessAt || null,
+    cacheVersion: status?.version ?? null,
     refetch,
-    isConfigured: isPollingConfigured(),
+    isConfigured: !!status?.configured,
   }
 }

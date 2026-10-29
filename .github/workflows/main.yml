@@ -61,7 +61,7 @@ jobs:
 
       - name: Test diagnostics and Calendar member guards
         run: |
-          node --test server/lib/__tests__/appLogger.test.js server/lib/__tests__/calendarMemberValidation.test.js server/routes/__tests__/weeklySchedule.test.js
+          node --test server/lib/__tests__/calendarPollState.test.js server/lib/__tests__/appLogger.test.js server/lib/__tests__/calendarMemberValidation.test.js server/routes/__tests__/weeklySchedule.test.js
           if errorlevel 1 exit /b 1
 
       - name: Build application
@@ -88,3 +88,4 @@ jobs:
             Start-Sleep -Seconds 2
           }
           throw 'Application health check failed after deployment.'
+
