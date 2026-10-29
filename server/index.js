@@ -1277,8 +1277,8 @@ app.use('/api', (req, res) => {
 
 runMigrations()
   .then(() => {
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API running at http://localhost:${PORT} (network: http://0.0.0.0:${PORT})`);
+app.listen(PORT, process.env.API_HOST || '0.0.0.0', () => {
+  console.log(`API running on ${process.env.API_HOST || '0.0.0.0'}:${PORT}`);
   registerWatch().catch(() => {});
 
       const cronExpr = process.env.BACKUP_SCHEDULE_CRON || '0 12 * * *';
