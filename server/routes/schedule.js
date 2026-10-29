@@ -16,12 +16,13 @@ import {
   handleRescheduleLinked,
   handleUnrescheduleLinked,
 } from '../lib/booking/cancelRescheduleService.js';
-import { handleRemoveLesson } from '../lib/booking/removeLessonService.js';
+
 import { handleSync } from '../lib/booking/_syncHandler.js';
 import { handleGetTeachers } from '../lib/booking/_teachersHandler.js';
 import { purgeAllReservedPlaceholders } from '../lib/booking/domainInternals.js';
 
 const router = Router();
+const deletionDisabled = (_req, res) => res.status(423).json({ code: 'CALENDAR_DELETION_DISABLED', error: 'Lesson removal and Calendar-deleting operations are temporarily disabled. Staff must perform Calendar cleanup manually.' });
 
 router.get('/', (req, res) => res.json({ ok: true, message: 'Schedule API' }));
 router.get('/week', handleGetWeek);
@@ -37,7 +38,7 @@ router.get('/booking-warning', async (req, res) => {
 });
 router.get('/teachers', handleGetTeachers);
 router.post('/book', handleBookLesson);
-router.post('/confirm-reserved', handleConfirmReserved);
+router.post('/confirm-reserved', deletionDisabled);
 router.post('/move-reserved', handleMoveReserved);
 router.post('/create-reserved', handleCreateReserved);
 router.post('/sync', handleSync);
@@ -46,8 +47,9 @@ router.patch(/^\/(.+)\/cancel\/?$/, handleCancel);
 router.patch(/^\/(.+)\/uncancel\/?$/, handleUncancel);
 router.patch(/^\/(.+)\/reschedule\/?$/, handleLegacyReschedule);
 router.post('/reschedule-linked', handleRescheduleLinked);
-router.post('/unreschedule-linked', handleUnrescheduleLinked);
-router.delete(/^\/(.+)\/?$/, handleRemoveLesson);
+router.post('/unreschedule-linked', deletionDisabled);
+router.delete(/^\/(.+)\/?$/, deletionDisabled);
 
 export { purgeAllReservedPlaceholders, renumberMonthLessonTitlesForStudent };
 export default router;
+

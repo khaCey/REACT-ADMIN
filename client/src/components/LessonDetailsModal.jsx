@@ -5,7 +5,8 @@ import { api } from '../api'
 import { useToast } from '../context/ToastContext'
 import { studentIsDemo } from '../config/booking'
 import { getCalendarSyncDisplayState, CALENDAR_STYLE_PENDING_ERROR } from '../utils/calendarSyncDisplay'
-import { BOOKING_WIP_DISABLED, RESERVED_CONFIRM_WIP_DISABLED } from '../guides/wipFlags'
+import { BOOKING_WIP_DISABLED } from '../guides/wipFlags'
+const RESERVED_CONFIRM_WIP_DISABLED = true
 import ConfirmActionModal from './ConfirmActionModal'
 
 const STATUS_STYLES = {
@@ -554,7 +555,7 @@ export default function LessonDetailsModal({
                   <button
                     type="button"
                     onClick={handleRemove}
-                    disabled={confirmDialogOpen || isTransientBusy}
+                    disabled={true}
                     className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     Remove
@@ -632,7 +633,7 @@ export default function LessonDetailsModal({
                   <button
                     type="button"
                     onClick={() => setUnrescheduleConfirmOpen(true)}
-                    disabled={confirmDialogOpen || isTransientBusy}
+                    disabled={true}
                     className="rounded-md border border-violet-600 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     Unreschedule
@@ -653,11 +654,9 @@ export default function LessonDetailsModal({
                 <button
                   type="button"
                   onClick={handleRemove}
-                  disabled={confirmDialogOpen || isTransientBusy}
+                  disabled={true}
                   title={
-                    isLocalOnlyRemove
-                      ? 'Removes this lesson from the schedule only; does not delete from Google Calendar.'
-                      : undefined
+                    'Temporarily disabled. Staff must perform Calendar cleanup manually.'
                   }
                   className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
@@ -781,3 +780,4 @@ export default function LessonDetailsModal({
     document.body
   )
 }
+

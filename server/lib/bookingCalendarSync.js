@@ -377,91 +377,7 @@ export async function createBookedLessonEventInGas(args) {
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function deleteBookedLessonEventInGas(monthlyEventId, gasOptions = {}) {
-  const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
-  const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
-  if (!baseUrl || !apiKey) {
-    return normalizeResult(null, 'BOOKING_GAS_URL (or CALENDAR_POLL_URL) / BOOKING_API_KEY is not configured');
-  }
-
-  const url = new URL(baseUrl);
-  url.searchParams.set('key', apiKey);
-  const ids = buildGasUpdatePayload(monthlyEventId, {}, gasOptions);
-  const rawMonthlyEventId = String(gasOptions.rawMonthlyEventId || monthlyEventId || '').trim();
-  const calendarSourceEventId =
-    gasOptions.calendarSourceEventId != null && gasOptions.calendarSourceEventId !== ''
-      ? String(gasOptions.calendarSourceEventId).trim()
-      : String(gasOptions.scheduleRows?.[0]?.calendar_source_event_id || '').trim() || null;
-  const lessonKind = String(gasOptions.lessonKind || gasOptions.scheduleRows?.[0]?.lesson_kind || 'regular')
-    .trim()
-    .toLowerCase();
-  const scheduleRow = gasOptions.scheduleRows?.[0];
-  const studentId = scheduleRow?.student_id != null ? scheduleRow.student_id : gasOptions.studentId;
-  const endIso =
-    scheduleRow?.end != null
-      ? new Date(scheduleRow.end).toISOString()
-      : gasOptions.endIso != null
-        ? String(gasOptions.endIso)
-        : null;
-  const excludeEventIds = Array.isArray(gasOptions.excludeEventIds)
-    ? gasOptions.excludeEventIds.map((id) => String(id || '').trim()).filter(Boolean)
-    : [];
-  const payload = {
-    action: 'lesson_book_delete',
-    eventId: ids.eventId,
-    occurrenceStartIso: ids.occurrenceStartIso,
-    seriesMasterId: ids.seriesMasterId,
-    updateScope: ids.updateScope,
-    rawMonthlyEventId,
-    ...(calendarSourceEventId ? { calendarSourceEventId } : {}),
-    ...(studentId != null ? { studentId } : {}),
-    ...(scheduleRow?.student_name ? { studentName: String(scheduleRow.student_name).trim() } : {}),
-    ...(endIso ? { endIso } : {}),
-    lessonKind,
-    ...(excludeEventIds.length > 0 ? { excludeEventIds } : {}),
-    ...(gasOptions.skipSlotSweep ? { skipSlotSweep: true } : {}),
-    ...(gasOptions.skipSeriesMasterIdInDirectRemove ? { skipSeriesMasterIdInDirectRemove: true } : {}),
-    ...(gasOptions.confirmReservedPlaceholder ? { confirmReservedPlaceholder: true } : {}),
-    source: 'student-admin-server',
-    timestamp: new Date().toISOString(),
-  };
-  const timeoutMs = Math.min(
-    120000,
-    Math.max(5000, parseInt(process.env.BOOKING_SYNC_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS)
-  );
-
-  const requestOnce = async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const data = await res.json().catch(() => null);
-      const strict = gasOptions.strictDelete === true;
-      if (!res.ok) return normalizeDeleteResult(data, `GAS booking delete failed (${res.status})`, { strict });
-      return normalizeDeleteResult(data, null, { strict });
-    } catch (err) {
-      const detail = formatFetchError(err);
-      console.error('[BookingSync] delete fetch error:', detail, err?.cause || '');
-      return normalizeDeleteResult(null, detail, { strict: gasOptions.strictDelete === true });
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  let last = await requestOnce();
-  if (gasDeleteConfirmedInCalendar(last)) return last;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!isGasCalendarDeleteUnreachableError(last.error)) break;
-    await sleepMs(2500);
-    const retry = await requestOnce();
-    if (gasDeleteConfirmedInCalendar(retry)) return retry;
-    last = retry;
-  }
-  return last;
+  return normalizeResult({ ok: false, actionTaken: 'deletion_disabled', error: 'Calendar deletion is temporarily disabled. Staff must delete events directly in Google Calendar.' });
 }
 
 /**
@@ -539,58 +455,7 @@ export async function updateBookedLessonEventInGas(monthlyEventId, updates = {},
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function deleteReservedCalendarSeriesInGas(args) {
-  const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
-  const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
-  if (!baseUrl || !apiKey) {
-    return normalizeResult(null, 'BOOKING_GAS_URL (or CALENDAR_POLL_URL) / BOOKING_API_KEY is not configured');
-  }
-
-  const url = new URL(baseUrl);
-  url.searchParams.set('key', apiKey);
-  const payload = {
-    action: 'lesson_book_delete_series',
-    seriesMasterId: String(args?.seriesMasterId || '').trim(),
-    lessonKind: String(args?.lessonKind || 'regular').trim().toLowerCase(),
-    source: 'student-admin-server',
-    timestamp: new Date().toISOString(),
-  };
-  const timeoutMs = Math.min(
-    120000,
-    Math.max(5000, parseInt(process.env.BOOKING_SYNC_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS)
-  );
-
-  const requestOnce = async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) return normalizeDeleteResult(data, `GAS series delete failed (${res.status})`);
-      return normalizeDeleteResult(data);
-    } catch (err) {
-      const detail = formatFetchError(err);
-      console.error('[BookingSync] series delete fetch error:', detail, err?.cause || '');
-      return normalizeDeleteResult(null, detail);
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  let last = await requestOnce();
-  if (gasDeleteConfirmedInCalendar(last)) return last;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!isGasCalendarDeleteUnreachableError(last.error)) break;
-    await sleepMs(2500);
-    const retry = await requestOnce();
-    if (gasDeleteConfirmedInCalendar(retry)) return retry;
-    last = retry;
-  }
-  return last;
+  return normalizeResult({ ok: false, actionTaken: 'deletion_disabled', error: 'Calendar deletion is temporarily disabled. Staff must delete events directly in Google Calendar.' });
 }
 
 /**
@@ -661,3 +526,4 @@ export async function createReservedRecurringHoldInGas(args) {
   const second = await requestOnce();
   return second.ok ? second : first;
 }
+
