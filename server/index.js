@@ -903,7 +903,7 @@ app.post('/api/admin/fetch-staff-schedule/:id', requireAuth, requireAdmin, async
 });
 
 /** Sync MonthlySchedule from GAS Calendar Webhook polling into PostgreSQL. Upserts by (event_id, student_name); optional removed[] + reconcile drop stale rows. */
-app.post('/api/calendar-poll/sync', async (req, res) => {
+app.post('/api/calendar-poll/sync', requireAdmin, async (req, res) => {
   try {
     const { data, removed } = req.body || {};
     if (!Array.isArray(data)) {
@@ -1056,7 +1056,7 @@ app.post('/api/calendar-poll/backfill', async (req, res) => {
  * - action=remove: delete local synced rows missing from Calendar (forceReconcile);
  *   optional body.entries [{event_id, student_name}] limits delete to those orphan rows
  */
-app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => {
+app.post('/api/calendar-poll/reconcile-month', requireAuth, requireAdmin, async (req, res) => {
   try {
     const url = (process.env.CALENDAR_POLL_URL || process.env.VITE_CALENDAR_POLL_URL || '').trim().replace(/\/$/, '');
     const key = (process.env.CALENDAR_POLL_API_KEY || process.env.VITE_CALENDAR_POLL_API_KEY || '').trim();
@@ -1231,7 +1231,7 @@ app.post('/api/calendar-poll/reconcile-month', requireAuth, async (req, res) => 
 });
 
 /** Sync MonthlySchedule from Google Sheets (Admin spreadsheet) into PostgreSQL. Fetches directly from Sheets API. */
-app.post('/api/calendar-poll/sync-from-sheet', async (req, res) => {
+app.post('/api/calendar-poll/sync-from-sheet', requireAdmin, async (req, res) => {
   try {
     const data = await fetchMonthlyScheduleFromSheet();
     if (data.length === 0) {
