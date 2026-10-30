@@ -100,10 +100,16 @@ router.post('/rebuild',async(req,res)=>{
     if(event.summary!==group.title||event.status==='cancelled'||event.extendedProperties?.private?.adminRecoveryOldEventId!==oldId||event.extendedProperties?.private?.lessonUuid!==String(group.members[0].lesson_uuid)||new Date(event.start.dateTime).toISOString()!==group.start||new Date(event.end.dateTime).toISOString()!==group.end)throw new Error('Recovery event identity or times do not match. Manual review required.');
     const newId=await relinkRecovery(client,group,event,calendarId);
     await client.query('COMMIT');
+    client.release();
+    client = null;
     await audit({entityType:'monthly_schedule',entityKey:newId,action:'calendar_rebuild',oldData:{event_id:oldId,lesson_uuid:group.members[0].lesson_uuid},newData:{event_id:newId,calendar_google_event_id:event.id,calendar_id:calendarId,lesson_uuid:group.members[0].lesson_uuid}},req).catch(e=>console.error('[calendar-recovery] audit failed',e.message));
     res.json({ok:true,newEventId:newId,googleEventId:event.id});
   }catch(error){
-    if(client)await client.query('ROLLBACK').catch(()=>{});
+    if(client) {
+      await client.query('ROLLBACK').catch(()=>{});
+      client.release();
+      client = null;
+    }
     if(prepared)await db.query('UPDATE calendar_event_recoveries SET last_error=$2 WHERE old_event_id=$1',[oldId,error.message]).catch(()=>{});
     console.error('[calendar-recovery]',error.message);
     res.status(409).json({error:error.message,retrySafe:true});
