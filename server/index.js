@@ -39,6 +39,7 @@ import staffRouter from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import notificationsRouter from './routes/notifications.js';
 import messagesRouter from './routes/messages.js';
+import calendarRecoveryRouter from './routes/calendarRecovery.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 import {
   bulkSyncCalendarsFromGasForStaffType,
@@ -463,6 +464,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/demo-tracker', demoTrackerRouter);
 app.use('/api/config', configRouter);
 app.use('/api/calendar', calendarRouter);
+app.use('/api/calendar-recovery', calendarRecoveryRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/shifts', shiftsRouter);
 
@@ -1335,4 +1337,5 @@ app.listen(PORT, process.env.API_HOST || '0.0.0.0', () => {
     console.error('Failed to run DB migrations:', err);
     process.exit(1);
 });
+
 

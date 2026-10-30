@@ -1,3 +1,4 @@
+import CalendarRecovery from '../components/CalendarRecovery'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Shield, Database, Download, RotateCcw, Trash2, Calendar, RefreshCw, Search, Upload } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
@@ -321,6 +322,7 @@ export default function Admin() {
       </div>
 
       <div className="space-y-8">
+        <CalendarRecovery />
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
             <Database className="w-5 h-5 text-gray-600" />
@@ -972,3 +974,4 @@ export default function Admin() {
     </div>
   )
 }
+

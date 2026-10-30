@@ -23,6 +23,9 @@ async function fetchApi(path, options = {}) {
 }
 
 export const api = {
+  getCalendarRecoverySettings: () => fetchApi('/calendar-recovery/settings'),
+  previewCalendarRecovery: (body) => fetchApi('/calendar-recovery/preview', { method: 'POST', body: JSON.stringify(body) }),
+  rebuildCalendarEvent: (body) => fetchApi('/calendar-recovery/rebuild', { method: 'POST', body: JSON.stringify(body) }),
   getWeeklySchedule: (weekStart) => fetchApi(`/weekly-schedule?week_start=${encodeURIComponent(weekStart)}`),
   getStudents: () => fetchApi('/students'),
   getHiatusStudents: () => fetchApi('/students/hiatus'),
@@ -355,3 +358,4 @@ export const api = {
   redoChange: (id) =>
     fetchApi(`/change-log/${id}/redo`, { method: 'POST' }),
 };
+

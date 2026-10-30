@@ -2,6 +2,7 @@
  * Shared logic for syncing MonthlySchedule data to PostgreSQL.
  * Used by both /api/calendar-poll/sync (from GAS) and /api/calendar-poll/sync-from-sheet (from Google Sheets API).
  */
+import { recoveryPollGuards } from './calendarRecovery.js';
 import { query } from '../db/index.js';
 import { logEvent } from './appLogger.js';
 import { validateCalendarSnapshot } from './calendarMemberValidation.js';
@@ -289,13 +290,17 @@ export async function clearScheduleSlotDismissals(rows) {
 
 async function buildMonthlyScheduleRows(data) {
   const nameToId = await buildStudentNameToIdMap();
+  // Prepared creations must not become duplicate rows. Retired IDs from stale GAS snapshots
+  // must not recreate the old identity after a successful relink.
+  const recovering = await query('SELECT old_event_id,google_event_id,state FROM calendar_event_recoveries');
+  const { preparedRawIds, retiredMonthlyIds } = recoveryPollGuards(recovering.rows);
   const months = new Set();
   const rows = [];
 
   for (const r of data) {
     const rawEventId = (r.eventID || r.event_id || '').toString().trim();
     const studentName = (r.studentName || r.student_name || '').toString().trim();
-    if (!rawEventId || !studentName) continue;
+    if (!rawEventId || !studentName || preparedRawIds.has(rawEventId)) continue;
 
     const dateStr = (r.date || '').toString().trim();
     const date = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : null;
@@ -384,6 +389,7 @@ async function buildMonthlyScheduleRows(data) {
       eventId = `${rawEventId}_${rows.length}`;
     }
 
+    if (retiredMonthlyIds.has(eventId)) continue;
     const studentId = nameToId.get(normalizeName(studentName)) ?? null;
     const awaitingReschedulePollMerge = parseAwaitingReschedulePollMerge(r);
     rows.push({
@@ -907,3 +913,4 @@ export async function upsertMonthlySchedule(data, options = {}) {
     ...removedStats,
   };
 }
+
