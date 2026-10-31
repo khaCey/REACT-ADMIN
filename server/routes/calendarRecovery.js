@@ -1,22 +1,10 @@
+import { createRecoveryGasConfig } from '../lib/calendarRecoveryGas.js';
 import { Router } from 'express';
-import { google } from 'googleapis';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { pool, query } from '../db/index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { logChange } from '../lib/changeLog.js';
 import { groupRecoveryRows, classifyRecovery, recoveryPayload, relinkRecovery, assertRecoveryRowsUnchanged } from '../lib/calendarRecovery.js';
 
-function setup() {
-  const calendars = JSON.parse(process.env.CALENDAR_RECOVERY_CALENDARS_JSON || '[]');
-  if (!Array.isArray(calendars) || !calendars.length || calendars.some(c => !c.id || !c.label)) throw new Error('Calendar recovery calendars are not configured.');
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
-    ? JSON.parse(readFileSync(resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH), 'utf8'))
-    : JSON.parse(raw?.startsWith('{') ? raw : Buffer.from(raw || '', 'base64').toString());
-  const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/calendar.events','https://www.googleapis.com/auth/calendar.readonly'] });
-  return { calendars, email: credentials.client_email, api: google.calendar({ version: 'v3', auth }) };
-}
 function range(body) {
   const { from, to, studentId } = body;
   const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0,10) === d;
@@ -37,7 +25,7 @@ async function readEvents(api, calendars, from, to) {
         events.push(...(response.data.items || []).map(e=>({...e,calendarId:calendar.id})));
         pageToken=response.data.nextPageToken;
       } while(pageToken);
-    } catch(error) { throw new Error(`Cannot verify ${calendar.label}. Check Calendar sharing and access before recovery. No lessons have been classified as missing. (${error.code || 'network error'})`); }
+    } catch(error) { throw new Error(`Cannot verify ${calendar.label}. Check the Apps Script Calendar API deployment and its calendar configuration before recovery. No lessons have been classified as missing. (${error.code || 'network error'})`); }
   }
   return events;
 }
@@ -46,16 +34,16 @@ async function loadRows(selection, dbQuery) {
   const r=await dbQuery(`SELECT m.* FROM monthly_schedule m WHERE m.event_id IN (SELECT event_id FROM monthly_schedule WHERE student_id=$1 AND date BETWEEN $2::date AND $3::date) ORDER BY m.start,m.event_id,m.student_name`,[selection.studentId,selection.from,selection.to]);
   return r.rows;
 }
-export function createCalendarRecoveryRouter({ getConfig = setup, db = { query, pool }, audit = logChange } = {}) {
+export function createCalendarRecoveryRouter({ getConfig = createRecoveryGasConfig, db = { query, pool }, audit = logChange } = {}) {
 const router = Router();
 router.use(requireAdmin);
-router.get('/settings', (_req,res)=>{
-  try {const config=getConfig();res.json({calendars:config.calendars,serviceAccountEmail:config.email});}
+router.get('/settings', async (_req,res)=>{
+  try {const config=await getConfig();res.json({calendars:config.calendars,source:'apps_script'});}
   catch(error){res.status(503).json({error:error.message});}
 });
 router.post('/preview',async(req,res)=>{
   try {
-    const selection=range(req.body || {}), config=getConfig();
+    const selection=range(req.body || {}), config=await getConfig();
     if(!config.calendars.some(c=>c.id===req.body.calendarId))return res.status(400).json({error:'Select a configured recovery calendar.'});
     const rows=await loadRows(selection, db.query);
     const events=await readEvents(config.api,config.calendars,selection.from,selection.to);
@@ -67,7 +55,7 @@ router.post('/rebuild',async(req,res)=>{
   let client, prepared=false;
   const oldId=String(req.body?.eventId || '');
   try {
-    const selection=range(req.body || {}), config=getConfig(), calendarId=req.body.calendarId;
+    const selection=range(req.body || {}), config=await getConfig(), calendarId=req.body.calendarId;
     if(!oldId || !config.calendars.some(c=>c.id===calendarId))return res.status(400).json({error:'Select a lesson and configured calendar.'});
     const previous=await db.query('SELECT * FROM calendar_event_recoveries WHERE old_event_id=$1',[oldId]);
     if(previous.rows[0]?.state==='linked')return res.json({ok:true,alreadyLinked:true,newEventId:previous.rows[0].new_event_id});

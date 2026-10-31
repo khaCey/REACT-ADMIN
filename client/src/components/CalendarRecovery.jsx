@@ -38,7 +38,7 @@ export default function CalendarRecovery() {
     <section className="rounded-lg border border-gray-200 bg-white p-5 mb-6 space-y-3">
       <h2 className="font-semibold text-lg">Recover missing Calendar events</h2>
       <p className="text-sm text-gray-600">Check lessons previously linked to Google Calendar. Local-only lessons are excluded. Only verified missing events can be rebuilt; lesson UUIDs and notes are retained.</p>
-      {settings && <p className="text-xs text-gray-500">All listed calendars must be shared with {settings.serviceAccountEmail}. The destination calendar needs permission to make changes to events.</p>}
+      {settings && <p className="text-xs text-gray-500">Uses the existing Apps Script Calendar API. No additional Calendar sharing setup is needed.</p>}
       <div className="flex flex-wrap gap-3 items-end">
         <label className="text-sm">Student ID<input aria-label="Recovery student ID" type="number" min="1" value={filters.studentId} onChange={e => change('studentId', e.target.value)} className={inputClass + ' block w-28'} disabled={busy} /></label>
         <label className="text-sm">From<input aria-label="Recovery from" type="date" value={filters.from} onChange={e => change('from', e.target.value)} className={inputClass + ' block'} disabled={busy} /></label>
