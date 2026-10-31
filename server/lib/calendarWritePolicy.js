@@ -12,7 +12,7 @@ export function assertCalendarWritesEnabled() {
 /** Reject Calendar-changing actions before they can change local lesson state. */
 export function calendarWritePauseMiddleware(req, res, next) {
   if (calendarWritesEnabled() || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
-  const path = req.path.replace(/\/+$/, '');
+  const path = req.path.toLowerCase().replace(/\/+$/, '');
   const scheduleWrite = path.startsWith('/schedule/') && path !== '/schedule/remove-local';
   const recoveryWrite = path === '/calendar-recovery/rebuild';
   if (scheduleWrite || recoveryWrite) return res.status(423).json(calendarWritesPaused);

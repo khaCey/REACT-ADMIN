@@ -17,7 +17,7 @@ test('pause blocks every Calendar write before any fetch or DB call; reads and l
   const db=async()=>{queries++;throw Error('Unexpected database access');};
   assert.equal((await runDailyLessonCounterReconciliation(db)).skipped,true);
   assert.equal((await reconcileCountersForAffectedRows([],db)).skipped,true);
-  for(const path of ['/schedule/book','/schedule/sync','/schedule/create-reserved','/schedule/move-reserved','/schedule/event/cancel','/schedule/event/reschedule','/schedule/renumber-month-titles','/calendar-recovery/rebuild']) {
+  for(const path of ['/SCHEDULE/book','/schedule/book','/schedule/sync','/schedule/create-reserved','/schedule/move-reserved','/schedule/event/cancel','/schedule/event/reschedule','/schedule/renumber-month-titles','/calendar-recovery/rebuild']) {
    let status,body,next=false;
    calendarWritePauseMiddleware({method:'POST',path},{status(s){status=s;return this;},json(b){body=b;}},()=>{next=true;});
    assert.equal(status,423,path);assert.equal(body.code,'CALENDAR_WRITES_DISABLED');assert.equal(next,false);
