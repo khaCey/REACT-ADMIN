@@ -905,6 +905,13 @@ export default function LessonsThisMonth({
     setSelectedLesson(null)
     onBookLesson({ moveReservedSource: lesson })
   }
+  const handleRemoveLocal = async (lesson) => {
+    await api.removeAdminLessonOnly(lesson.eventID, studentId)
+    setSelectedLesson(null)
+    await refetchSilent()
+    onMonthLessonsUpdated?.()
+    success('Removed from Admin only. Google Calendar was not changed.')
+  }
   const handleRemove = (lesson) => {
     if ((lesson?.eventID || '').startsWith('unscheduled-')) {
       const monthKey = findLessonMonthKey(serverData, lesson.eventID) || activeMonth
@@ -1519,6 +1526,7 @@ export default function LessonsThisMonth({
             findLessonMonthKey(serverData, selectedLesson?.eventID) || activeMonth || ''
           }
           onRemove={handleRemove}
+          onRemoveLocal={handleRemoveLocal}
           onMoveReservedDate={handleOpenMoveReservedDate}
           onBookLesson={
             onBookLesson
@@ -1707,3 +1715,4 @@ export default function LessonsThisMonth({
     </>
   )
 }
+

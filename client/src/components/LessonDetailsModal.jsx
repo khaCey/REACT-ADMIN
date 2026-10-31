@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, StickyNote } from 'lucide-react'
 import { api } from '../api'
@@ -40,12 +40,16 @@ export default function LessonDetailsModal({
   onConfirmAllWeeks,
   confirmScheduleMonthKey,
   onRemove,
+  onRemoveLocal,
   onBookLesson,
   onMoveReservedDate,
   onLessonNotesChanged,
 }) {
   const { success } = useToast()
   const [syncing, setSyncing] = useState(false)
+  const [localRemoveOpen, setLocalRemoveOpen] = useState(false)
+  const [removingLocal, setRemovingLocal] = useState(false)
+  const [localRemoveError, setLocalRemoveError] = useState('')
   const [confirmOneOpen, setConfirmOneOpen] = useState(false)
   const [confirmAllOpen, setConfirmAllOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
@@ -239,7 +243,6 @@ export default function LessonDetailsModal({
     !!lesson?.calendarSyncError ||
     isAwaitingRescheduleDate
 
-  const isLocalOnlyRemove = calendarSyncStatus === 'failed' && !hasCalendarStyleFailure
 
   const dayStr = lesson.day && lesson.day !== '--'
     ? `${parseInt(lesson.day)}日`
@@ -249,6 +252,7 @@ export default function LessonDetailsModal({
     : 'Not specified'
 
   const confirmDialogOpen =
+    localRemoveOpen ||
     cancelConfirmOpen ||
     uncancelConfirmOpen ||
     unrescheduleConfirmOpen ||
@@ -369,12 +373,7 @@ export default function LessonDetailsModal({
     }
   }
 
-  const noteHeader = useMemo(() => {
-    if (!hasLessonIdentity) return 'Lesson Notes'
-    if (lessonNoteCount === 0) return 'Lesson Notes'
-    if (lessonNoteCount === 1) return 'Lesson Notes (1)'
-    return `Lesson Notes (${lessonNoteCount})`
-  }, [hasLessonIdentity, lessonNoteCount])
+  const noteHeader = !hasLessonIdentity || lessonNoteCount === 0 ? 'Lesson Notes' : `Lesson Notes (${lessonNoteCount})`
 
   return createPortal(
     <>
@@ -558,7 +557,7 @@ export default function LessonDetailsModal({
                     disabled={true}
                     className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Remove
+                    Remove from Calendar
                   </button>
                 )}
               </>
@@ -660,9 +659,14 @@ export default function LessonDetailsModal({
                   }
                   className="rounded-md border border-red-600 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {isLocalOnlyRemove ? 'Remove locally' : 'Remove'}
+                  Remove from Calendar
                 </button>
               </>
+            )}
+            {typeof onRemoveLocal === 'function' && !isUnscheduled && (
+              <button type="button" onClick={() => { setLocalRemoveError(''); setLocalRemoveOpen(true) }} disabled={confirmDialogOpen || isTransientBusy} title="Remove only this student's Admin record; leave Google Calendar unchanged" className="rounded-md border border-amber-600 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-60 disabled:cursor-not-allowed">
+                Remove from Admin only
+              </button>
             )}
           </div>
           <button
@@ -711,6 +715,17 @@ export default function LessonDetailsModal({
           </div>
         </div>
       </div>
+    )}
+    {localRemoveOpen && (
+      <ConfirmActionModal title="Remove from Admin only" message="Remove this student's lesson record from Admin? Google Calendar, lesson notes and paid lesson credits will remain unchanged. Polling will not re-import this slot." confirmLabel="Remove from Admin only" destructive confirming={removingLocal} onClose={() => !removingLocal && setLocalRemoveOpen(false)} onConfirm={async () => {
+        setRemovingLocal(true)
+        setLocalRemoveError('')
+        try { await onRemoveLocal(lesson, student); setLocalRemoveOpen(false) }
+        catch (error) { setLocalRemoveError(error.message || 'Could not remove the Admin record.') }
+        finally { setRemovingLocal(false) }
+      }}>
+        {localRemoveError && <p role="alert" className="text-sm text-red-700">{localRemoveError}</p>}
+      </ConfirmActionModal>
     )}
     {cancelConfirmOpen && (
       <ConfirmActionModal
@@ -780,4 +795,5 @@ export default function LessonDetailsModal({
     document.body
   )
 }
+
 

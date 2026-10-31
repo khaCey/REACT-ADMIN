@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { handleLocalLessonRemove } from '../lib/booking/localLessonRemove.js';
 import { handleGetWeek } from '../lib/booking/availabilityService.js';
 import { handleBookLesson } from '../lib/booking/bookLessonService.js';
 import { handleConfirmReserved } from '../lib/booking/confirmReservedService.js';
@@ -38,6 +39,7 @@ router.get('/booking-warning', async (req, res) => {
 });
 router.get('/teachers', handleGetTeachers);
 router.post('/book', handleBookLesson);
+router.post('/remove-local', handleLocalLessonRemove);
 router.post('/confirm-reserved', deletionDisabled);
 router.post('/move-reserved', handleMoveReserved);
 router.post('/create-reserved', handleCreateReserved);
@@ -52,4 +54,5 @@ router.delete(/^\/(.+)\/?$/, deletionDisabled);
 
 export { purgeAllReservedPlaceholders, renumberMonthLessonTitlesForStudent };
 export default router;
+
 

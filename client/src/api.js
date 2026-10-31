@@ -23,6 +23,7 @@ async function fetchApi(path, options = {}) {
 }
 
 export const api = {
+  removeAdminLessonOnly: (eventId, studentId) => fetchApi('/schedule/remove-local', { method: 'POST', body: JSON.stringify({ eventId, studentId }) }),
   getCalendarRecoverySettings: () => fetchApi('/calendar-recovery/settings'),
   previewCalendarRecovery: (body) => fetchApi('/calendar-recovery/preview', { method: 'POST', body: JSON.stringify(body) }),
   rebuildCalendarEvent: (body) => fetchApi('/calendar-recovery/rebuild', { method: 'POST', body: JSON.stringify(body) }),
@@ -358,4 +359,5 @@ export const api = {
   redoChange: (id) =>
     fetchApi(`/change-log/${id}/redo`, { method: 'POST' }),
 };
+
 
