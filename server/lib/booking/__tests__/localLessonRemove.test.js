@@ -7,9 +7,9 @@ function fixture(rows=[row(),row({student_id:2,student_name:'Student Two'})],fai
  const client={release(){},async query(sql,args=[]){state.sql.push({sql,args});
   if(sql==='BEGIN')snapshot={rows:[...state.rows],dismissals:[...state.dismissals]};
   if(sql==='ROLLBACK'){state.rows=snapshot.rows;state.dismissals=snapshot.dismissals;}
-  if(sql.startsWith('SELECT *'))return{rows:state.rows.filter(r=>r.event_id===args[0]&&r.student_id===args[1])};
+  if(sql.startsWith('SELECT m.*'))return{rows:state.rows.filter(r=>r.event_id===args[0]&&(r.student_id===args[1] || (r.student_id==null && r.student_name==='Student One')))};
   if(sql.startsWith('INSERT INTO schedule_slot_dismissals'))state.dismissals.push(args);
-  if(sql.startsWith('DELETE FROM monthly_schedule')){const before=state.rows.length;state.rows=state.rows.filter(r=>r.event_id!==args[0]||r.student_id!==args[1]);return{rowCount:before-state.rows.length};}
+  if(sql.startsWith('DELETE FROM monthly_schedule')){const before=state.rows.length;state.rows=state.rows.filter(r=>r.event_id!==args[0]||r.student_name!==args[1]);return{rowCount:before-state.rows.length};}
   return{rows:[],rowCount:1};
  }};
  const handler=createLocalLessonRemoveHandler({dbPool:{connect:async()=>{state.connections++;return client}},audit:async(entry,_req,transaction)=>{assert.equal(transaction,client);if(failAudit)throw Error('audit failed');state.audit.push(entry)}});
@@ -24,3 +24,5 @@ test('authentication and exact student identity are mandatory',async()=>{const f
 test('dismissal and deletion roll back together when audit fails',async()=>{const f=fixture(undefined,true);assert.equal((await f.call()).status,500);assert.equal(f.state.rows.length,2);assert.equal(f.state.dismissals.length,0);assert.equal(f.state.sql.at(-1).sql,'ROLLBACK')});
 test('one event ID spanning multiple occurrences cannot be bulk-deleted',async()=>{const f=fixture([row(),row({date:'2026-11-07',start:'2026-11-07T02:00:00Z'})]);assert.equal((await f.call()).status,409);assert.equal(f.state.rows.length,2);assert.equal(f.state.dismissals.length,0)});
 test('incomplete local-only bookings can be removed without inventing a Calendar dismissal',async()=>{const f=fixture([row({event_id:'local-booking-123',date:null,start:null})]);assert.equal((await f.call({eventId:'local-booking-123',studentId:1})).status,200);assert.equal(f.state.dismissals.length,0)});
+
+test('uniquely matched legacy rows without student_id can be removed locally',async()=>{const f=fixture([row({student_id:null}),row({student_id:2,student_name:'Student Two'})]);assert.equal((await f.call()).status,200);assert.equal(f.state.rows.length,1);assert.equal(f.state.rows[0].student_id,2);assert.equal(f.state.dismissals.length,1)});
