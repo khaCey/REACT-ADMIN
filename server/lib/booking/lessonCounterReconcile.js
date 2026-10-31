@@ -1,3 +1,4 @@
+import { calendarWritesEnabled } from '../calendarWritePolicy.js';
 import { lessonPackStatusSql, parseLessonPackTotal } from '../lessonMonthCounters.js';
 /**
  * Repairs chronological x/y lesson title suffixes. Used after timetable edits
@@ -82,6 +83,7 @@ export async function reconcileStudentMonthCounters(studentId, month, db = query
 
 /** Reconcile both old and new months after a move, and all students in a group. */
 export async function reconcileCountersForAffectedRows(rows, db = query) {
+  if (!calendarWritesEnabled()) return { skipped: true, reason: 'calendar_writes_disabled', checked: 0, updated: 0, calendar_patched: 0, errors: [] };
   const pairs = new Map();
   for (const row of rows || []) {
     const studentId = Number(row?.student_id);
@@ -111,6 +113,7 @@ let dailyRunning = false;
 
 /** Daily sweep of all months that still have active, non-demo lesson rows. */
 export async function runDailyLessonCounterReconciliation(db = query) {
+  if (!calendarWritesEnabled()) return { skipped: true, reason: 'calendar_writes_disabled', checked: 0, updated: 0, calendar_patched: 0, errors: [] };
   if (dailyRunning) return { skipped: true, reason: 'previous run still active' };
   dailyRunning = true;
   try {

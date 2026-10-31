@@ -44,7 +44,8 @@ test('counter Calendar failures survive an unchanged-title reconciliation and re
   } });
   try {
     const { renumberMonthLessonTitlesForStudent } = await import('../domainInternals.js');
-    const run = () => renumberMonthLessonTitlesForStudent(7, '2026-10', 4, db, { persistPack: false });
+    process.env.CALENDAR_WRITES_ENABLED = 'true'; // Calendar is module-mocked in this test.
+  const run = () => renumberMonthLessonTitlesForStudent(7, '2026-10', 4, db, { persistPack: false });
     const first = await run();
     assert.equal(first.updated, 1);
     assert.equal(first.calendar_errors.length, 1);

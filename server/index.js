@@ -19,6 +19,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 import express from 'express';
+import { calendarWritesEnabled, calendarWritePauseMiddleware } from './lib/calendarWritePolicy.js';
 import cors from 'cors';
 import { query, runMigrations } from './db/index.js';
 import { upsertMonthlySchedule, compareMonthSchedule, removeDisappearedForMonth } from './lib/calendarSync.js';
@@ -456,6 +457,7 @@ app.get('/api/students/:id/latest-by-month', async (req, res) => {
   }
 });
 
+app.use('/api', calendarWritePauseMiddleware);
 app.use('/api/students', studentsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/notes', notesRouter);
@@ -1321,7 +1323,7 @@ app.listen(PORT, process.env.API_HOST || '0.0.0.0', () => {
 
       // Keep monthly x/y title counters in chronological date order (Tokyo time).
       const counterCron = (process.env.LESSON_COUNTER_RECONCILE_CRON ?? '0 13 * * *').trim();
-      if (counterCron && counterCron !== '0' && !/^off$/i.test(counterCron)) {
+      if (calendarWritesEnabled() && counterCron && counterCron !== '0' && !/^off$/i.test(counterCron)) {
         cron.schedule(
           counterCron,
           () => runDailyLessonCounterReconciliation().catch((err) =>

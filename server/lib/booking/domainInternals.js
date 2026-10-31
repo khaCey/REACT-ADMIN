@@ -1,3 +1,4 @@
+import { calendarWritesEnabled } from '../calendarWritePolicy.js';
 import { logEvent } from '../appLogger.js';
 import { canonicalEventMembers } from '../calendarMemberValidation.js';
 import { lessonPackStatusSql, applyCancelledTitleMarker, parseLessonPackTotal } from '../lessonMonthCounters.js';
@@ -406,6 +407,7 @@ export async function getBookedCountForMonth(studentId, monthKey, db = query) {
  * @returns {Promise<{ updated: number, pack_total: number, calendar_patched: number, calendar_errors: Array<{ event_id: string, error: string }> }>}
  */
 export async function renumberMonthLessonTitlesForStudent(studentId, monthKey, packTotal, db = query, options = {}) {
+  if (!calendarWritesEnabled()) return { skipped: true, reason: 'calendar_writes_disabled', updated: 0, calendar_patched: 0, calendar_errors: [] };
   const sid = Number(studentId);
   const month = String(monthKey || '').trim().slice(0, 7);
   const pack = Math.max(1, parseInt(packTotal, 10) || 0);

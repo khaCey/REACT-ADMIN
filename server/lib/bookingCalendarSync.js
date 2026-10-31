@@ -1,3 +1,4 @@
+import { calendarWritesEnabled, calendarWritesPaused } from './calendarWritePolicy.js';
 /**
  * Server -> GAS calendar booking sync.
  * Called from POST /api/schedule/book to create a real Calendar event.
@@ -288,6 +289,7 @@ function stripOurSuffixForPayload(monthlyEventId, calendarSourceEventId) {
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function createBookedLessonEventInGas(args) {
+  if (!calendarWritesEnabled()) return { ok: false, actionTaken: 'writes_disabled', eventId: null, calendarId: null, error: calendarWritesPaused.error };
   const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
   if (!baseUrl || !apiKey) {
@@ -389,6 +391,7 @@ export async function deleteBookedLessonEventInGas(monthlyEventId, gasOptions = 
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function updateBookedLessonEventInGas(monthlyEventId, updates = {}, gasOptions = {}) {
+  if (!calendarWritesEnabled()) return { ok: false, actionTaken: 'writes_disabled', eventId: null, calendarId: null, error: calendarWritesPaused.error };
   const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
   if (!baseUrl || !apiKey) {
@@ -472,6 +475,7 @@ export async function deleteReservedCalendarSeriesInGas(args) {
  * @returns {Promise<{ok:boolean,actionTaken:string|null,eventId:string|null,calendarId:string|null,error:string|null}>}
  */
 export async function createReservedRecurringHoldInGas(args) {
+  if (!calendarWritesEnabled()) return { ok: false, actionTaken: 'writes_disabled', eventId: null, calendarId: null, error: calendarWritesPaused.error };
   const baseUrl = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const apiKey = String(process.env.BOOKING_API_KEY || '').trim();
   if (!baseUrl || !apiKey) {

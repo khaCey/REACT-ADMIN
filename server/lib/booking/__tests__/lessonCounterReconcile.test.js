@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reconcileStudentMonthCounters, reconcileCountersForAffectedRows, runDailyLessonCounterReconciliation } from '../lessonCounterReconcile.js';
 
+process.env.CALENDAR_WRITES_ENABLED = 'true'; // This suite exercises the enabled path with fake DB/Calendar dependencies.
 delete process.env.BOOKING_GAS_URL;
 delete process.env.BOOKING_API_KEY;
 delete process.env.CALENDAR_POLL_URL;

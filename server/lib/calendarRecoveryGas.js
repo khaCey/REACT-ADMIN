@@ -1,9 +1,11 @@
+import { assertCalendarWritesEnabled } from './calendarWritePolicy.js';
 /** Server-only adapter to the existing Apps Script Calendar API. */
 export async function createRecoveryGasConfig() {
   const url = String(process.env.BOOKING_GAS_URL || process.env.CALENDAR_POLL_URL || '').trim();
   const key = String(process.env.BOOKING_API_KEY || '').trim();
   if (!url || !key) throw new Error('The existing Apps Script booking API is not configured.');
   async function call(operation, params = {}) {
+    if (operation === 'insert') assertCalendarWritesEnabled();
     const endpoint = new URL(url);
     endpoint.searchParams.set('key', key);
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'calendar_recovery_v1', operation, ...params }), signal: AbortSignal.timeout(45000) });
